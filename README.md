@@ -90,6 +90,10 @@ Am schnellsten ohne Entwicklungsumgebung: Board anstecken und im Browser
 flashen. Fertige `.bin`-Dateien für `esptool.py` oder das Espressif-Tool
 liegen bei jedem [Release](https://github.com/Zendonir/ESP32_Lebensmittel_BT_Scanner_Docker/releases).
 
+Unterstützt werden **Waveshare ESP32-S3-Touch-LCD-3.5** (ST7796/FT6336) und
+**3.5B** (AXS15231B/QSPI). Im Browser-Installer muss die auf der Platine
+aufgedruckte Variante gewählt werden; die Binärdateien sind nicht austauschbar.
+
 Zum Weiterentwickeln in VS Code: **Datei → Arbeitsbereich aus Datei öffnen…** →
 `lebensmittel-scanner.code-workspace`, dann der Upload-Pfeil in der
 PlatformIO-Leiste. Wichtig ist die Arbeitsbereichsdatei – öffnet man das
@@ -100,7 +104,8 @@ Auf der Kommandozeile:
 
 ```bash
 cd firmware
-pio run --target upload
+pio run -e terminal-35 --target upload    # 3.5
+pio run -e terminal-35b --target upload   # 3.5B
 ```
 
 Beim ersten Start – oder wenn beim Einschalten **BOOT** gedrückt wird – öffnet
@@ -192,7 +197,7 @@ cd server && ../.venv/bin/python -m pytest tests -q
 # Linter
 ../.venv/bin/ruff check server/app server/tests
 
-# Firmware
+# Firmware (beide Boardvarianten)
 cd firmware && pio run
 ```
 

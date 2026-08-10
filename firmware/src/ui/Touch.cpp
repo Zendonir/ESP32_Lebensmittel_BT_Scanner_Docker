@@ -11,11 +11,38 @@ bool Touch::begin() {
     // stehen, bevor der Expander den Display-Reset loesen kann.
     Wire.beginTransmission(TOUCH_ADDR);
     _ok = Wire.endTransmission() == 0;
-    if (!_ok) log_e("FT6336 nicht gefunden (0x%02X)", TOUCH_ADDR);
+    if (!_ok) {
+#if defined(BOARD_WAVESHARE_35B)
+        log_e("AXS15231B-Touch nicht gefunden (0x%02X)", TOUCH_ADDR);
+#else
+        log_e("FT6336 nicht gefunden (0x%02X)", TOUCH_ADDR);
+#endif
+    }
     return _ok;
 }
 
 bool Touch::read(int16_t &x, int16_t &y) {
+#if defined(BOARD_WAVESHARE_35B)
+    // Protokoll aus dem Waveshare-Treiber esp_lcd_touch_axs15231b. Der
+    // Controller erwartet vor jedem 14-Byte-Bericht dieses 11-Byte-Kommando.
+    static const uint8_t command[11] = {
+        0xB5, 0xAB, 0xA5, 0x5A, 0x00, 0x00, 0x00, 0x0E, 0x00, 0x00, 0x00,
+    };
+    uint8_t data[14] = {};
+    Wire.beginTransmission(TOUCH_ADDR);
+    Wire.write(command, sizeof(command));
+    if (Wire.endTransmission() != 0) return false;
+    if (Wire.requestFrom((uint8_t)TOUCH_ADDR, (uint8_t)sizeof(data)) != sizeof(data)) return false;
+    Wire.readBytes(data, sizeof(data));
+    if (data[0] == 0xFF || data[1] == 0 || data[1] > 2 || data[3] < 2 || data[5] < 2) {
+        return false;
+    }
+    const int16_t px = ((data[2] & 0x0F) << 8) | data[3];
+    const int16_t py = ((data[4] & 0x0F) << 8) | data[5];
+    x = constrain(py, 0, UI_WIDTH - 1);
+    y = constrain(PANEL_WIDTH - 1 - px, 0, UI_HEIGHT - 1);
+    return true;
+#else
     Wire.beginTransmission(TOUCH_ADDR);
     Wire.write(0x02);                       // Registeranfang: Anzahl Beruehrungen
     if (Wire.endTransmission(false) != 0) return false;
@@ -34,6 +61,7 @@ bool Touch::read(int16_t &x, int16_t &y) {
     x = constrain(py, 0, UI_WIDTH - 1);
     y = constrain(PANEL_WIDTH - 1 - px, 0, UI_HEIGHT - 1);
     return true;
+#endif
 }
 
 bool Touch::pressed(int16_t &x, int16_t &y) {

@@ -69,11 +69,13 @@
   </p>
 
   <div class="card flash">
-    <esp-web-install-button manifest="manifest.json">
+    <h2>Waveshare 3.5</h2>
+    <p>ST7796-Display und FT6336-Touch</p>
+    <esp-web-install-button manifest="manifest-35.json">
       <button slot="activate" style="
         font: inherit; font-weight: 600; padding: 13px 30px; border: 0;
         border-radius: 9px; background: var(--primary); color: #fff; cursor: pointer;">
-        Terminal flashen
+        3.5 flashen
       </button>
       <span slot="unsupported"></span>
       <span slot="not-allowed"></span>
@@ -85,6 +87,26 @@
       und Mobilbrowser unterstützen WebSerial nicht.
     </p>
 
+  </div>
+
+  <div class="card flash">
+    <h2>Waveshare 3.5B</h2>
+    <p>AXS15231B-Display und -Touch über QSPI/I²C</p>
+    <esp-web-install-button manifest="manifest-35b.json">
+      <button slot="activate" style="
+        font: inherit; font-weight: 600; padding: 13px 30px; border: 0;
+        border-radius: 9px; background: var(--primary); color: #fff; cursor: pointer;">
+        3.5B flashen
+      </button>
+      <span slot="unsupported"></span>
+      <span slot="not-allowed"></span>
+    </esp-web-install-button>
+
+    <p class="unsupported">
+      Dieser Browser unterstützt WebSerial nicht. Bitte Chrome, Edge oder
+      Opera am Rechner verwenden.
+    </p>
+
     <div class="version" id="version">…</div>
   </div>
 
@@ -92,7 +114,7 @@
   <ol>
     <li>Board per <strong>USB-Datenkabel</strong> anschließen. Viele Kabel
       führen nur Strom – dann erscheint kein Gerät zur Auswahl.</li>
-    <li>Auf <em>Terminal flashen</em> klicken und den seriellen Port auswählen.</li>
+    <li>Die auf der Platine aufgedruckte Variante auswählen und den seriellen Port öffnen.</li>
     <li><strong>Erase device</strong> nur beim ersten Mal oder wenn ein
       früherer Stand vollständig weg soll. Ohne Löschen bleiben WLAN-Zugang,
       Server-Adresse und Token erhalten.</li>
@@ -134,14 +156,15 @@
   <table>
     <thead><tr><th>Datei</th><th>Offset</th><th>Zweck</th></tr></thead>
     <tbody>
-      <tr><td><code>firmware.factory.bin</code></td><td><code>0x0</code></td><td>alles in einem – diese genügt</td></tr>
+      <tr><td><code>firmware-35.factory.bin</code></td><td><code>0x0</code></td><td>Waveshare 3.5</td></tr>
+      <tr><td><code>firmware-35b.factory.bin</code></td><td><code>0x0</code></td><td>Waveshare 3.5B</td></tr>
       <tr><td><code>bootloader.bin</code></td><td><code>0x0</code></td><td rowspan="3">einzeln, falls gewünscht</td></tr>
       <tr><td><code>partitions.bin</code></td><td><code>0x8000</code></td></tr>
       <tr><td><code>firmware.bin</code></td><td><code>0x10000</code></td></tr>
     </tbody>
   </table>
   <p style="margin-top:14px">
-    <code>esptool.py --chip esp32s3 write_flash 0x0 firmware.factory.bin</code>
+    <code>esptool.py --chip esp32s3 write_flash 0x0 firmware-35b.factory.bin</code>
   </p>
 
   <footer>
@@ -153,11 +176,11 @@
 <script>
   // Version aus dem Manifest anzeigen, damit die Seite nicht bei jedem
   // Release von Hand angefasst werden muss.
-  fetch('manifest.json')
+  fetch('manifest-35b.json')
     .then((r) => r.json())
     .then((m) => {
       document.getElementById('version').textContent =
-        `Version ${m.version} · ESP32-S3 · Waveshare Touch-LCD 3.5`;
+        `Version ${m.version} · ESP32-S3 · Waveshare Touch-LCD 3.5 / 3.5B`;
     })
     .catch(() => {
       document.getElementById('version').textContent =

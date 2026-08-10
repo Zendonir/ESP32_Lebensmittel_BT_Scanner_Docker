@@ -23,9 +23,11 @@ static constexpr uint16_t C_WARN = 0xFC40;
 static constexpr uint16_t C_DANGER = 0xE9E5;
 
 void Screen::begin() {
-    _tft.init();
-    _tft.setRotation(1);            // Querformat
-    _tft.fillScreen(C_BG);
+    if (!_spr.begin()) {
+        log_e("Display-Puffer konnte nicht initialisiert werden");
+        return;
+    }
+    _spr.fillSprite(C_BG);
 
     // PWM einmalig einrichten; setBrightness() schreibt danach nur noch den
     // Tastgrad. Ein erneutes ledcAttach() bei jeder Einstellungsaenderung
@@ -36,10 +38,6 @@ void Screen::begin() {
     // Der Sprite liegt in PSRAM (TFT_eSPI nutzt bei CONFIG_SPIRAM_SUPPORT
     // heap_caps_malloc). Alles wird hinein gezeichnet und in einem Rutsch
     // ausgegeben - so gibt es kein Flackern und keine Teilbilder.
-    _spr.setColorDepth(16);
-    if (!_spr.createSprite(W, H)) {
-        log_e("Sprite konnte nicht angelegt werden - direktes Zeichnen");
-    }
     _spr.setTextDatum(TL_DATUM);
     _ready = true;
 }
