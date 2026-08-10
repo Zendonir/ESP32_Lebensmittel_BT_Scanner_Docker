@@ -18,6 +18,7 @@
 #define LCD_DC   3
 #define LCD_CLK  5
 #define LCD_BL   6
+#define LCD_RST  4
 
 #define PANEL_WIDTH   320  // native Aufloesung (Hochformat)
 #define PANEL_HEIGHT  480
