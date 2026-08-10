@@ -2,8 +2,9 @@
 
 #include <ArduinoJson.h>
 #include <Arduino.h>
-#include <TFT_eSPI.h>
 #include <vector>
+
+#include "DisplayCanvas.h"
 
 // Allgemeiner Renderer fuer die Bildschirmbeschreibungen des Servers.
 //
@@ -70,8 +71,7 @@ private:
     static uint16_t parseColor(const char *hex, uint16_t fallback);
     String  shiftDate(const String &iso, int days, int months) const;
 
-    TFT_eSPI  _tft;
-    TFT_eSprite _spr{&_tft};
+    DisplayCanvas _spr;
 
     JsonDocument _screen;      // aktuelle Beschreibung
     std::vector<Hit> _hits;

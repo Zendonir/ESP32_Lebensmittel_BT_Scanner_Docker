@@ -2,7 +2,7 @@ name: Firmware veroeffentlichen
 
 # Baut die Firmware und stellt sie so bereit, dass sie ohne Entwicklungs-
 # umgebung installierbar ist:
-#   * GitHub Release mit firmware.factory.bin (alles ab Offset 0)
+#   * GitHub Release mit je einem Abbild fuer 3.5 und 3.5B
 #   * Browser-Installer auf GitHub Pages (ESP Web Tools, WebSerial)
 #
 # Auslesen: ein Tag "v2.0.0" pushen, oder den Workflow von Hand starten.
@@ -72,11 +72,13 @@ jobs:
       - name: Dateien einsammeln
         run: |
           mkdir -p dist
-          B=firmware/.pio/build/terminal
-          cp "$B/firmware.factory.bin" dist/
-          cp "$B/firmware.bin"         dist/
-          cp "$B/bootloader.bin"       dist/
-          cp "$B/partitions.bin"       dist/
+          for BOARD in 35 35b; do
+            B="firmware/.pio/build/terminal-$BOARD"
+            cp "$B/firmware.factory.bin" "dist/firmware-$BOARD.factory.bin"
+            cp "$B/firmware.bin"         "dist/firmware-$BOARD.bin"
+          done
+          cp firmware/.pio/build/terminal-35/bootloader.bin dist/
+          cp firmware/.pio/build/terminal-35/partitions.bin dist/
           ls -la dist
 
       - name: Pruefsummen
@@ -86,11 +88,12 @@ jobs:
       # Der Installer im Browser laedt genau dieses Manifest. Ein Teil bei
       # Offset 0 - firmware.factory.bin enthaelt Bootloader, Partitionstabelle
       # und Anwendung bereits zusammengefasst.
-      - name: Manifest fuer den Browser-Installer schreiben
+      - name: Manifeste fuer den Browser-Installer schreiben
         run: |
-          cat > dist/manifest.json <<JSON
+          for BOARD in 35 35b; do
+          cat > "dist/manifest-$BOARD.json" <<JSON
           {
-            "name": "Lebensmittel-Terminal",
+            "name": "Lebensmittel-Terminal $BOARD",
             "version": "${{ steps.version.outputs.value }}",
             "home_assistant_domain": null,
             "new_install_prompt_erase": true,
@@ -98,19 +101,20 @@ jobs:
               {
                 "chipFamily": "ESP32-S3",
                 "parts": [
-                  { "path": "firmware.factory.bin", "offset": 0 }
+                  { "path": "firmware-$BOARD.factory.bin", "offset": 0 }
                 ]
               }
             ]
           }
           JSON
-          python -c "import json;json.load(open('dist/manifest.json'));print('Manifest gueltig')"
+          done
+          python -c "import json;[json.load(open(f'dist/manifest-{b}.json')) for b in ('35','35b')];print('Manifeste gueltig')"
 
       - name: Installer-Seite zusammenstellen
         run: |
           mkdir -p site
           cp firmware/web-installer/index.html site/
-          cp dist/firmware.factory.bin dist/manifest.json site/
+          cp dist/firmware-*.factory.bin dist/manifest-*.json site/
           # Jekyll wuerde Dateien mit Unterstrich verschlucken.
           touch site/.nojekyll
           ls -la site
@@ -163,10 +167,11 @@ jobs:
 
             ### Von Hand flashen
 
-            Die zusammengefasste Datei genuegt:
+            Die zur Boardvariante passende zusammengefasste Datei genuegt:
 
             ```
-            esptool.py --chip esp32s3 write_flash 0x0 firmware.factory.bin
+            esptool.py --chip esp32s3 write_flash 0x0 firmware-35.factory.bin
+            esptool.py --chip esp32s3 write_flash 0x0 firmware-35b.factory.bin
             ```
 
             Einzeln, etwa fuer das Espressif Flash Download Tool:
