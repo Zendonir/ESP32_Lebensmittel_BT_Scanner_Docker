@@ -121,6 +121,17 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+      # Schaltet GitHub Pages beim ersten Lauf selbst ein (enablement), damit
+      # niemand vorher in die Repository-Einstellungen muss. Bei einem privaten
+      # Repo ohne passenden Plan ist Pages nicht verfuegbar - dann schlaegt
+      # dieser Schritt fehl, ohne den Rest des Builds zu gefaehrden.
+      - name: Pages einrichten
+        id: pages
+        continue-on-error: true
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site/

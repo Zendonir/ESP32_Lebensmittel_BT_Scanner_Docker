@@ -57,8 +57,15 @@ GitHub-Release und veröffentlicht die Installer-Seite. Für einen Testlauf ohne
 Tag: Actions → *Firmware veröffentlichen* → *Run workflow* (baut und
 aktualisiert die Seite, legt aber kein Release an).
 
-> Einmalig nötig: **Settings → Pages → Source** auf *GitHub Actions* stellen.
-> Sonst schlägt der Pages-Auftrag fehl.
+Der Workflow schaltet GitHub Pages beim ersten Lauf selbst ein. Falls das
+fehlschlägt, von Hand: **Repo → Settings** (Reiter oben, nicht das
+Profilmenü) **→ Pages** in der linken Leiste unter *Code and automation* **→
+Build and deployment → Source: GitHub Actions**. Direktlink:
+`https://github.com/Zendonir/ESP32_Lebensmittel_BT_Scanner_Docker/settings/pages`
+
+> Bei einem **privaten** Repo ist Pages nur mit GitHub Pro/Team verfügbar –
+> dort fehlt der Menüpunkt dann tatsächlich. Dieses Repo ist öffentlich, also
+> kein Thema.
 
 ---
 
