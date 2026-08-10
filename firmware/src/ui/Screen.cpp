@@ -66,6 +66,10 @@ void Screen::apply(JsonDocument &doc) {
         _dateValue = String(_screen["value"] | "");
     } else if (_kind == "number") {
         _numberValue = _screen["value"] | 1.0f;
+    } else if (_kind == "keyboard") {
+        _textValue = String(_screen["value"] | "");
+        _kbShift = false;
+        _kbNumeric = false;
     }
     redraw();
 }
@@ -119,6 +123,7 @@ void Screen::redraw() {
     else if (_kind == "list") drawList();
     else if (_kind == "date") drawDate();
     else if (_kind == "number") drawNumber();
+    else if (_kind == "keyboard") drawKeyboard();
     else drawMessage();
 
     drawFooter();
@@ -238,6 +243,17 @@ void Screen::drawList() {
     for (int i = 0; i < _pageSize && (_scroll + i) < total; i++) {
         JsonObject item = items[_scroll + i];
         const int16_t y = BODY_Y + i * rowH;
+
+        // Gruppenueberschrift: nicht antippbar, eigener Zeilenstil. Zaehlt als
+        // gewoehnliche Zeile fuer die Seitenberechnung - das haelt das Blaettern
+        // einfach und vorhersehbar, kostet dafuer etwas Platz.
+        if (item["header"] | false) {
+            _spr.setTextFont(2);
+            _spr.setTextColor(C_MUTED, C_BG);
+            _spr.drawString(String(item["label"] | ""), 10, y + rowH / 2 - 8);
+            continue;
+        }
+
         const uint16_t color = parseColor(item["color"] | "", C_PRIMARY);
 
         _spr.fillRoundRect(8, y + 2, W - 16 - (total > _pageSize ? 34 : 0), rowH - 6, 6, C_SURFACE);
@@ -340,6 +356,76 @@ void Screen::drawNumber() {
     button(W - 92, y, 78, 40, "+" + String(step * 10, step < 1 ? 1 : 0), C_SURFACE, "__n++");
 }
 
+// Bildschirmtastatur: drei Reihen Buchstaben (oder im Ziffernmodus Ziffern und
+// Satzzeichen) plus eine Bedienreihe mit Umschalt/Modus, Leerzeichen und OK.
+// Reihen sind unterschiedlich breit wie bei einer echten Tastatur - das ist
+// bewusst kein einheitliches Raster, sondern an app/DisplayCanvas'
+// Textbreite orientiert.
+static const char KB_ROW1[] = "qwertyuiop";               // 10 Zeichen
+static const char KB_ROW2[] = "asdfghjkl";                 // 9 Zeichen
+static const char KB_ROW3[] = "zxcvbnm";                   // 7 Zeichen + Ruecktaste
+static const char KB_NUM1[] = "1234567890";
+static const char KB_NUM2[] = "-_/:;()&@";
+static const char KB_NUM3[] = ".,?!'\"";
+
+char Screen::keyboardCharAt(uint8_t row, uint8_t col) const {
+    const char *src = nullptr;
+    if (_kbNumeric) {
+        src = row == 0 ? KB_NUM1 : row == 1 ? KB_NUM2 : KB_NUM3;
+    } else {
+        src = row == 0 ? KB_ROW1 : row == 1 ? KB_ROW2 : KB_ROW3;
+    }
+    const char c = src[col];
+    if (c == 0) return 0;
+    if (!_kbNumeric && _kbShift) return (char)toupper(c);
+    return c;
+}
+
+void Screen::drawKeyboard() {
+    // Eingabezeile
+    _spr.fillRoundRect(8, BODY_Y, W - 16, 26, 5, C_SURFACE);
+    _spr.setTextFont(4);
+    _spr.setTextColor(_textValue.isEmpty() ? C_MUTED : C_TEXT, C_SURFACE);
+    _spr.drawString(_textValue.isEmpty() ? "..." : (_textValue + "_"), 14, BODY_Y + 2);
+
+    const int16_t gap = 3;
+    const int16_t rowH = 36;
+
+    // Zeichenreihe zeichnen: `count` Tasten plus optional eine breitere
+    // Sondertaste (Ruecktaste) im letzten Slot dieser Zeile.
+    auto drawCharRow = [&](uint8_t row, int count, int16_t y, bool withBackspace) {
+        const int slots = count + (withBackspace ? 1 : 0);
+        const int16_t w = (W - 12 - (slots - 1) * gap) / slots;
+        int16_t x = 6;
+        for (int col = 0; col < count; col++) {
+            const char c = keyboardCharAt(row, col);
+            char label[2] = {c, 0};
+            button(x, y, w, rowH, label, C_SURFACE, "K" + String(c));
+            x += w + gap;
+        }
+        if (withBackspace) button(x, y, w, rowH, "<-", C_DANGER, "__kbback");
+    };
+
+    int16_t y = BODY_Y + 32;
+    drawCharRow(0, _kbNumeric ? strlen(KB_NUM1) : strlen(KB_ROW1), y, false);
+    y += rowH + gap;
+    drawCharRow(1, _kbNumeric ? strlen(KB_NUM2) : strlen(KB_ROW2), y, false);
+    y += rowH + gap;
+    drawCharRow(2, _kbNumeric ? strlen(KB_NUM3) : strlen(KB_ROW3), y, true);
+    y += rowH + gap;
+
+    // Bedienreihe: ein einzelner Knopf durchlaeuft klein -> GROSS -> 123 -> klein,
+    // damit fuer Umschalten und Ziffernmodus keine zwei separaten Tasten den
+    // knappen Platz der Bedienreihe teilen muessen. Der Text zeigt das Ziel des
+    // naechsten Tipps, nicht den aktuellen Zustand.
+    const char *modeLabel = _kbNumeric ? "abc" : (_kbShift ? "123" : "ABC");
+    const int16_t modeW = 70, okW = 90;
+    const int16_t spaceW = W - 12 - modeW - okW - 2 * gap;
+    button(6, y, modeW, rowH, modeLabel, C_SURFACE, "__kbmode");
+    button(6 + modeW + gap, y, spaceW, rowH, "LEERTASTE", C_SURFACE, "K ");
+    button(6 + modeW + gap + spaceW + gap, y, okW, rowH, "OK", C_OK, "ok");
+}
+
 void Screen::drawMessage() {
     JsonArray lines = _screen["lines"].as<JsonArray>();
     int16_t y = BODY_Y + 6;
@@ -432,11 +518,36 @@ Action Screen::handleTouch(int16_t x, int16_t y) {
             return action;
         }
 
+        if (_kind == "keyboard") {
+            const int16_t maxLen = _screen["meta"]["max_len"] | 40;
+
+            if (id == "__kbback") {
+                if (_textValue.length()) _textValue.remove(_textValue.length() - 1);
+                redraw();
+                return action;
+            }
+            if (id == "__kbmode") {
+                // klein -> GROSS -> Ziffern -> klein, siehe drawKeyboard().
+                if (_kbNumeric)          { _kbNumeric = false; _kbShift = false; }
+                else if (!_kbShift)      { _kbShift = true; }
+                else                     { _kbShift = false; _kbNumeric = true; }
+                redraw();
+                return action;
+            }
+            if (id.startsWith("K") && id.length() == 2) {
+                if (_textValue.length() < (size_t)maxLen) _textValue += id[1];
+                redraw();
+                return action;
+            }
+        }
+
         // "OK" auf einem Eingabebildschirm schickt zuerst den Wert, damit der
         // Server ihn kennt, bevor er den Tipp auswertet.
-        if (id == "ok" && (_kind == "date" || _kind == "number")) {
+        if (id == "ok" && (_kind == "date" || _kind == "number" || _kind == "keyboard")) {
             action.type = ActionType::Input;
-            action.value = _kind == "date" ? _dateValue : String(_numberValue, 2);
+            action.value = _kind == "date" ? _dateValue
+                          : _kind == "number" ? String(_numberValue, 2)
+                          : _textValue;
             action.id = id;
             return action;
         }

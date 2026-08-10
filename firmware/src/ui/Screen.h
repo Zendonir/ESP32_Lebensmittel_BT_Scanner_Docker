@@ -59,8 +59,12 @@ private:
     void drawDate();
     void drawNumber();
     void drawMessage();
+    void drawKeyboard();
     void drawToast();
     void commit();
+
+    // Zeichen, das eine Taste bei aktuellem Umschalt-/Zifferzustand einfuegt.
+    char keyboardCharAt(uint8_t row, uint8_t col) const;
 
     void addHit(int16_t x, int16_t y, int16_t w, int16_t h, const String &id, bool isInput = false);
     void tile(int16_t x, int16_t y, int16_t w, int16_t h, const String &label,
@@ -83,6 +87,9 @@ private:
     // Zustand der Eingabeelemente
     String   _dateValue;
     float    _numberValue = 1;
+    String   _textValue;
+    bool     _kbShift   = false;   // Grossbuchstaben
+    bool     _kbNumeric = false;   // Ziffern/Symbole statt Buchstaben
 
     // Liste
     int      _scroll     = 0;

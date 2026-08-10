@@ -40,6 +40,8 @@ TMPL_BRAND = "tmpl_brand"
 TMPL_SORTE = "tmpl_sorte"
 TMPL_AMOUNT = "tmpl_amount"
 CONFIRM_REMOVE = "confirm_remove"
+UNKNOWN_NAME = "unknown_name"
+LOCATION_NEW = "location_new"
 
 
 @dataclass
@@ -74,6 +76,7 @@ class DeviceSession:
     location: str = ""
     screen_id: int = 0
     last_result: list[str] = field(default_factory=list)
+    location_draft: str = ""
     scanner: dict = field(default_factory=dict)
     online_since: datetime = field(default_factory=datetime.utcnow)
 
@@ -140,6 +143,10 @@ async def render(session: AsyncSession, sess: DeviceSession) -> dict:
         return await _screen_expiring(session, sess, sid, status)
     if name == UNKNOWN:
         return _screen_unknown(sess, sid, status)
+    if name == UNKNOWN_NAME:
+        return _screen_unknown_name(sess, sid, status)
+    if name == LOCATION_NEW:
+        return _screen_location_new(sess, sid, status)
     if name == ENTER_DATE:
         return _screen_date(sess, sid, status)
     if name == ENTER_QTY:
@@ -213,11 +220,25 @@ async def _screen_locations(session, sess, sid, status) -> dict:
         }
         for row in rows
     ]
+    items.append({"id": "new", "label": "+ Neuer Ort", "color": "#1e88e5"})
     return proto.screen(
         screen_id=sid,
         kind="list",
         title="Lagerort waehlen",
         items=items,
+        buttons=[proto.BTN_BACK],
+        status=status,
+    )
+
+
+def _screen_location_new(sess, sid, status) -> dict:
+    return proto.screen(
+        screen_id=sid,
+        kind="keyboard",
+        title="Neuer Lagerort",
+        subtitle="Name eingeben",
+        value="",
+        meta={"max_len": 40},
         buttons=[proto.BTN_BACK],
         status=status,
     )
@@ -281,10 +302,24 @@ def _screen_unknown(sess, sid, status) -> dict:
         lines=["Kein Produkt gefunden.", "Ueber eine Vorlage anlegen oder verwerfen."],
         items=[
             {"id": "templates", "label": "Vorlage", "color": "#1e88e5"},
+            {"id": "name", "label": "Namen eingeben", "color": "#1e88e5"},
             {"id": "generic", "label": "Ohne Namen", "sub": "nur MHD", "color": "#546e7a"},
             {"id": "home", "label": "Verwerfen", "color": "#e53935"},
         ],
         buttons=[proto.BTN_HOME],
+        status=status,
+    )
+
+
+def _screen_unknown_name(sess, sid, status) -> dict:
+    return proto.screen(
+        screen_id=sid,
+        kind="keyboard",
+        title="Produktname",
+        subtitle=sess.draft.barcode,
+        value=sess.draft.name,
+        meta={"max_len": 60},
+        buttons=[proto.BTN_BACK],
         status=status,
     )
 
@@ -479,6 +514,8 @@ async def on_tap(session: AsyncSession, sess: DeviceSession, item: str) -> None:
         LOCATIONS: _tap_locations,
         EXPIRING: _tap_expiring,
         UNKNOWN: _tap_unknown,
+        UNKNOWN_NAME: _tap_unknown_name,
+        LOCATION_NEW: _tap_location_new,
         ENTER_DATE: _tap_date,
         ENTER_QTY: _tap_confirm_save,
         RESULT: _tap_result,
@@ -508,6 +545,10 @@ async def _tap_home(session, sess, item) -> None:
 
 
 async def _tap_locations(session, sess, item) -> None:
+    if item == "new":
+        sess.location_draft = ""
+        sess.push(LOCATION_NEW)
+        return
     if not item.startswith("loc:"):
         return
     sess.location = item[4:]
@@ -519,6 +560,39 @@ async def _tap_locations(session, sess, item) -> None:
         await session.commit()
     sess.pop()
     await hub.send_to(sess.device_id, proto.toast(f"Ort: {sess.location}"))
+
+
+async def _tap_location_new(session, sess, item) -> None:
+    if item != "ok":
+        return
+    name = sess.location_draft.strip()
+    if not name:
+        await hub.send_to(sess.device_id, proto.toast("Name fehlt", "warn"))
+        return
+
+    existing = (
+        await session.execute(select(Location).where(Location.name == name))
+    ).scalar_one_or_none()
+    if existing is None:
+        max_order = (
+            await session.execute(
+                select(Location.sort_order).order_by(Location.sort_order.desc()).limit(1)
+            )
+        ).scalar_one_or_none()
+        session.add(Location(name=name, sort_order=(max_order or 0) + 1))
+        await session.flush()
+
+    sess.location = name
+    device = (
+        await session.execute(select(Device).where(Device.device_id == sess.device_id))
+    ).scalar_one_or_none()
+    if device is not None:
+        device.active_location = name
+    await session.commit()
+    await hub.notify_ui("catalog")
+
+    sess.pop()
+    await hub.send_to(sess.device_id, proto.toast(f"Ort: {name}", "success"))
 
 
 async def _tap_expiring(session, sess, item) -> None:
@@ -539,9 +613,21 @@ async def _tap_expiring(session, sess, item) -> None:
 async def _tap_unknown(session, sess, item) -> None:
     if item == "templates":
         sess.stack = [HOME, TMPL_CATEGORY]
+    elif item == "name":
+        sess.push(UNKNOWN_NAME)
     elif item == "generic":
         sess.draft.name = sess.draft.name or f"Artikel {sess.draft.barcode[-4:]}"
         sess.stack = [HOME, ENTER_DATE]
+
+
+async def _tap_unknown_name(session, sess, item) -> None:
+    if item != "ok":
+        return
+    if not sess.draft.name.strip():
+        await hub.send_to(sess.device_id, proto.toast("Name fehlt", "warn"))
+        return
+    sess.draft.name = sess.draft.name.strip()
+    sess.stack = [HOME, ENTER_DATE]
 
 
 async def _tap_date(session, sess, item) -> None:
@@ -626,6 +712,10 @@ async def on_input(session: AsyncSession, sess: DeviceSession, value) -> None:
             sess.draft.quantity = float(value)
         except (TypeError, ValueError):
             sess.draft.quantity = 1.0
+    elif current == UNKNOWN_NAME:
+        sess.draft.name = str(value or "").strip()
+    elif current == LOCATION_NEW:
+        sess.location_draft = str(value or "").strip()
     await push_screen(session, sess)
 
 

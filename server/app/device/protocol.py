@@ -31,7 +31,9 @@ from typing import Any, Literal
 
 PROTOCOL_VERSION = 1
 
-ScreenKind = Literal["tiles", "list", "date", "number", "message", "confirm", "text"]
+ScreenKind = Literal[
+    "tiles", "list", "date", "number", "message", "confirm", "text", "keyboard"
+]
 
 
 def screen(
@@ -49,10 +51,13 @@ def screen(
 ) -> dict:
     """Ein Bildschirm in geraeteunabhaengiger Form.
 
-    `items`   : [{id, label, sub, color, badge}]  - Kacheln oder Listenzeilen
+    `items`   : [{id, label, sub, color, badge}]  - Kacheln oder Listenzeilen.
+                Ein Eintrag mit `header: true` ist eine nicht antippbare
+                Gruppenueberschrift innerhalb einer `list`.
     `buttons` : [{id, label, style}]              - feste Fussleiste
-    `value`   : Startwert fuer date/number/text
-    `meta`    : {min, max, step, unit, presets:[{id,label}]}
+    `value`   : Startwert fuer date/number/keyboard
+    `meta`    : {min, max, step, unit, presets:[{id,label}], max_len}
+                `max_len` begrenzt die Eingabe bei `keyboard` (Standard 40).
     """
     return {
         "t": "screen",
