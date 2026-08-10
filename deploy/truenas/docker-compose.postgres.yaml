@@ -1,0 +1,108 @@
+# ============================================================================
+# Lebensmittel-Scanner 2.0 - Custom App fuer TrueNAS SCALE, mit PostgreSQL
+#
+# Nur nehmen, wenn es einen konkreten Grund gibt: mehrere Terminals mit hohem
+# Durchsatz, oder eine bereits vorhandene Postgres-Instanz, in der alles
+# zusammenlaufen soll. Fuer einen Haushalt genuegt die SQLite-Variante
+# (docker-compose.yaml) vollauf - sie ist mit einem Snapshot gesichert und
+# braucht keinen zweiten Container.
+#
+# Vorbereitung:
+#   mkdir -p /mnt/tank/apps/lebensmittel/{data,postgres}
+#   chown -R 568:568 /mnt/tank/apps/lebensmittel
+#
+# Anpassen: DEVICE_TOKEN, POSTGRES_PASSWORD (an beiden Stellen!), Pfade, Port.
+# ============================================================================
+
+services:
+  lebensmittel:
+    image: ghcr.io/zendonir/esp32_lebensmittel_bt_scanner_docker:latest
+    container_name: lebensmittel-scanner
+    restart: unless-stopped
+    user: "568:568"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    ports:
+      - "8080:8080"
+
+    volumes:
+      - /mnt/tank/apps/lebensmittel/data:/data
+
+    environment:
+      DEVICE_TOKEN: "HIER-EIN-LANGES-ZUFALLSTOKEN-EINTRAGEN"
+      DATABASE_URL: "postgresql+asyncpg://scanner:BITTE-AENDERN@postgres:5432/lebensmittel"
+
+      TZ: "Europe/Berlin"
+      HOUSEHOLD: "Standard"
+      LABEL_PREFIX: "LEB"
+      LABEL_PAPER_CHARS: "32"
+      LOG_LEVEL: "INFO"
+      UI_PASSWORD: ""
+
+      EXPIRY_WARN_DAYS: "3"
+      EXPIRY_CHECK_HOUR: "8"
+      RESTORE_WINDOW_HOURS: "48"
+      OPENFOODFACTS_ENABLED: "true"
+
+      NTFY_URL: ""
+      NTFY_TOPIC: ""
+      TELEGRAM_TOKEN: ""
+      TELEGRAM_CHAT_ID: ""
+      MQTT_HOST: ""
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=4).status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    stop_grace_period: 30s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: lebensmittel-postgres
+    restart: unless-stopped
+    user: "568:568"
+
+    # Kein Port nach aussen: nur der Anwendungscontainer spricht mit der
+    # Datenbank, und beide haengen im selben Compose-Netz.
+    expose:
+      - "5432"
+
+    volumes:
+      - /mnt/tank/apps/lebensmittel/postgres:/var/lib/postgresql/data
+
+    environment:
+      POSTGRES_DB: "lebensmittel"
+      POSTGRES_USER: "scanner"
+      POSTGRES_PASSWORD: "BITTE-AENDERN"
+      # Ohne dieses Unterverzeichnis beschwert sich Postgres, wenn das
+      # Dataset nicht leer ist (verlorene lost+found o.ae.).
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scanner -d lebensmittel"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

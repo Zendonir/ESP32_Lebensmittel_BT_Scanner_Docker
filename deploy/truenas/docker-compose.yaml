@@ -1,0 +1,98 @@
+# ============================================================================
+# Lebensmittel-Scanner 2.0 - Custom App fuer TrueNAS SCALE
+#
+# Einspielen:  Apps -> Discover Apps -> Custom App -> "Install via YAML"
+#              und diesen Inhalt einfuegen.
+#
+# Vor dem Start zwei Dinge erledigen:
+#   1. Dataset anlegen, z.B.  tank/apps/lebensmittel
+#   2. Dataset dem Apps-Benutzer geben (UID/GID 568):
+#        chown -R 568:568 /mnt/tank/apps/lebensmittel
+#      Ohne diesen Schritt kann der Container die Datenbank nicht anlegen.
+#
+# Danach an drei Stellen anpassen:
+#   * DEVICE_TOKEN  - Pflicht, langes Zufallstoken. Erzeugen mit:
+#                       openssl rand -hex 24
+#                     Genau dieser Wert muss spaeter im WLAN-Portal des
+#                     ESP32-Terminals eingetragen werden.
+#   * die Pfade unter "volumes" auf den eigenen Pool
+#   * bei Bedarf den Port (8080 ist auf manchen Systemen belegt)
+# ============================================================================
+
+services:
+  lebensmittel:
+    image: ghcr.io/zendonir/esp32_lebensmittel_bt_scanner_docker:latest
+    container_name: lebensmittel-scanner
+    restart: unless-stopped
+
+    # Der Apps-Benutzer von TrueNAS. Muss zum Eigentuemer des Datasets passen.
+    user: "568:568"
+
+    ports:
+      # links = Port auf dem NAS, rechts = Port im Container (nicht aendern)
+      - "8080:8080"
+
+    volumes:
+      # Datenbank, Produktcache, Einstellungen - das ist der einzige Ort,
+      # an dem Nutzdaten liegen. Genau dieses Dataset sichern.
+      - /mnt/tank/apps/lebensmittel/data:/data
+
+    environment:
+      # --- Pflicht ---------------------------------------------------------
+      DEVICE_TOKEN: "HIER-EIN-LANGES-ZUFALLSTOKEN-EINTRAGEN"
+
+      # --- Grundeinstellungen ----------------------------------------------
+      TZ: "Europe/Berlin"
+      HOUSEHOLD: "Standard"
+      LABEL_PREFIX: "LEB"
+      LABEL_PAPER_CHARS: "32"        # 32 = 58-mm-Papier, 48 = 80-mm-Papier
+      LOG_LEVEL: "INFO"
+
+      # Passwortschutz des Web-Interface. Leer = im LAN frei zugaenglich.
+      UI_PASSWORD: ""
+
+      # SQLite im Volume. Fuer einen Haushalt voellig ausreichend und mit
+      # einem Dataset-Snapshot gesichert. Postgres siehe unten.
+      DATABASE_URL: "sqlite+aiosqlite:////data/lebensmittel.db"
+
+      # --- MHD-Ueberwachung --------------------------------------------------
+      EXPIRY_WARN_DAYS: "3"
+      EXPIRY_CHECK_HOUR: "8"
+      RESTORE_WINDOW_HOURS: "48"
+
+      # --- Produktdaten ------------------------------------------------------
+      OPENFOODFACTS_ENABLED: "true"
+      HTTP_TIMEOUT: "8"
+
+      # --- Benachrichtigungen (alles optional, leer = aus) --------------------
+      NTFY_URL: ""
+      NTFY_TOPIC: ""
+      TELEGRAM_TOKEN: ""
+      TELEGRAM_CHAT_ID: ""
+      MQTT_HOST: ""
+      MQTT_PORT: "1883"
+      MQTT_USER: ""
+      MQTT_PASS: ""
+      MQTT_PREFIX: "lebensmittel"
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=4).status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    # Das Terminal haelt eine dauerhafte WebSocket-Verbindung. Ein hartes
+    # Kill-Signal wuerde offene Druckauftraege mitten im Versand abschneiden;
+    # 30 s reichen fuer einen sauberen Abschluss.
+    stop_grace_period: 30s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -78,6 +78,10 @@ Web-Interface: `http://<server>:8080` · Mobil: `http://<server>:8080/mobile`
 Beim ersten Start werden Kategorien, Lagerorte und ein paar Beispielvorlagen
 angelegt. Die Daten liegen im Volume `scanner-data` (`/data/lebensmittel.db`).
 
+Auf einem NAS statt am Terminal? Für **TrueNAS SCALE** liegen fertige Custom-App-YAMLs
+unter [`deploy/truenas/`](deploy/truenas/), die Schritte dazu in
+[docs/TRUENAS.md](docs/TRUENAS.md).
+
 ### 2. Terminal
 
 ```bash
@@ -181,4 +185,5 @@ cd firmware && pio run
 Weitere Unterlagen:
 [Architektur](docs/ARCHITECTURE.md) ·
 [Geräteprotokoll](docs/PROTOCOL.md) ·
-[Migration aus Version 1](docs/MIGRATION.md)
+[Migration aus Version 1](docs/MIGRATION.md) ·
+[Installation auf TrueNAS](docs/TRUENAS.md)
