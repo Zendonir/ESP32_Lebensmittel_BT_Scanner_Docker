@@ -74,73 +74,25 @@
 
 // ============================================================================
 // Netzwerk
-// =====================================================…5599 tokens truncated…ger"  ? C_DANGER
-                                               : C_SURFACE;
-        button(10 + index * (w + 10), y, w, FOOTER_H - 12, String(item["label"] | ""),
-               bg, String(item["id"] | ""));
-        index++;
-    }
-}
+// ============================================================================
+#define AP_SSID     "Lebensmittel-Terminal"
+#define AP_PASSWORD "12345678"
 
-void Screen::drawToast() {
-    const uint16_t bg = _toastLevel == "error"   ? C_DANGER
-                      : _toastLevel == "warn"    ? C_WARN
-                      : _toastLevel == "success" ? C_OK
-                                                 : C_PRIMARY;
-    const int16_t h = 40;
-    _spr.fillRoundRect(20, H - FOOTER_H - h - 6, W - 40, h, 8, bg);
-    _spr.setTextDatum(MC_DATUM);
-    _spr.setTextFont(4);
-    _spr.setTextColor(TFT_WHITE, bg);
-    _spr.drawString(_toastText, W / 2, H - FOOTER_H - h / 2 - 6);
-    _spr.setTextDatum(TL_DATUM);
-}
+// Voreinstellungen; zur Laufzeit ueber das WLAN-Portal aenderbar und im NVS
+// abgelegt. Der Server wird als Host:Port angegeben, nicht als volle URL -
+// die Firmware baut daraus sowohl den HTTP- als auch den WS-Pfad.
+#define DEFAULT_SERVER_HOST "lebensmittel.local"
+#define DEFAULT_SERVER_PORT 8080
+#define DEFAULT_DEVICE_TOKEN ""
 
-// ---------------------------------------------------------------------------
-// Beruehrung
-// ---------------------------------------------------------------------------
-Action Screen::handleTouch(int16_t x, int16_t y) {
-    Action action;
-    for (const Hit &hit : _hits) {
-        if (x < hit.x || x > hit.x + hit.w || y < hit.y || y > hit.y + hit.h) continue;
+#define WS_PATH "/ws/device"
 
-        const String &id = hit.id;
-
-        // Lokal behandelte Elemente veraendern nur die Anzeige und erzeugen
-        // keinen Netzverkehr. Erst "OK" schickt den Wert an den Server.
-        if (id == "__up") { _scroll = max(0, _scroll - _pageSize); redraw(); return action; }
-        if (id == "__down") { _scroll += _pageSize; redraw(); return action; }
-
-        if (id == "__d-") { _dateValue = shiftDate(_dateValue, -1, 0); redraw(); return action; }
-        if (id == "__d+") { _dateValue = shiftDate(_dateValue, 1, 0); redraw(); return action; }
-        if (id == "__m-") { _dateValue = shiftDate(_dateValue, 0, -1); redraw(); return action; }
-        if (id == "__m+") { _dateValue = shiftDate(_dateValue, 0, 1); redraw(); return action; }
-
-        if (id.startsWith("__n")) {
-            const float step = _screen["meta"]["step"] | 1.0f;
-            const float lo = _screen["meta"]["min"] | 0.0f;
-            const float hi = _screen["meta"]["max"] | 9999.0f;
-            if (id == "__n-")  _numberValue -= step;
-            if (id == "__n+")  _numberValue += step;
-            if (id == "__n--") _numberValue -= step * 10;
-            if (id == "__n++") _numberValue += step * 10;
-            _numberValue = constrain(_numberValue, lo, hi);
-            redraw();
-            return action;
-        }
-
-        // "OK" auf einem Eingabebildschirm schickt zuerst den Wert, damit der
-        // Server ihn kennt, bevor er den Tipp auswertet.
-        if (id == "ok" && (_kind == "date" || _kind == "number")) {
-            action.type = ActionType::Input;
-            action.value = _kind == "date" ? _dateValue : String(_numberValue, 2);
-            action.id = id;
-            return action;
-        }
-
-        action.type = ActionType::Tap;
-        action.id = id;
-        return action;
-    }
-    return action;
-}
+// ============================================================================
+// Zeitverhalten
+// ============================================================================
+#define WS_RECONNECT_MS      3000   // Wiederverbindung nach Abriss
+#define TELEMETRY_INTERVAL_MS 30000
+#define BATTERY_POLL_MS      300000 // Scanner-Akku alle 5 Minuten
+#define WDT_TIMEOUT_S        30
+#define TOUCH_POLL_MS        20
+#define BLE_CONNECT_TIMEOUT_MS 30000
