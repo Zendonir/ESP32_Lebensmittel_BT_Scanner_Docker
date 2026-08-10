@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  server:
+    name: Server (Tests, Linter, Image)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements-dev.txt
+
+      - name: Abhaengigkeiten
+        run: pip install -r server/requirements-dev.txt
+
+      - name: Linter
+        run: ruff check server/app server/tests
+
+      - name: Tests
+        working-directory: server
+        env:
+          DEVICE_TOKEN: ci-token
+        run: python -m pytest tests -q
+
+      - name: Docker-Image bauen
+        run: docker build -t lebensmittel-scanner:ci ./server
+
+      - name: Container startet und antwortet
+        run: |
+          docker run -d --name ci -p 8080:8080 -e DEVICE_TOKEN=ci-token \
+            -e DATABASE_URL=sqlite+aiosqlite:////tmp/ci.db lebensmittel-scanner:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8080/api/health && break || sleep 2
+          done
+          curl -fsS http://localhost:8080/api/health
+          curl -fsS -o /dev/null http://localhost:8080/
+          docker rm -f ci
+
+  firmware:
+    name: Firmware (Build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: PlatformIO
+        run: pip install platformio
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-${{ hashFiles('firmware/platformio.ini') }}
+
+      - name: Bauen
+        working-directory: firmware
+        run: pio run
+
+      - name: Groesse der Firmware
+        working-directory: firmware
+        run: pio run --target size | tail -25
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: firmware/.pio/build/terminal/firmware.bin
+          if-no-files-found: error

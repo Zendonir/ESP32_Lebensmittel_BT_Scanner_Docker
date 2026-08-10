@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.db
+*.db-wal
+*.db-shm
+
+# Betrieb
+.env
+
+# PlatformIO
+firmware/.pio/
+firmware/.vscode/
+
+# Werkzeuge
+.DS_Store

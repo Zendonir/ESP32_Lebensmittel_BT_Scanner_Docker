@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="de" data-theme="">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lebensmittel-Scanner</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+
+<header class="top">
+  <h1>Lebensmittel-Scanner</h1>
+  <nav class="tabs" id="tabs">
+    <button data-page="dashboard" class="active">Übersicht</button>
+    <button data-page="inventory">Inventar</button>
+    <button data-page="labels">Etiketten</button>
+    <button data-page="templates">Vorlagen</button>
+    <button data-page="catalog">Stammdaten</button>
+    <button data-page="shopping">Einkauf</button>
+    <button data-page="devices">Terminals</button>
+    <button data-page="system">System</button>
+  </nav>
+  <span class="spacer"></span>
+  <span class="muted" id="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">verbinde…</span></span>
+  <button class="sm ghost" id="theme-toggle" title="Design wechseln">◐</button>
+  <a href="/mobile"><button class="sm ghost">Mobil</button></a>
+</header>
+
+<main>
+
+  <!-- ------------------------------------------------------------ Übersicht -->
+  <section class="page active" id="page-dashboard">
+    <div class="grid stats" id="stats"></div>
+
+    <div class="grid cols2" style="margin-top:14px">
+      <div class="card">
+        <h2>Läuft bald ab</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Artikel</th><th>MHD</th><th>Ort</th><th></th></tr></thead>
+          <tbody id="dash-expiring"></tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <h2>Letzte Ereignisse</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Zeit</th><th>Typ</th><th>Artikel</th></tr></thead>
+          <tbody id="dash-events"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="grid cols2" style="margin-top:14px">
+      <div class="card"><h2>Nach Kategorie</h2><div id="dash-cat"></div></div>
+      <div class="card"><h2>Nach Lagerort</h2><div id="dash-loc"></div></div>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------------------------- Inventar -->
+  <section class="page" id="page-inventory">
+    <div class="card">
+      <div class="row">
+        <input id="inv-q" placeholder="Suchen (Name, Marke, Barcode, Etikett)" style="flex:1;min-width:220px">
+        <select id="inv-category"><option value="">Alle Kategorien</option></select>
+        <select id="inv-location"><option value="">Alle Orte</option></select>
+        <select id="inv-status">
+          <option value="active">Im Bestand</option>
+          <option value="removed">Ausgelagert</option>
+          <option value="all">Alle</option>
+        </select>
+        <select id="inv-sort">
+          <option value="expiry">nach MHD</option>
+          <option value="name">nach Name</option>
+          <option value="added">nach Eingang</option>
+          <option value="location">nach Ort</option>
+        </select>
+        <button id="inv-reload">Aktualisieren</button>
+        <a href="/api/export/csv" download><button class="ghost">CSV</button></a>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Etikett</th><th>Artikel</th><th>Kategorie</th><th>MHD</th>
+          <th>Rest</th><th>Menge</th><th>Ort</th><th class="right">Aktion</th>
+        </tr></thead>
+        <tbody id="inv-body"></tbody>
+      </table></div>
+      <div class="empty" id="inv-empty" hidden>Nichts gefunden.</div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------- Etiketten -->
+  <section class="page" id="page-labels">
+    <div class="grid cols2">
+      <div class="card">
+        <h2>Etikett anlegen</h2>
+        <form id="label-form">
+          <div class="form-grid">
+            <label class="field">Name*<input name="name" required></label>
+            <label class="field">Marke<input name="brand"></label>
+            <label class="field">Kategorie<select name="category" data-fill="categories"></select></label>
+            <label class="field">Sorte<input name="subcategory"></label>
+            <label class="field">Barcode<input name="barcode"></label>
+            <label class="field">MHD<input name="expiry_date" type="date"></label>
+            <label class="field">Menge<input name="quantity" type="number" step="0.1" value="1"></label>
+            <label class="field">Einheit
+              <select name="unit"><option value=""></option><option>St.</option><option>g</option><option>kg</option><option>ml</option><option>l</option></select>
+            </label>
+            <label class="field">Lagerort<select name="location" data-fill="locations"></select></label>
+            <label class="field">Anzahl Etiketten<input name="count" type="number" min="1" max="20" value="1"></label>
+          </div>
+          <div class="row" style="margin-top:14px">
+            <label class="row tight"><input type="checkbox" name="print" checked> drucken</label>
+            <button class="primary" type="submit">Anlegen</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Etikettenrolle</h2>
+        <div id="roll-state" class="muted">…</div>
+        <div class="row" style="margin-top:10px">
+          <input id="roll-size" type="number" min="0" placeholder="Etiketten pro Rolle" style="width:180px">
+          <button id="roll-set">Neue Rolle</button>
+          <button id="test-print" class="ghost">Testdruck</button>
+        </div>
+
+        <h3>Druckwarteschlange</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>#</th><th>Etikett</th><th>Status</th><th>Versuche</th></tr></thead>
+          <tbody id="print-queue"></tbody>
+        </table></div>
+        <div class="row" style="margin-top:10px">
+          <button id="queue-reload" class="sm ghost">Aktualisieren</button>
+          <button id="queue-clear" class="sm danger">Leeren</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------------------------- Vorlagen -->
+  <section class="page" id="page-templates">
+    <div class="card">
+      <div class="row">
+        <h2 style="margin:0;flex:1">Vorlagen</h2>
+        <button class="primary" id="tpl-new">Neue Vorlage</button>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th>Kategorie</th><th>MHD-Tage</th><th>Einheit</th><th>Marken</th><th>Sorten</th><th class="right">Aktion</th></tr></thead>
+        <tbody id="tpl-body"></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------ Stammdaten -->
+  <section class="page" id="page-catalog">
+    <div class="grid cols2">
+      <div class="card">
+        <div class="row"><h2 style="margin:0;flex:1">Kategorien</h2><button class="sm primary" id="cat-new">Neu</button></div>
+        <div class="table-wrap"><table><tbody id="cat-body"></tbody></table></div>
+      </div>
+      <div class="card">
+        <div class="row"><h2 style="margin:0;flex:1">Lagerorte</h2><button class="sm primary" id="loc-new">Neu</button></div>
+        <div class="table-wrap"><table><tbody id="loc-body"></tbody></table></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="row"><h2 style="margin:0;flex:1">Produkt-Cache</h2><input id="prod-q" placeholder="Suchen" style="width:220px"></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Barcode</th><th>Name</th><th>Marke</th><th>Kategorie</th><th>Menge</th><th>Quelle</th><th class="right">Aktion</th></tr></thead>
+        <tbody id="prod-body"></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- --------------------------------------------------------------- Einkauf -->
+  <section class="page" id="page-shopping">
+    <div class="card">
+      <form class="row" id="shop-form">
+        <input name="name" placeholder="Was fehlt?" required style="flex:1;min-width:200px">
+        <input name="quantity" type="number" step="0.1" value="1" style="width:90px">
+        <input name="unit" placeholder="Einheit" style="width:110px">
+        <button class="primary">Hinzufügen</button>
+      </form>
+    </div>
+    <div class="card" style="margin-top:14px"><div class="table-wrap"><table><tbody id="shop-body"></tbody></table></div></div>
+  </section>
+
+  <!-- ------------------------------------------------------------- Terminals -->
+  <section class="page" id="page-devices">
+    <div id="devices-list" class="grid cols2"></div>
+    <div class="card" style="margin-top:14px">
+      <h2>Scan simulieren</h2>
+      <p class="muted">Schickt einen Code in den Workflow eines Terminals – zum Testen ohne BLE-Scanner.</p>
+      <form class="row" id="sim-form">
+        <select id="sim-device"></select>
+        <input id="sim-code" placeholder="Barcode oder LEB000123" style="flex:1;min-width:200px">
+        <button class="primary">Senden</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- System -->
+  <section class="page" id="page-system">
+    <div class="grid cols2">
+      <div class="card"><h2>Server</h2><div id="sys-info" class="mono"></div></div>
+      <div class="card">
+        <h2>Einstellungen</h2>
+        <h3>Oberfläche</h3>
+        <div class="row">
+          <label class="field">Ablaufwarnung (Tage)<input id="set-expiring-days" type="number" min="1" max="90" style="width:110px"></label>
+          <button class="sm" id="set-ui-save">Speichern</button>
+        </div>
+        <h3>Terminal</h3>
+        <div class="row">
+          <label class="field">Helligkeit %<input id="set-brightness" type="number" min="5" max="100" style="width:110px"></label>
+          <label class="field">Ruhe nach (s)<input id="set-idle" type="number" min="0" max="3600" style="width:110px"></label>
+          <label class="row tight" style="align-self:end"><input id="set-beep" type="checkbox"> Ton</label>
+          <button class="sm" id="set-device-save">Speichern</button>
+        </div>
+        <h3>Drucker</h3>
+        <div class="row">
+          <label class="row tight"><input id="set-print-enabled" type="checkbox"> aktiv</label>
+          <label class="field">Zeichen/Zeile<input id="set-paper" type="number" min="24" max="64" style="width:110px"></label>
+          <label class="field">Nachschub (Dots)<input id="set-feed" type="number" min="0" max="500" style="width:120px"></label>
+          <label class="row tight"><input id="set-qr" type="checkbox"> QR</label>
+          <label class="row tight"><input id="set-c128" type="checkbox"> Code128</label>
+          <button class="sm" id="set-printer-save">Speichern</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="row">
+        <h2 style="margin:0;flex:1">Wartung</h2>
+        <a href="/api/export/json" download><button class="ghost">Sicherung laden</button></a>
+        <button id="notify-test" class="ghost">Benachrichtigung testen</button>
+        <button id="expiry-now" class="ghost">MHD-Bericht jetzt</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>Ereignisprotokoll</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Zeit</th><th>Typ</th><th>Etikett</th><th>Artikel</th><th>Gerät</th><th>Details</th></tr></thead>
+        <tbody id="sys-events"></tbody>
+      </table></div>
+    </div>
+  </section>
+
+</main>
+
+<dialog id="modal"><form method="dialog" id="modal-form">
+  <h2 id="modal-title"></h2>
+  <div class="form-grid" id="modal-body"></div>
+  <div class="dialog-actions">
+    <button value="cancel" class="ghost">Abbrechen</button>
+    <button value="ok" class="primary">Speichern</button>
+  </div>
+</form></dialog>
+
+<div id="toasts"></div>
+<script src="/static/js/app.js" type="module"></script>
+</body>
+</html>

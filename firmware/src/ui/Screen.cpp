@@ -1,0 +1,451 @@
+#include "Screen.h"
+
+#include "config.h"
+
+Screen screen;
+
+// Layoutraster fuer 480x320 im Querformat.
+static constexpr int16_t W = UI_WIDTH;
+static constexpr int16_t H = UI_HEIGHT;
+static constexpr int16_t STATUS_H = 26;
+static constexpr int16_t TITLE_H = 40;
+static constexpr int16_t FOOTER_H = 46;
+static constexpr int16_t BODY_Y = STATUS_H + TITLE_H;
+static constexpr int16_t BODY_H = H - BODY_Y - FOOTER_H;
+
+static constexpr uint16_t C_BG = 0x1082;      // #12171b
+static constexpr uint16_t C_SURFACE = 0x2124; // #1f2a24 -> dunkle Kachel
+static constexpr uint16_t C_TEXT = 0xEF7D;
+static constexpr uint16_t C_MUTED = 0x8410;
+static constexpr uint16_t C_PRIMARY = 0x1C7B;
+static constexpr uint16_t C_OK = 0x4C69;
+static constexpr uint16_t C_WARN = 0xFC40;
+static constexpr uint16_t C_DANGER = 0xE9E5;
+static constexpr uint16_t C_LINE = 0x31A6;
+
+void Screen::begin() {
+    _tft.init();
+    _tft.setRotation(1);            // Querformat
+    _tft.fillScreen(C_BG);
+
+    pinMode(LCD_BL, OUTPUT);
+    setBrightness(_brightness);
+
+    // Der Sprite liegt in PSRAM (TFT_eSPI nutzt bei CONFIG_SPIRAM_SUPPORT
+    // heap_caps_malloc). Alles wird hinein gezeichnet und in einem Rutsch
+    // ausgegeben - so gibt es kein Flackern und keine Teilbilder.
+    _spr.setColorDepth(16);
+    if (!_spr.createSprite(W, H)) {
+        log_e("Sprite konnte nicht angelegt werden - direktes Zeichnen");
+    }
+    _spr.setTextDatum(TL_DATUM);
+    _ready = true;
+}
+
+void Screen::setBrightness(uint8_t percent) {
+    _brightness = constrain(percent, 5, 100);
+    // Kanal 0, 5 kHz, 8 Bit. Ohne PWM waere nur an/aus moeglich.
+    ledcAttach(LCD_BL, 5000, 8);
+    ledcWrite(LCD_BL, map(_brightness, 0, 100, 0, 255));
+}
+
+// ---------------------------------------------------------------------------
+uint16_t Screen::parseColor(const char *hex, uint16_t fallback) {
+    if (!hex || hex[0] != '#' || strlen(hex) < 7) return fallback;
+    const long value = strtol(hex + 1, nullptr, 16);
+    const uint8_t r = (value >> 16) & 0xFF, g = (value >> 8) & 0xFF, b = value & 0xFF;
+    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+}
+
+void Screen::apply(JsonDocument &doc) {
+    _screen.clear();
+    _screen.set(doc);
+    _screenId = _screen["id"] | 0;
+    _kind = String(_screen["kind"] | "message");
+    _scroll = 0;
+
+    if (_kind == "date") {
+        _dateValue = String(_screen["value"] | "");
+    } else if (_kind == "number") {
+        _numberValue = _screen["value"] | 1.0f;
+    }
+    redraw();
+}
+
+void Screen::toast(const String &text, const String &level) {
+    _toastText = text;
+    _toastLevel = level;
+    _toastUntil = millis() + 2500;
+    redraw();
+}
+
+void Screen::setBanner(const String &text) {
+    if (_banner == text) return;
+    _banner = text;
+    redraw();
+}
+
+void Screen::showBoot(const String &line1, const String &line2) {
+    _spr.fillSprite(C_BG);
+    _spr.setTextColor(C_TEXT, C_BG);
+    _spr.setTextDatum(MC_DATUM);
+    _spr.setTextFont(4);
+    _spr.drawString(line1, W / 2, H / 2 - 16);
+    _spr.setTextFont(2);
+    _spr.setTextColor(C_MUTED, C_BG);
+    _spr.drawString(line2, W / 2, H / 2 + 18);
+    _spr.setTextDatum(TL_DATUM);
+    commit();
+}
+
+void Screen::loop() {
+    if (_toastUntil && millis() > _toastUntil) {
+        _toastUntil = 0;
+        _toastText = "";
+        redraw();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Zeichnen
+// ---------------------------------------------------------------------------
+void Screen::redraw() {
+    if (!_ready) return;
+    _hits.clear();
+    _spr.fillSprite(C_BG);
+
+    drawStatusBar();
+    drawTitle();
+
+    if (_kind == "tiles") drawTiles();
+    else if (_kind == "list") drawList();
+    else if (_kind == "date") drawDate();
+    else if (_kind == "number") drawNumber();
+    else drawMessage();
+
+    drawFooter();
+    if (_toastUntil) drawToast();
+    commit();
+}
+
+void Screen::commit() {
+    if (_spr.created()) _spr.pushSprite(0, 0);
+}
+
+void Screen::addHit(int16_t x, int16_t y, int16_t w, int16_t h, const String &id, bool isInput) {
+    _hits.push_back({x, y, w, h, id, isInput});
+}
+
+void Screen::drawStatusBar() {
+    _spr.fillRect(0, 0, W, STATUS_H, C_SURFACE);
+    _spr.setTextFont(2);
+
+    JsonObject status = _screen["status"].as<JsonObject>();
+    const bool removeMode = status["mode"] == "remove";
+    const char *location = status["location"] | "";
+
+    _spr.setTextColor(removeMode ? C_DANGER : C_OK, C_SURFACE);
+    _spr.drawString(removeMode ? "AUSLAGERN" : "EINLAGERN", 8, 5);
+
+    _spr.setTextColor(C_MUTED, C_SURFACE);
+    _spr.drawString(location, 116, 5);
+
+    // Rechts: Scanner-Akku und Verbindungspunkt.
+    const int battery = status["battery"] | -1;
+    if (battery >= 0) {
+        char buf[12];
+        snprintf(buf, sizeof(buf), "%d%%", battery);
+        _spr.setTextColor(battery < 10 ? C_DANGER : C_MUTED, C_SURFACE);
+        _spr.drawString(buf, W - 74, 5);
+    }
+    const bool scanner = status["scanner"] | false;
+    _spr.fillCircle(W - 22, STATUS_H / 2, 5, scanner ? C_OK : C_DANGER);
+
+    if (!_banner.isEmpty()) {
+        _spr.fillRect(0, STATUS_H, W, 18, C_WARN);
+        _spr.setTextColor(TFT_BLACK, C_WARN);
+        _spr.drawString(_banner, 8, STATUS_H + 1);
+    }
+}
+
+void Screen::drawTitle() {
+    const int16_t y = STATUS_H + (_banner.isEmpty() ? 0 : 18);
+    _spr.setTextFont(4);
+    _spr.setTextColor(C_TEXT, C_BG);
+    _spr.drawString(String(_screen["title"] | ""), 10, y + 2);
+
+    const char *subtitle = _screen["subtitle"] | "";
+    if (subtitle[0]) {
+        _spr.setTextFont(2);
+        _spr.setTextColor(C_MUTED, C_BG);
+        _spr.drawString(subtitle, 10, y + 26);
+    }
+}
+
+void Screen::tile(int16_t x, int16_t y, int16_t w, int16_t h, const String &label,
+                  const String &sub, uint16_t color, const String &id) {
+    _spr.fillRoundRect(x, y, w, h, 8, color);
+    _spr.setTextDatum(MC_DATUM);
+    _spr.setTextFont(4);
+    _spr.setTextColor(TFT_WHITE, color);
+    _spr.drawString(label, x + w / 2, y + h / 2 - (sub.isEmpty() ? 0 : 10));
+    if (!sub.isEmpty()) {
+        _spr.setTextFont(2);
+        _spr.drawString(sub, x + w / 2, y + h / 2 + 14);
+    }
+    _spr.setTextDatum(TL_DATUM);
+    addHit(x, y, w, h, id);
+}
+
+void Screen::button(int16_t x, int16_t y, int16_t w, int16_t h, const String &label,
+                    uint16_t bg, const String &id) {
+    _spr.fillRoundRect(x, y, w, h, 6, bg);
+    _spr.setTextDatum(MC_DATUM);
+    _spr.setTextFont(2);
+    _spr.setTextColor(TFT_WHITE, bg);
+    _spr.drawString(label, x + w / 2, y + h / 2);
+    _spr.setTextDatum(TL_DATUM);
+    addHit(x, y, w, h, id);
+}
+
+void Screen::drawTiles() {
+    JsonArray items = _screen["items"].as<JsonArray>();
+    const int count = items.size();
+    if (count == 0) return;
+
+    const int cols = count <= 4 ? 2 : 3;
+    const int rows = (count + cols - 1) / cols;
+    const int16_t gap = 8;
+    const int16_t w = (W - gap * (cols + 1)) / cols;
+    const int16_t h = min<int16_t>((BODY_H - gap * (rows + 1)) / rows, 92);
+
+    int index = 0;
+    for (JsonObject item : items) {
+        const int row = index / cols, col = index % cols;
+        tile(gap + col * (w + gap), BODY_Y + gap + row * (h + gap), w, h,
+             String(item["label"] | ""), String(item["sub"] | ""),
+             parseColor(item["color"] | "", C_PRIMARY), String(item["id"] | ""));
+        index++;
+    }
+}
+
+void Screen::drawList() {
+    JsonArray items = _screen["items"].as<JsonArray>();
+    const int total = items.size();
+    const int16_t rowH = 44;
+    _pageSize = BODY_H / rowH;
+
+    if (_scroll > max(0, total - _pageSize)) _scroll = max(0, total - _pageSize);
+
+    for (int i = 0; i < _pageSize && (_scroll + i) < total; i++) {
+        JsonObject item = items[_scroll + i];
+        const int16_t y = BODY_Y + i * rowH;
+        const uint16_t color = parseColor(item["color"] | "", C_PRIMARY);
+
+        _spr.fillRoundRect(8, y + 2, W - 16 - (total > _pageSize ? 34 : 0), rowH - 6, 6, C_SURFACE);
+        _spr.fillRoundRect(8, y + 2, 5, rowH - 6, 3, color);
+
+        _spr.setTextFont(4);
+        _spr.setTextColor(C_TEXT, C_SURFACE);
+        _spr.drawString(String(item["label"] | ""), 22, y + 5);
+
+        const char *sub = item["sub"] | "";
+        if (sub[0]) {
+            _spr.setTextFont(2);
+            _spr.setTextColor(C_MUTED, C_SURFACE);
+            _spr.drawString(sub, 22, y + 24);
+        }
+        addHit(8, y, W - 16, rowH - 4, String(item["id"] | ""));
+    }
+
+    // Bildlaufleiste als zwei grosse Flaechen - fuer Finger, nicht fuer Maeuse.
+    if (total > _pageSize) {
+        button(W - 32, BODY_Y, 26, BODY_H / 2 - 3, "^", C_SURFACE, "__up");
+        button(W - 32, BODY_Y + BODY_H / 2 + 3, 26, BODY_H / 2 - 3, "v", C_SURFACE, "__down");
+    }
+}
+
+String Screen::shiftDate(const String &iso, int days, int months) const {
+    struct tm tm {};
+    if (iso.length() == 10) {
+        tm.tm_year = iso.substring(0, 4).toInt() - 1900;
+        tm.tm_mon  = iso.substring(5, 7).toInt() - 1;
+        tm.tm_mday = iso.substring(8, 10).toInt();
+    } else {
+        const time_t now = time(nullptr);
+        localtime_r(&now, &tm);
+    }
+    tm.tm_mday += days;
+    tm.tm_mon  += months;
+    tm.tm_hour = 12;   // Mittag: schuetzt vor Sommerzeit-Sprüngen um Mitternacht
+    const time_t stamp = mktime(&tm);
+    struct tm out {};
+    localtime_r(&stamp, &out);
+
+    char buf[11];
+    strftime(buf, sizeof(buf), "%Y-%m-%d", &out);
+    return String(buf);
+}
+
+void Screen::drawDate() {
+    // Grosse Datumsanzeige
+    _spr.setTextDatum(MC_DATUM);
+    _spr.setTextFont(6);
+    _spr.setTextColor(C_TEXT, C_BG);
+    String shown = "--.--.----";
+    if (_dateValue.length() == 10) {
+        shown = _dateValue.substring(8, 10) + "." + _dateValue.substring(5, 7) + "." +
+                _dateValue.substring(0, 4);
+    }
+    _spr.drawString(shown, W / 2, BODY_Y + 26);
+    _spr.setTextDatum(TL_DATUM);
+
+    // Schrittweisen: Tag und Monat
+    const int16_t y = BODY_Y + 56;
+    button(10, y, 68, 34, "-1 Mon", C_SURFACE, "__m-");
+    button(84, y, 60, 34, "-1 Tag", C_SURFACE, "__d-");
+    button(W - 144, y, 60, 34, "+1 Tag", C_SURFACE, "__d+");
+    button(W - 78, y, 68, 34, "+1 Mon", C_SURFACE, "__m+");
+
+    // Voreinstellungen des Servers
+    JsonArray presets = _screen["meta"]["presets"].as<JsonArray>();
+    int index = 0;
+    const int16_t py = y + 42;
+    const int16_t pw = (W - 20 - 5 * 6) / 6;
+    for (JsonObject preset : presets) {
+        if (index >= 6) break;
+        button(10 + index * (pw + 6), py, pw, 32, String(preset["label"] | ""),
+               C_PRIMARY, String(preset["id"] | ""));
+        index++;
+    }
+}
+
+void Screen::drawNumber() {
+    _spr.setTextDatum(MC_DATUM);
+    _spr.setTextFont(7);
+    _spr.setTextColor(C_TEXT, C_BG);
+    char buf[16];
+    if (_numberValue == (long)_numberValue) snprintf(buf, sizeof(buf), "%ld", (long)_numberValue);
+    else snprintf(buf, sizeof(buf), "%.1f", _numberValue);
+    _spr.drawString(buf, W / 2, BODY_Y + 40);
+
+    _spr.setTextFont(2);
+    _spr.setTextColor(C_MUTED, C_BG);
+    _spr.drawString(String(_screen["meta"]["unit"] | ""), W / 2, BODY_Y + 78);
+    _spr.setTextDatum(TL_DATUM);
+
+    const float step = _screen["meta"]["step"] | 1.0f;
+    const int16_t y = BODY_Y + 94;
+    button(14, y, 78, 40, "-" + String(step * 10, step < 1 ? 1 : 0), C_SURFACE, "__n--");
+    button(100, y, 78, 40, "-" + String(step, step < 1 ? 1 : 0), C_SURFACE, "__n-");
+    button(W - 178, y, 78, 40, "+" + String(step, step < 1 ? 1 : 0), C_SURFACE, "__n+");
+    button(W - 92, y, 78, 40, "+" + String(step * 10, step < 1 ? 1 : 0), C_SURFACE, "__n++");
+}
+
+void Screen::drawMessage() {
+    JsonArray lines = _screen["lines"].as<JsonArray>();
+    int16_t y = BODY_Y + 6;
+    _spr.setTextFont(4);
+    _spr.setTextColor(C_TEXT, C_BG);
+    for (JsonVariant line : lines) {
+        _spr.drawString(String(line.as<const char *>()), 12, y);
+        y += 26;
+        if (y > BODY_Y + BODY_H - 24) break;
+    }
+
+    // Bei message-Bildschirmen sind items grosse Bestaetigungskacheln.
+    JsonArray items = _screen["items"].as<JsonArray>();
+    if (!items.isNull() && items.size() > 0) {
+        const int count = items.size();
+        const int16_t w = (W - 10 * (count + 1)) / count;
+        int index = 0;
+        for (JsonObject item : items) {
+            tile(10 + index * (w + 10), BODY_Y + BODY_H - 58, w, 52,
+                 String(item["label"] | ""), String(item["sub"] | ""),
+                 parseColor(item["color"] | "", C_PRIMARY), String(item["id"] | ""));
+            index++;
+        }
+    }
+}
+
+void Screen::drawFooter() {
+    JsonArray buttons = _screen["buttons"].as<JsonArray>();
+    if (buttons.isNull() || buttons.size() == 0) return;
+
+    const int count = buttons.size();
+    const int16_t y = H - FOOTER_H + 5;
+    const int16_t w = (W - 10 * (count + 1)) / count;
+    int index = 0;
+    for (JsonObject item : buttons) {
+        const String style = String(item["style"] | "ghost");
+        const uint16_t bg = style == "primary" ? C_PRIMARY
+                          : style == "danger"  ? C_DANGER
+                                               : C_SURFACE;
+        button(10 + index * (w + 10), y, w, FOOTER_H - 12, String(item["label"] | ""),
+               bg, String(item["id"] | ""));
+        index++;
+    }
+}
+
+void Screen::drawToast() {
+    const uint16_t bg = _toastLevel == "error"   ? C_DANGER
+                      : _toastLevel == "warn"    ? C_WARN
+                      : _toastLevel == "success" ? C_OK
+                                                 : C_PRIMARY;
+    const int16_t h = 40;
+    _spr.fillRoundRect(20, H - FOOTER_H - h - 6, W - 40, h, 8, bg);
+    _spr.setTextDatum(MC_DATUM);
+    _spr.setTextFont(4);
+    _spr.setTextColor(TFT_WHITE, bg);
+    _spr.drawString(_toastText, W / 2, H - FOOTER_H - h / 2 - 6);
+    _spr.setTextDatum(TL_DATUM);
+}
+
+// ---------------------------------------------------------------------------
+// Beruehrung
+// ---------------------------------------------------------------------------
+Action Screen::handleTouch(int16_t x, int16_t y) {
+    Action action;
+    for (const Hit &hit : _hits) {
+        if (x < hit.x || x > hit.x + hit.w || y < hit.y || y > hit.y + hit.h) continue;
+
+        const String &id = hit.id;
+
+        // Lokal behandelte Elemente veraendern nur die Anzeige und erzeugen
+        // keinen Netzverkehr. Erst "OK" schickt den Wert an den Server.
+        if (id == "__up") { _scroll = max(0, _scroll - _pageSize); redraw(); return action; }
+        if (id == "__down") { _scroll += _pageSize; redraw(); return action; }
+
+        if (id == "__d-") { _dateValue = shiftDate(_dateValue, -1, 0); redraw(); return action; }
+        if (id == "__d+") { _dateValue = shiftDate(_dateValue, 1, 0); redraw(); return action; }
+        if (id == "__m-") { _dateValue = shiftDate(_dateValue, 0, -1); redraw(); return action; }
+        if (id == "__m+") { _dateValue = shiftDate(_dateValue, 0, 1); redraw(); return action; }
+
+        if (id.startsWith("__n")) {
+            const float step = _screen["meta"]["step"] | 1.0f;
+            const float lo = _screen["meta"]["min"] | 0.0f;
+            const float hi = _screen["meta"]["max"] | 9999.0f;
+            if (id == "__n-")  _numberValue -= step;
+            if (id == "__n+")  _numberValue += step;
+            if (id == "__n--") _numberValue -= step * 10;
+            if (id == "__n++") _numberValue += step * 10;
+            _numberValue = constrain(_numberValue, lo, hi);
+            redraw();
+            return action;
+        }
+
+        // "OK" auf einem Eingabebildschirm schickt zuerst den Wert, damit der
+        // Server ihn kennt, bevor er den Tipp auswertet.
+        if (id == "ok" && (_kind == "date" || _kind == "number")) {
+            action.type = ActionType::Input;
+            action.value = _kind == "date" ? _dateValue : String(_numberValue, 2);
+            action.id = id;
+            return action;
+        }
+
+        action.type = ActionType::Tap;
+        action.id = id;
+        return action;
+    }
+    return action;
+}

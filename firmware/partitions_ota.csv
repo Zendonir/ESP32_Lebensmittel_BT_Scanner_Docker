@@ -1,0 +1,13 @@
+# Partitionstabelle 16 MB - schlanke Terminal-Firmware
+#
+# Gegenueber dem Vorgaengerprojekt entfaellt die 1-MB-spiffs-Partition fuer
+# Web-Dateien und die 2,25-MB-userdata-Partition fuer Inventar-JSON: beides
+# liegt jetzt im Server. Der Platz geht an die App-Slots, damit ein OTA nie
+# an Groesse scheitert.
+#
+# Name,     Type, SubType,  Offset,   Size
+nvs,        data, nvs,      0x9000,   0x5000
+otadata,    data, ota,      0xe000,   0x2000
+app0,       app,  ota_0,    0x10000,  0x780000
+app1,       app,  ota_1,    0x790000, 0x780000
+coredump,   data, coredump, 0xf10000, 0x10000

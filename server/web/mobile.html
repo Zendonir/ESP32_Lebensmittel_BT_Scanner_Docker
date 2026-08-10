@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#1e88e5">
+  <title>Vorrat</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <style>
+    body { padding-bottom: calc(62px + env(safe-area-inset-bottom)); }
+
+    header.m {
+      position: sticky; top: 0; z-index: 20;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 10px 14px calc(10px);
+      display: flex; gap: 10px; align-items: center;
+    }
+    header.m h1 { font-size: 16px; margin: 0; flex: 1; }
+
+    .list { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+
+    /* Wischen zum Auslagern: die sichtbare Karte liegt ueber dem Aktionsfeld
+       und wird nach links geschoben. Ohne eigenen Stacking-Kontext scheint der
+       Knopf sonst durch - genau der Fehler aus dem ersten Projekt. */
+    .swipe { position: relative; overflow: hidden; border-radius: var(--radius); }
+    .swipe-action {
+      position: absolute; inset: 0; display: flex; justify-content: flex-end; align-items: center;
+      padding-right: 20px; background: var(--danger); color: #fff; font-weight: 600;
+    }
+    .swipe-inner {
+      position: relative; z-index: 1;
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 12px 14px; transition: transform .16s ease-out; touch-action: pan-y;
+    }
+    .swipe-inner .t { font-weight: 600; }
+    .swipe-inner .s { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+    nav.bottom {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      background: var(--surface); border-top: 1px solid var(--border);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    nav.bottom button {
+      border: 0; background: none; color: var(--muted);
+      padding: 10px 4px; font-size: 11px; border-radius: 0;
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+    }
+    nav.bottom button .ico { font-size: 19px; line-height: 1; }
+    nav.bottom button.active { color: var(--primary); }
+
+    #scanview { padding: 12px; }
+    #cam { width: 100%; border-radius: var(--radius); background: #000; aspect-ratio: 4/3; object-fit: cover; }
+  </style>
+</head>
+<body>
+
+<header class="m">
+  <h1 id="m-title">Inventar</h1>
+  <span class="pill" id="m-count">–</span>
+</header>
+
+<div id="m-view"></div>
+
+<nav class="bottom" id="m-nav">
+  <button data-view="inv" class="active"><span class="ico">📦</span>Inventar</button>
+  <button data-view="exp"><span class="ico">⏰</span>Ablaufend</button>
+  <button data-view="scan"><span class="ico">📷</span>Scan</button>
+  <button data-view="shop"><span class="ico">🛒</span>Einkauf</button>
+</nav>
+
+<div id="toasts"></div>
+<script type="module">
+import { get, post, del, put, toast, fmtDate, daysPill, esc, liveConnect } from '/static/js/api.js';
+
+const view = document.getElementById('m-view');
+const title = document.getElementById('m-title');
+const count = document.getElementById('m-count');
+let current = 'inv';
+
+const TITLES = { inv: 'Inventar', exp: 'Ablaufend', scan: 'Scannen', shop: 'Einkauf' };
+
+document.getElementById('m-nav').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('button[data-view]');
+  if (!btn) return;
+  [...document.querySelectorAll('#m-nav button')].forEach((b) => b.classList.toggle('active', b === btn));
+  current = btn.dataset.view;
+  title.textContent = TITLES[current];
+  render();
+});
+
+async function render() {
+  stopCamera();
+  try {
+    if (current === 'inv') await renderList('/api/inventory?limit=300&sort=expiry');
+    else if (current === 'exp') await renderList('/api/inventory?expiring=true&limit=200');
+    else if (current === 'scan') renderScan();
+    else await renderShopping();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function renderList(url) {
+  const rows = await get(url);
+  count.textContent = rows.length;
+  view.innerHTML = `<div class="list">${rows.map((i) => `
+    <div class="swipe" data-label="${esc(i.label)}">
+      <div class="swipe-action">auslagern</div>
+      <div class="swipe-inner">
+        <div class="t">${esc(i.name)}</div>
+        <div class="s">${esc(i.brand || i.subcategory || '')}</div>
+        <div class="s">${fmtDate(i.expiry_date)} ${daysPill(i.days_left)} · ${esc(i.location)}</div>
+        <div class="s mono">${esc(i.label)}</div>
+      </div>
+    </div>`).join('') || '<div class="empty">Nichts vorhanden.</div>'}</div>`;
+  attachSwipe();
+}
+
+// Wischgeste: nur horizontal, ab 90 px wird ausgelagert. Vertikales Scrollen
+// bleibt dem Browser ueberlassen (touch-action: pan-y).
+function attachSwipe() {
+  view.querySelectorAll('.swipe').forEach((card) => {
+    const inner = card.querySelector('.swipe-inner');
+    let startX = 0, startY = 0, dx = 0, locked = null;
+
+    inner.addEventListener('touchstart', (e) => {
+      startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+      dx = 0; locked = null; inner.style.transition = 'none';
+    }, { passive: true });
+
+    inner.addEventListener('touchmove', (e) => {
+      const cx = e.touches[0].clientX - startX;
+      const cy = e.touches[0].clientY - startY;
+      if (locked === null) locked = Math.abs(cx) > Math.abs(cy) ? 'x' : 'y';
+      if (locked !== 'x') return;
+      dx = Math.min(0, cx);
+      inner.style.transform = `translateX(${dx}px)`;
+    }, { passive: true });
+
+    inner.addEventListener('touchend', async () => {
+      inner.style.transition = '';
+      if (dx < -90) {
+        inner.style.transform = 'translateX(-100%)';
+        try {
+          await post('/api/inventory/remove', { label: card.dataset.label, reason: 'mobile' });
+          toast('Ausgelagert', 'success');
+          card.remove();
+          count.textContent = view.querySelectorAll('.swipe').length;
+        } catch (e) { toast(e.message, 'error'); inner.style.transform = ''; }
+      } else {
+        inner.style.transform = '';
+      }
+    });
+  });
+}
+
+// -------------------------------------------------------------------- Scannen
+let stream = null, detectTimer = null;
+
+function renderScan() {
+  count.textContent = '';
+  const supported = 'BarcodeDetector' in window;
+  view.innerHTML = `<div id="scanview">
+    ${supported ? '<video id="cam" playsinline muted autoplay></video>' :
+      '<div class="card">Die Kamera-Erkennung wird von diesem Browser nicht unterstützt. Code bitte eintippen.</div>'}
+    <form class="row" id="manual" style="margin-top:12px">
+      <input id="code" placeholder="Barcode / LEB000123" style="flex:1" inputmode="text">
+      <button class="primary">Senden</button>
+    </form>
+    <p class="muted" style="margin-top:10px">
+      Der Code läuft durch denselben Ablauf wie am Terminal: eigenes Etikett = auslagern,
+      Produkt-Barcode = einlagern.</p>
+    <div id="scanresult"></div></div>`;
+
+  document.getElementById('manual').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const code = document.getElementById('code').value.trim();
+    if (code) { await sendScan(code); document.getElementById('code').value = ''; }
+  });
+
+  if (supported) startCamera();
+}
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    const cam = document.getElementById('cam');
+    cam.srcObject = stream;
+    const detector = new BarcodeDetector({
+      formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code'],
+    });
+    let last = '', lastAt = 0;
+    detectTimer = setInterval(async () => {
+      try {
+        const codes = await detector.detect(cam);
+        if (!codes.length) return;
+        const value = codes[0].rawValue;
+        // Entprellen: die Kamera liefert denselben Code 10x pro Sekunde.
+        if (value === last && Date.now() - lastAt < 3000) return;
+        last = value; lastAt = Date.now();
+        navigator.vibrate?.(60);
+        await sendScan(value);
+      } catch { /* Einzelbild ohne Treffer */ }
+    }, 350);
+  } catch (e) {
+    toast(`Kamera nicht verfügbar: ${e.message}`, 'warn');
+  }
+}
+
+function stopCamera() {
+  if (detectTimer) { clearInterval(detectTimer); detectTimer = null; }
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+}
+
+async function sendScan(code) {
+  try {
+    const res = await post('/api/inventory/scan', { code });
+    const box = document.getElementById('scanresult');
+    if (res.routed_to) {
+      toast(`An ${res.routed_to} gesendet`, 'success');
+    } else if (res.product) {
+      toast(res.product.name || 'Produkt unbekannt');
+      if (box) box.innerHTML = `<div class="card" style="margin-top:12px">
+        <b>${esc(res.product.name || 'Unbekannt')}</b><div class="muted">${esc(res.product.brand)}</div>
+        <div class="mono muted">${esc(res.product.barcode)}</div></div>`;
+    } else {
+      toast('Kein Terminal online, Produkt unbekannt', 'warn');
+    }
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// -------------------------------------------------------------------- Einkauf
+async function renderShopping() {
+  const rows = await get('/api/shopping');
+  count.textContent = rows.filter((r) => !r.done).length;
+  view.innerHTML = `<div class="list">
+    <form class="row" id="add"><input name="name" placeholder="Was fehlt?" style="flex:1" required>
+      <button class="primary">+</button></form>
+    ${rows.map((s) => `<div class="swipe-inner" style="display:flex;gap:10px;align-items:center">
+      <input type="checkbox" data-done="${s.id}" ${s.done ? 'checked' : ''}>
+      <span style="flex:1;${s.done ? 'text-decoration:line-through;opacity:.55' : ''}">${esc(s.name)}
+        <span class="muted">${s.quantity} ${esc(s.unit)}</span></span>
+      <button class="sm danger" data-del="${s.id}">×</button></div>`).join('')}
+  </div>`;
+
+  document.getElementById('add').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const name = new FormData(ev.target).get('name');
+    await post('/api/shopping', { name, quantity: 1, unit: '', note: '', done: false });
+    renderShopping();
+  });
+
+  view.querySelectorAll('[data-done]').forEach((cb) => cb.addEventListener('change', async () => {
+    const item = rows.find((r) => r.id === +cb.dataset.done);
+    await put(`/api/shopping/${item.id}`, { ...item, done: cb.checked });
+    renderShopping();
+  }));
+
+  view.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+    await del(`/api/shopping/${b.dataset.del}`);
+    renderShopping();
+  }));
+}
+
+liveConnect((msg) => {
+  if ((msg.event === 'inventory' && (current === 'inv' || current === 'exp')) ||
+      (msg.event === 'shopping' && current === 'shop')) render();
+}, () => {});
+
+render();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+</script>
+</body>
+</html>
