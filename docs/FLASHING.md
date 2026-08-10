@@ -1,8 +1,70 @@
-# Firmware bauen und flashen (VS Code)
+# Firmware installieren und bauen
 
 Zielgerät: **Waveshare ESP32-S3-Touch-LCD-3.5** (N16R8, 16 MB Flash, PSRAM).
 
+Es gibt zwei Wege. Wer nur ein Gerät in Betrieb nehmen will, braucht die
+Entwicklungsumgebung nicht.
+
 ---
+
+## Weg A: Ohne Entwicklungsumgebung
+
+GitHub baut die Firmware und stellt sie fertig bereit – es muss nichts
+übersetzt werden.
+
+### Im Browser
+
+**https://zendonir.github.io/ESP32_Lebensmittel_BT_Scanner_Docker/**
+
+Board per USB-Datenkabel anschließen, auf *Terminal flashen* klicken, Port
+auswählen, fertig. Voraussetzung ist **Chrome, Edge oder Opera am Rechner** –
+Firefox, Safari und Mobilbrowser können kein WebSerial.
+
+*Erase device* nur beim ersten Mal ankreuzen. Ohne Löschen bleiben WLAN-Zugang,
+Server-Adresse und Token erhalten – praktisch beim Aktualisieren.
+
+### Mit einem eigenen Werkzeug
+
+Unter [Releases](https://github.com/Zendonir/ESP32_Lebensmittel_BT_Scanner_Docker/releases)
+liegen die fertigen Dateien. Die zusammengefasste genügt:
+
+```bash
+esptool.py --chip esp32s3 write_flash 0x0 firmware.factory.bin
+```
+
+Für das *Espressif Flash Download Tool* einzeln:
+
+| Datei | Offset |
+|---|---|
+| `bootloader.bin` | `0x0` |
+| `partitions.bin` | `0x8000` |
+| `firmware.bin` | `0x10000` |
+
+`firmware.bin` allein ist außerdem das Abbild für ein OTA-Update.
+Prüfsummen stehen in `SHA256SUMS.txt`.
+
+### Ein Release erzeugen
+
+Die Dateien entstehen, sobald ein Tag geschoben wird:
+
+```bash
+git tag v2.0.0
+git push origin v2.0.0
+```
+
+Der Workflow `firmware-release.yml` baut, hängt die Dateien an ein
+GitHub-Release und veröffentlicht die Installer-Seite. Für einen Testlauf ohne
+Tag: Actions → *Firmware veröffentlichen* → *Run workflow* (baut und
+aktualisiert die Seite, legt aber kein Release an).
+
+> Einmalig nötig: **Settings → Pages → Source** auf *GitHub Actions* stellen.
+> Sonst schlägt der Pages-Auftrag fehl.
+
+---
+
+## Weg B: Mit VS Code
+
+Nötig, sobald am Quelltext etwas geändert werden soll.
 
 ## 1. Einmalige Einrichtung
 

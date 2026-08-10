@@ -1,0 +1,187 @@
+name: Firmware veroeffentlichen
+
+# Baut die Firmware und stellt sie so bereit, dass sie ohne Entwicklungs-
+# umgebung installierbar ist:
+#   * GitHub Release mit firmware.factory.bin (alles ab Offset 0)
+#   * Browser-Installer auf GitHub Pages (ESP Web Tools, WebSerial)
+#
+# Auslesen: ein Tag "v2.0.0" pushen, oder den Workflow von Hand starten.
+#
+# Einmalige Voraussetzung: Settings -> Pages -> Source auf "GitHub Actions"
+# stellen. Ohne das schlaegt der Pages-Auftrag fehl.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versionsbezeichnung fuer einen Testlauf ohne Tag"
+        required: false
+        default: "dev"
+
+permissions:
+  contents: write   # Release anlegen
+  pages: write      # Pages veroeffentlichen
+  id-token: write   # von deploy-pages verlangt
+
+concurrency:
+  group: firmware-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Bauen
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # scripts/version.py liest den Git-Stand
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: PlatformIO installieren
+        run: pip install platformio
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-${{ hashFiles('firmware/platformio.ini') }}
+
+      - name: Version bestimmen
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ inputs.version }}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Firmware bauen
+        working-directory: firmware
+        run: pio run
+
+      - name: Dateien einsammeln
+        run: |
+          mkdir -p dist
+          B=firmware/.pio/build/terminal
+          cp "$B/firmware.factory.bin" dist/
+          cp "$B/firmware.bin"         dist/
+          cp "$B/bootloader.bin"       dist/
+          cp "$B/partitions.bin"       dist/
+          ls -la dist
+
+      - name: Pruefsummen
+        working-directory: dist
+        run: sha256sum *.bin | tee SHA256SUMS.txt
+
+      # Der Installer im Browser laedt genau dieses Manifest. Ein Teil bei
+      # Offset 0 - firmware.factory.bin enthaelt Bootloader, Partitionstabelle
+      # und Anwendung bereits zusammengefasst.
+      - name: Manifest fuer den Browser-Installer schreiben
+        run: |
+          cat > dist/manifest.json <<JSON
+          {
+            "name": "Lebensmittel-Terminal",
+            "version": "${{ steps.version.outputs.value }}",
+            "home_assistant_domain": null,
+            "new_install_prompt_erase": true,
+            "builds": [
+              {
+                "chipFamily": "ESP32-S3",
+                "parts": [
+                  { "path": "firmware.factory.bin", "offset": 0 }
+                ]
+              }
+            ]
+          }
+          JSON
+          python -c "import json;json.load(open('dist/manifest.json'));print('Manifest gueltig')"
+
+      - name: Installer-Seite zusammenstellen
+        run: |
+          mkdir -p site
+          cp firmware/web-installer/index.html site/
+          cp dist/firmware.factory.bin dist/manifest.json site/
+          # Jekyll wuerde Dateien mit Unterstrich verschlucken.
+          touch site/.nojekyll
+          ls -la site
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ steps.version.outputs.value }}
+          path: dist/
+          if-no-files-found: error
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  release:
+    name: Release anlegen
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Release veroeffentlichen
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            ## Firmware ${{ needs.build.outputs.version }}
+
+            ### Im Browser installieren
+
+            Chrome, Edge oder Opera am Rechner:
+            **https://zendonir.github.io/ESP32_Lebensmittel_BT_Scanner_Docker/**
+
+            ### Von Hand flashen
+
+            Die zusammengefasste Datei genuegt:
+
+            ```
+            esptool.py --chip esp32s3 write_flash 0x0 firmware.factory.bin
+            ```
+
+            Einzeln, etwa fuer das Espressif Flash Download Tool:
+
+            | Datei | Offset |
+            |---|---|
+            | `bootloader.bin` | `0x0` |
+            | `partitions.bin` | `0x8000` |
+            | `firmware.bin` | `0x10000` |
+
+            Pruefsummen stehen in `SHA256SUMS.txt`.
+
+            ### Danach
+
+            Das Geraet oeffnet den Zugangspunkt `Lebensmittel-Terminal`
+            (Passwort `12345678`). Unter http://192.168.4.1 WLAN, Server-Adresse
+            und `DEVICE_TOKEN` eintragen.
+
+  pages:
+    name: Installer-Seite veroeffentlichen
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

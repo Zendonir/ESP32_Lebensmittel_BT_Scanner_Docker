@@ -84,7 +84,13 @@ unter [`deploy/truenas/`](deploy/truenas/), die Schritte dazu in
 
 ### 2. Terminal
 
-In VS Code: **Datei → Arbeitsbereich aus Datei öffnen…** →
+Am schnellsten ohne Entwicklungsumgebung: Board anstecken und im Browser
+(Chrome/Edge) auf
+**[zendonir.github.io/ESP32_Lebensmittel_BT_Scanner_Docker](https://zendonir.github.io/ESP32_Lebensmittel_BT_Scanner_Docker/)**
+flashen. Fertige `.bin`-Dateien für `esptool.py` oder das Espressif-Tool
+liegen bei jedem [Release](https://github.com/Zendonir/ESP32_Lebensmittel_BT_Scanner_Docker/releases).
+
+Zum Weiterentwickeln in VS Code: **Datei → Arbeitsbereich aus Datei öffnen…** →
 `lebensmittel-scanner.code-workspace`, dann der Upload-Pfeil in der
 PlatformIO-Leiste. Wichtig ist die Arbeitsbereichsdatei – öffnet man das
 Repo-Wurzelverzeichnis, findet PlatformIO die `platformio.ini` unter

@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lebensmittel-Terminal flashen</title>
+
+<!-- ESP Web Tools spricht ueber WebSerial direkt mit dem Chip. Braucht
+     zwingend HTTPS (GitHub Pages liefert das) und Chrome/Edge/Opera -
+     Firefox und Safari haben kein WebSerial. -->
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js"></script>
+
+<style>
+  :root {
+    --bg: #f4f6f8; --surface: #fff; --border: #d7dde2;
+    --text: #1b2227; --muted: #6b7a85; --primary: #1e88e5; --warn: #fb8c00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12171b; --surface: #1a2126; --border: #2e3941;
+      --text: #e6edf3; --muted: #93a3ae;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px; background: var(--bg); color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 680px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 17px; margin: 32px 0 10px; }
+  p.lead { color: var(--muted); margin: 0 0 28px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px; margin-bottom: 18px;
+  }
+  .flash { text-align: center; }
+  .version { font-size: 13px; color: var(--muted); margin-top: 12px; }
+  .note {
+    border-left: 3px solid var(--warn); padding: 2px 0 2px 14px;
+    color: var(--muted); font-size: 14.5px; margin: 16px 0;
+  }
+  ol, ul { padding-left: 22px; }
+  li { margin: 6px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 5px; padding: 1px 5px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  a { color: var(--primary); }
+  footer { color: var(--muted); font-size: 13.5px; margin-top: 34px; text-align: center; }
+  esp-web-install-button[install-unsupported] { display: none; }
+  .unsupported {
+    display: none; color: var(--warn); font-weight: 600;
+  }
+  esp-web-install-button[install-unsupported] + .unsupported { display: block; }
+</style>
+</head>
+<body>
+<main>
+
+  <h1>Lebensmittel-Terminal</h1>
+  <p class="lead">
+    Firmware direkt aus dem Browser auf den ESP32-S3 spielen – ohne VS Code,
+    ohne PlatformIO, ohne Toolchain.
+  </p>
+
+  <div class="card flash">
+    <esp-web-install-button manifest="manifest.json">
+      <button slot="activate" style="
+        font: inherit; font-weight: 600; padding: 13px 30px; border: 0;
+        border-radius: 9px; background: var(--primary); color: #fff; cursor: pointer;">
+        Terminal flashen
+      </button>
+      <span slot="unsupported"></span>
+      <span slot="not-allowed"></span>
+    </esp-web-install-button>
+
+    <p class="unsupported">
+      Dieser Browser kann keine seriellen Geräte ansprechen.
+      Bitte Chrome, Edge oder Opera am Rechner verwenden – Firefox, Safari
+      und Mobilbrowser unterstützen WebSerial nicht.
+    </p>
+
+    <div class="version" id="version">…</div>
+  </div>
+
+  <h2>Ablauf</h2>
+  <ol>
+    <li>Board per <strong>USB-Datenkabel</strong> anschließen. Viele Kabel
+      führen nur Strom – dann erscheint kein Gerät zur Auswahl.</li>
+    <li>Auf <em>Terminal flashen</em> klicken und den seriellen Port auswählen.</li>
+    <li><strong>Erase device</strong> nur beim ersten Mal oder wenn ein
+      früherer Stand vollständig weg soll. Ohne Löschen bleiben WLAN-Zugang,
+      Server-Adresse und Token erhalten.</li>
+    <li>Nach etwa einer Minute Reset drücken – das Gerät startet mit der
+      neuen Firmware.</li>
+  </ol>
+
+  <p class="note">
+    Meldet der Browser <em>Failed to initialize</em> oder wird kein Port
+    angeboten: Board von Hand in den Download-Modus bringen – <strong>BOOT</strong>
+    halten, kurz <strong>RESET</strong> drücken, <strong>BOOT</strong> loslassen,
+    dann erneut versuchen.
+  </p>
+
+  <h2>Danach: einrichten</h2>
+  <p>
+    Nach dem ersten Start öffnet das Gerät den WLAN-Zugangspunkt
+    <code>Lebensmittel-Terminal</code> (Passwort <code>12345678</code>).
+    Damit verbinden, <a href="http://192.168.4.1">192.168.4.1</a> aufrufen und
+    eintragen:
+  </p>
+  <ul>
+    <li>WLAN-Name und -Passwort – <strong>2,4 GHz</strong>, der ESP32 kann kein 5 GHz</li>
+    <li>Server: IP des Docker-Hosts, ohne <code>http://</code> und ohne Pfad</li>
+    <li>Port: wie in der Compose-Datei, Standard <code>8080</code></li>
+    <li>Token: das <code>DEVICE_TOKEN</code> aus der <code>.env</code></li>
+  </ul>
+  <p>
+    Das Portal lässt sich jederzeit erneut öffnen: <strong>BOOT</strong> halten
+    und das Gerät einschalten.
+  </p>
+
+  <h2>Lieber ein anderes Werkzeug?</h2>
+  <p>
+    Die Dateien jedes Releases lassen sich auch mit dem
+    <em>Espressif Flash Download Tool</em> oder <code>esptool.py</code>
+    schreiben. Am einfachsten ist die zusammengefasste Datei:
+  </p>
+  <table>
+    <thead><tr><th>Datei</th><th>Offset</th><th>Zweck</th></tr></thead>
+    <tbody>
+      <tr><td><code>firmware.factory.bin</code></td><td><code>0x0</code></td><td>alles in einem – diese genügt</td></tr>
+      <tr><td><code>bootloader.bin</code></td><td><code>0x0</code></td><td rowspan="3">einzeln, falls gewünscht</td></tr>
+      <tr><td><code>partitions.bin</code></td><td><code>0x8000</code></td></tr>
+      <tr><td><code>firmware.bin</code></td><td><code>0x10000</code></td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:14px">
+    <code>esptool.py --chip esp32s3 write_flash 0x0 firmware.factory.bin</code>
+  </p>
+
+  <footer>
+    <a id="repo" href="https://github.com/Zendonir/ESP32_Lebensmittel_BT_Scanner_Docker">Quelltext und Dokumentation</a>
+  </footer>
+
+</main>
+
+<script>
+  // Version aus dem Manifest anzeigen, damit die Seite nicht bei jedem
+  // Release von Hand angefasst werden muss.
+  fetch('manifest.json')
+    .then((r) => r.json())
+    .then((m) => {
+      document.getElementById('version').textContent =
+        `Version ${m.version} · ESP32-S3 · Waveshare Touch-LCD 3.5`;
+    })
+    .catch(() => {
+      document.getElementById('version').textContent =
+        'Manifest nicht gefunden – wurde schon ein Release gebaut?';
+    });
+</script>
+</body>
+</html>
