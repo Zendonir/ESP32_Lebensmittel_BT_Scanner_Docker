@@ -5,12 +5,19 @@
 Buzzer buzzer;
 
 void Buzzer::begin() {
+    // BUZZER_PIN < 0 bedeutet: kein Piezo bestueckt. Dann darf hier auch
+    // nichts angefasst werden - ein LEDC-Kanal auf einem Pin, der zum PSRAM
+    // gehoert, zerlegt den Heap (siehe Hinweis in config.h).
+    if (BUZZER_PIN < 0) {
+        _enabled = false;
+        return;
+    }
     ledcAttach(BUZZER_PIN, 2000, 10);
     ledcWriteTone(BUZZER_PIN, 0);
 }
 
 void Buzzer::play(const String &pattern) {
-    if (!_enabled) return;
+    if (!_enabled || BUZZER_PIN < 0) return;
 
     _count = 0;
     auto add = [&](uint16_t hz, uint16_t ms) {
@@ -35,7 +42,7 @@ void Buzzer::play(const String &pattern) {
 }
 
 void Buzzer::loop() {
-    if (!_active) return;
+    if (!_active || BUZZER_PIN < 0) return;
     if ((int32_t)(millis() - _nextAt) < 0) return;
 
     if (_index >= _count) {

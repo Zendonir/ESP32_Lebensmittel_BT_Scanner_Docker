@@ -12,6 +12,11 @@ static Preferences prefs;
 static const char *NS = "terminal";
 
 void Settings::begin() {
+    // Einmal schreibend oeffnen legt den Namespace an. Sonst meldet
+    // Preferences beim ersten Start "nvs_open failed: NOT_FOUND" - harmlos,
+    // aber es sieht im Log nach einem Fehler aus.
+    if (prefs.begin(NS, false)) prefs.end();
+
     prefs.begin(NS, true);
     wifiSsid   = prefs.getString("ssid", "");
     wifiPass   = prefs.getString("pass", "");

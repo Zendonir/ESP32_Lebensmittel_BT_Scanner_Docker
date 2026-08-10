@@ -7,7 +7,8 @@
 Touch touch;
 
 bool Touch::begin() {
-    Wire.begin(TOUCH_SDA, TOUCH_SCL, I2C_FREQ);
+    // Wire wurde bereits in Board::begin() gestartet - dort muss der Bus
+    // stehen, bevor der Expander den Display-Reset loesen kann.
     Wire.beginTransmission(TOUCH_ADDR);
     _ok = Wire.endTransmission() == 0;
     if (!_ok) log_e("FT6336 nicht gefunden (0x%02X)", TOUCH_ADDR);
@@ -31,7 +32,7 @@ bool Touch::read(int16_t &x, int16_t &y) {
     // Panel ist hochkant verbaut, gezeichnet wird quer (Rotation 1):
     // x_ui = y_raw, y_ui = Panelbreite - x_raw.
     x = constrain(py, 0, UI_WIDTH - 1);
-    y = constrain(PANEL_WIDTH - px, 0, UI_HEIGHT - 1);
+    y = constrain(PANEL_WIDTH - 1 - px, 0, UI_HEIGHT - 1);
     return true;
 }
 

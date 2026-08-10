@@ -15,6 +15,7 @@
 #include <esp_task_wdt.h>
 
 #include "config.h"
+#include "core/Board.h"
 #include "core/Net.h"
 #include "core/Settings.h"
 #include "printer/Printer.h"
@@ -123,6 +124,12 @@ void setup() {
     Serial.begin(115200);
     delay(150);
     logResetReason();
+
+    // Zwingend als Erstes: auf diesem Board haengen die Reset-Leitungen von
+    // Display und Touchcontroller am TCA9554-Portexpander, nicht an einem GPIO.
+    // Ohne diesen Schritt zeigt der ST7796 Rauschen und der FT6336 meldet sich
+    // gar nicht erst auf dem I2C-Bus.
+    board.begin();
 
     screen.begin();
     screen.showBoot("Lebensmittel-Terminal", FIRMWARE_VERSION);

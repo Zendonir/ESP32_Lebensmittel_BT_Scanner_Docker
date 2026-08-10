@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "config.h"
+
 // Quittungstoene ueber einen passiven Piezo an BUZZER_PIN.
 //
 // Nicht blockierend: `play()` legt eine kurze Tonfolge ab, `loop()` schaltet
@@ -14,7 +16,7 @@ public:
 
     // pattern: ok | error | warn | scan | print
     void play(const String &pattern);
-    void setEnabled(bool enabled) { _enabled = enabled; }
+    void setEnabled(bool enabled) { _enabled = enabled && (BUZZER_PIN >= 0); }
 
 private:
     struct Tone { uint16_t hz; uint16_t ms; };

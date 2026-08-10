@@ -37,10 +37,22 @@
 #define PRINTER_BAUD 9600
 
 // ---- Signalton -------------------------------------------------------------
-// Passiver Piezo an einem der freien GPIOs. Der ES8311-Codec des Boards braucht
-// I2S + Expander-Freigabe fuer den Verstaerker; fuer Quittungstoene ist das
-// unverhaeltnismaessig viel Code und Fehlerflaeche.
-#define BUZZER_PIN 35
+// Standardmaessig AUS (-1). Das Board hat keinen Piezo; die Toene wuerden ueber
+// den ES8311-Codec laufen, was I2S und die Verstaerkerfreigabe am Expander
+// braucht - dafuer ist die Quittung zu wenig wert.
+//
+// ACHTUNG bei der Wahl eines eigenen Pins: auf dem N16R8-Modul (octal PSRAM,
+// board_build.arduino.memory_type = qio_opi) sind **GPIO 33-37 vom PSRAM
+// belegt**. Wer dort etwas anschliesst, zerstoert die PSRAM-Anbindung; das
+// aeussert sich nicht als Pin-Fehler, sondern als
+//   assert failed: block_locate_free ... (block_size(block) >= *size)
+// beim naechsten groesseren malloc - also als scheinbar zusammenhangloser
+// Absturz. Die Bezeichnung "FREE_GPIO_1..3" fuer 35/36/37 im Vorgaengerprojekt
+// war irrefuehrend; benutzt wurden sie dort nie.
+//
+// Wirklich frei sind auf diesem Board z.B. GPIO 17, 18 oder 21 - vor dem
+// Anschluss trotzdem den Schaltplan pruefen.
+#define BUZZER_PIN -1
 
 // ---- Bedienung -------------------------------------------------------------
 #define BOOT_BTN 0
