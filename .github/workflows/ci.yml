@@ -76,5 +76,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: firmware
-          path: firmware/.pio/build/terminal/firmware.bin
+          path: |
+            firmware/.pio/build/terminal-35/firmware.bin
+            firmware/.pio/build/terminal-35b/firmware.bin
           if-no-files-found: error
