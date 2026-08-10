@@ -80,7 +80,7 @@ void BLEScanner::begin() {
     _mutex = xSemaphoreCreateMutex();
 
     NimBLEDevice::init("Lebensmittel-Terminal");
-    NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+    NimBLEDevice::setPower(9);   // dBm - NimBLE 2.x nimmt keine esp_power_level_t mehr
     NimBLEDevice::setSecurityAuth(true, false, true);   // Bonding, kein MITM
     NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
 

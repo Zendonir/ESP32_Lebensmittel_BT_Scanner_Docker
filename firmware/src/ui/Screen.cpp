@@ -21,14 +21,16 @@ static constexpr uint16_t C_PRIMARY = 0x1C7B;
 static constexpr uint16_t C_OK = 0x4C69;
 static constexpr uint16_t C_WARN = 0xFC40;
 static constexpr uint16_t C_DANGER = 0xE9E5;
-static constexpr uint16_t C_LINE = 0x31A6;
 
 void Screen::begin() {
     _tft.init();
     _tft.setRotation(1);            // Querformat
     _tft.fillScreen(C_BG);
 
-    pinMode(LCD_BL, OUTPUT);
+    // PWM einmalig einrichten; setBrightness() schreibt danach nur noch den
+    // Tastgrad. Ein erneutes ledcAttach() bei jeder Einstellungsaenderung
+    // laesst die Hintergrundbeleuchtung kurz flackern.
+    ledcAttach(LCD_BL, 5000, 8);
     setBrightness(_brightness);
 
     // Der Sprite liegt in PSRAM (TFT_eSPI nutzt bei CONFIG_SPIRAM_SUPPORT
@@ -44,8 +46,6 @@ void Screen::begin() {
 
 void Screen::setBrightness(uint8_t percent) {
     _brightness = constrain(percent, 5, 100);
-    // Kanal 0, 5 kHz, 8 Bit. Ohne PWM waere nur an/aus moeglich.
-    ledcAttach(LCD_BL, 5000, 8);
     ledcWrite(LCD_BL, map(_brightness, 0, 100, 0, 255));
 }
 

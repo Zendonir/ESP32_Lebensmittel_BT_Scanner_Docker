@@ -2,6 +2,7 @@
 
 #include <Preferences.h>
 #include <WiFi.h>
+#include <esp_mac.h>   // esp_read_mac() - nicht ueber Arduino.h eingebunden
 
 #include "config.h"
 

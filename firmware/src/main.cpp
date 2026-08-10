@@ -11,6 +11,7 @@
 // ============================================================================
 
 #include <Arduino.h>
+#include <esp_system.h>    // esp_reset_reason()
 #include <esp_task_wdt.h>
 
 #include "config.h"

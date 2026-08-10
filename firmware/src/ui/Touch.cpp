@@ -18,7 +18,7 @@ bool Touch::read(int16_t &x, int16_t &y) {
     Wire.beginTransmission(TOUCH_ADDR);
     Wire.write(0x02);                       // Registeranfang: Anzahl Beruehrungen
     if (Wire.endTransmission(false) != 0) return false;
-    if (Wire.requestFrom(TOUCH_ADDR, (uint8_t)5) != 5) return false;
+    if (Wire.requestFrom((uint8_t)TOUCH_ADDR, (uint8_t)5) != 5) return false;
 
     const uint8_t points = Wire.read() & 0x0F;
     const uint8_t xh = Wire.read(), xl = Wire.read();
