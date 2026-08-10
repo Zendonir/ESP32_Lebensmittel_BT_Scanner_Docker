@@ -10,8 +10,9 @@ import os
 import platform
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +29,7 @@ from ..schemas import (
     ShoppingIn,
     ShoppingOut,
 )
+from ..services import importer as importer_service
 from ..services import inventory as inv
 from ..services import notify, settings_store
 from ..services.dates import to_display
@@ -265,6 +267,52 @@ async def export_csv(
         iter([buffer.getvalue()]),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="inventar.csv"'},
+    )
+
+
+class ImportResult(BaseModel):
+    imported: int
+    skipped_duplicate: int
+    skipped_invalid: int
+    total_rows: int
+    errors: list[str]
+    dry_run: bool
+
+
+@router.post("/import/v1", response_model=ImportResult)
+async def import_v1(
+    file: UploadFile,
+    dry_run: bool = Query(
+        False, description="Nur pruefen, nichts in die Datenbank schreiben"
+    ),
+    session: AsyncSession = Depends(get_session),
+):
+    """Bestand aus Version 1 uebernehmen.
+
+    Erwartet eine CSV wie sie `SELECT * FROM current_inventory` liefert -
+    Spalten label_barcode, barcode, name, brand, category, expiry_date,
+    added_date, quantity, household. Etiketten mit bereits vorhandenem
+    label_barcode werden uebersprungen, ein wiederholter Import nach einem
+    Abbruch ist damit gefahrlos.
+    """
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(400, "Bitte eine .csv-Datei hochladen")
+
+    content = await file.read()
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(413, "Datei zu groß (Grenze 20 MB)")
+
+    result = await importer_service.import_csv(session, content, dry_run=dry_run)
+    if not dry_run and result.imported:
+        await hub.notify_ui("inventory")
+
+    return ImportResult(
+        imported=result.imported,
+        skipped_duplicate=result.skipped_duplicate,
+        skipped_invalid=result.skipped_invalid,
+        total_rows=result.total_rows,
+        errors=result.errors[:50],
+        dry_run=dry_run,
     )
 
 

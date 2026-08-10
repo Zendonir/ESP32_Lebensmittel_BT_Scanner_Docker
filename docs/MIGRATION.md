@@ -74,36 +74,53 @@ Nicht alles war neu zu erfinden. Bewusst übernommen:
 
 ## Daten aus Version 1 übernehmen
 
-Version 1 speicherte den Bestand als Event-Strom in der MySQL-Tabelle
-`inventory_events`. Der aktuelle Stand lässt sich daraus mit dem damaligen View
-`current_inventory` ziehen und über die REST-API einspielen:
+Es gibt eine eingebaute Importfunktion (`POST /api/import/v1`,
+`app/services/importer.py`), die genau die Spalten des alten
+`current_inventory`-Views nimmt.
+
+### Export aus der alten Datenbank
 
 ```bash
-mysql -N -B -e "SELECT label_barcode,barcode,name,brand,category,expiry_date,
-                       added_date,quantity,household
-                FROM Lebensmittel_Scanner.current_inventory" \
-| while IFS=$'\t' read -r label barcode name brand cat mhd added qty haushalt; do
-    curl -s -X POST http://localhost:8080/api/labels \
-      -H 'Content-Type: application/json' \
-      -d "$(jq -n --arg n "$name" --arg b "$brand" --arg c "$cat" \
-                  --arg bc "$barcode" --arg e "$mhd" --argjson q "${qty:-1}" \
-            '{name:$n, brand:$b, category:$c, barcode:$bc, expiry_date:$e,
-              quantity:$q, count:1, print:false}')" > /dev/null
-  done
+mysql -B -e "SELECT label_barcode,barcode,name,brand,category,expiry_date,
+                    added_date,quantity,household
+             FROM Lebensmittel_Scanner.current_inventory" \
+  > export.csv
 ```
 
-Zwei Hinweise dazu:
+(`-B` liefert Tab-getrennte Ausgabe mit Kopfzeile - der Importer erkennt
+Komma, Semikolon und Tabulator automatisch.)
 
-* **Die Etikettennummern ändern sich.** Der Server vergibt neue, fortlaufende
-  Nummern; die alten Aufkleber im Schrank passen danach nicht mehr. Wer den
-  Bestand übernehmen will, druckt entweder neu (`"print": true`) oder trägt die
-  alten Nummern direkt in die Datenbank ein. Sauberer ist, den Zähler einmalig
-  über den vorhandenen Höchstwert zu setzen und die alten Zeilen per SQL zu
-  importieren.
-* **MHD-Werte lagen gemischt als `YYYY-MM-DD` und `DD.MM.YYYY` vor.** Die API
-  normalisiert beides beim Import (`app/services/dates.py`), der Import muss
-  also nichts umrechnen.
+### Einspielen
 
-Vorlagen, Kategorien und Lagerorte lagen in Version 1 als JSON auf LittleFS.
-Sie sind schneller im Web-Interface neu angelegt als exportiert – und die
-Erstbefüllung bringt einen brauchbaren Satz bereits mit.
+Im Web-Interface unter **System → Bestand aus Version 1 übernehmen** die Datei
+hochladen. „Nur prüfen" ist voreingestellt und zeigt, wie viele Zeilen erkannt
+würden, ohne etwas zu schreiben - danach den Haken entfernen und erneut
+hochladen.
+
+Per Kommandozeile:
+
+```bash
+curl -X POST "http://localhost:8080/api/import/v1?dry_run=true" \
+  -F "file=@export.csv"
+```
+
+### Was dabei passiert
+
+* **Etikettennummern bleiben erhalten.** Anders als beim Anlegen über
+  `/api/labels` vergibt der Import keine neuen Nummern, sondern übernimmt
+  `label_barcode` unverändert - die Aufkleber im Schrank passen danach
+  weiterhin. Der interne Zähler wird anschließend über den höchsten
+  importierten Wert gesetzt, damit neu angelegte Etiketten nicht kollidieren.
+* **Doppelter Import ist gefahrlos.** Eine Etikettennummer, die schon in der
+  Datenbank steht, wird übersprungen statt dupliziert - bricht der Import ab,
+  einfach dieselbe Datei erneut hochladen.
+* **MHD-Werte** waren in Version 1 gemischt als `YYYY-MM-DD` und
+  `DD.MM.YYYY` gespeichert; beide Formen werden normalisiert
+  (`app/services/dates.py`).
+* **Zeilen ohne Etikettennummer** (z.B. unvollständige alte Exporte) bekommen
+  eine aus Name, Barcode und Eingangsdatum abgeleitete Ersatznummer
+  (`IMPORT########`) - stabil genug, um auch hier Duplikate zu erkennen.
+* **Nicht übernommen** werden Vorlagen, Kategorien und Lagerorte - die legt
+  man im Web-Interface schneller neu an, als sie aus der alten Struktur
+  eindeutig zuzuordnen. Die Erstbefüllung (`services/seed.py`) liefert dafür
+  ohnehin einen brauchbaren Ausgangssatz.

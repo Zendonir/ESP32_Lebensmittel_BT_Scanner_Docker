@@ -535,6 +535,43 @@ $('#notify-test').addEventListener('click', async () => {
   catch (e) { toast(e.message, 'error'); }
 });
 
+$('#import-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const file = $('#import-file').files[0];
+  if (!file) return;
+  const dryRun = $('#import-dry-run').checked;
+
+  const body = new FormData();
+  body.append('file', file);
+  const box = $('#import-result');
+  box.innerHTML = '<span class="muted">Wird verarbeitet…</span>';
+
+  try {
+    const res = await fetch(`/api/import/v1?dry_run=${dryRun}`, { method: 'POST', body });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Fehler');
+
+    box.innerHTML = `
+      <div class="row">
+        <span class="pill ${dryRun ? '' : 'ok'}">${dryRun ? 'Prüflauf' : 'Importiert'}</span>
+        <span>${data.imported} von ${data.total_rows} Zeilen</span>
+        ${data.skipped_duplicate ? `<span class="pill">${data.skipped_duplicate} Duplikate übersprungen</span>` : ''}
+        ${data.skipped_invalid ? `<span class="pill warn">${data.skipped_invalid} ungültig</span>` : ''}
+      </div>
+      ${data.errors.length ? `<ul class="muted" style="margin:8px 0 0;padding-left:18px">${
+        data.errors.map((e) => `<li>${esc(e)}</li>`).join('')
+      }</ul>` : ''}`;
+
+    if (!dryRun && data.imported) {
+      toast(`${data.imported} Artikel übernommen`, 'success');
+      await Promise.all([loadInventory().catch(() => {}), loadDashboard().catch(() => {})]);
+    }
+  } catch (e) {
+    box.innerHTML = '';
+    toast(e.message, 'error');
+  }
+});
+
 // ------------------------------------------------------------------- Dialoge
 function modal(title, fields) {
   const dlg = $('#modal');
