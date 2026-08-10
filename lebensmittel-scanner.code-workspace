@@ -1,0 +1,67 @@
+{
+  // VS-Code-Arbeitsbereich fuer das Gesamtprojekt.
+  //
+  // Der Ordner "firmware" ist bewusst ein eigener Wurzelordner: PlatformIO
+  // sucht die platformio.ini immer direkt in einem Wurzelordner des
+  // Arbeitsbereichs. Waere nur das Repo-Wurzelverzeichnis geoeffnet, wuerde
+  // die Erweiterung das Projekt nicht finden - kein Build-Knopf, kein Upload.
+  //
+  // Oeffnen mit: Datei -> Arbeitsbereich aus Datei oeffnen…
+  "folders": [
+    {
+      "name": "Firmware (PlatformIO)",
+      "path": "firmware"
+    },
+    {
+      "name": "Projekt (Server, Doku, Deployment)",
+      "path": "."
+    }
+  ],
+
+  "settings": {
+    // Im Projekt-Wurzelordner ausblenden, was schon als eigener Ordner oben
+    // steht - sonst taucht die Firmware doppelt in der Baumansicht auf.
+    "files.exclude": {
+      "firmware": true,
+      "**/__pycache__": true,
+      "**/.pytest_cache": true,
+      "**/.ruff_cache": true
+    },
+
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "editor.rulers": [88],
+
+    // Firmware
+    "C_Cpp.default.cppStandard": "c++17",
+    "platformio-ide.autoRebuildAutocompleteIndex": true,
+    // Der Fortschrittsbalken von pio schreibt Steuerzeichen; ohne dies
+    // steht die Ausgabe voll mit Muell.
+    "terminal.integrated.scrollback": 5000,
+
+    // Server
+    "python.defaultInterpreterPath": "${workspaceFolder:Projekt (Server, Doku, Deployment)}/.venv/bin/python",
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": ["server/tests"],
+    "[python]": {
+      "editor.defaultFormatter": "charliermarsh.ruff",
+      "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit"
+      }
+    }
+  },
+
+  "extensions": {
+    "recommendations": [
+      "platformio.platformio-ide",
+      "ms-python.python",
+      "charliermarsh.ruff"
+    ],
+    // Die Arduino-Erweiterung von Microsoft kollidiert mit PlatformIO
+    // (beide beanspruchen die serielle Schnittstelle und die IntelliSense-
+    // Konfiguration).
+    "unwantedRecommendations": [
+      "vsciot-vscode.vscode-arduino"
+    ]
+  }
+}

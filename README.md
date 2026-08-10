@@ -84,6 +84,14 @@ unter [`deploy/truenas/`](deploy/truenas/), die Schritte dazu in
 
 ### 2. Terminal
 
+In VS Code: **Datei → Arbeitsbereich aus Datei öffnen…** →
+`lebensmittel-scanner.code-workspace`, dann der Upload-Pfeil in der
+PlatformIO-Leiste. Wichtig ist die Arbeitsbereichsdatei – öffnet man das
+Repo-Wurzelverzeichnis, findet PlatformIO die `platformio.ini` unter
+`firmware/` nicht. Einzelheiten und Fehlerbilder: [docs/FLASHING.md](docs/FLASHING.md).
+
+Auf der Kommandozeile:
+
 ```bash
 cd firmware
 pio run --target upload
@@ -186,4 +194,5 @@ Weitere Unterlagen:
 [Architektur](docs/ARCHITECTURE.md) ·
 [Geräteprotokoll](docs/PROTOCOL.md) ·
 [Migration aus Version 1](docs/MIGRATION.md) ·
-[Installation auf TrueNAS](docs/TRUENAS.md)
+[Installation auf TrueNAS](docs/TRUENAS.md) ·
+[Firmware flashen](docs/FLASHING.md)

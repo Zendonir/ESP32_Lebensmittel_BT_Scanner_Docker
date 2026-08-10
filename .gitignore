@@ -13,7 +13,15 @@ __pycache__/
 
 # PlatformIO
 firmware/.pio/
-firmware/.vscode/
+
+# Von PlatformIO erzeugt - nicht einchecken. Die eingecheckten
+# VS-Code-Dateien (extensions.json, *.code-workspace) bleiben davon
+# unberuehrt.
+firmware/.vscode/c_cpp_properties.json
+firmware/.vscode/launch.json
+firmware/.vscode/ipch/
+firmware/.vscode/.browse.*
+firmware/.vscode/extensions.json
 
 # Werkzeuge
 .DS_Store
