@@ -5,10 +5,10 @@
 #define FIRMWARE_VERSION "dev"
 #endif
 
-// ============================================================================
-// Waveshare ESP32-S3-Touch-LCD-3.5 - Pinbelegung
-// Uebernommen aus dem Vorgaengerprojekt; die Werte sind am Geraet verifiziert.
-// ============================================================================
+// Exakt eines der beiden PlatformIO-Ziele muss die Boardvariante setzen.
+#if !defined(BOARD_WAVESHARE_35) && !defined(BOARD_WAVESHARE_35B)
+#error "Boardvariante fehlt: terminal-35 oder terminal-35b bauen"
+#endif
 
 // ---- Display (ST7796, SPI) -------------------------------------------------
 // LCD_CS haengt nicht an einem direkten GPIO, LCD_RST am TCA9554-Expander.
@@ -18,7 +18,17 @@
 #define LCD_DC   3
 #define LCD_CLK  5
 #define LCD_BL   6
-#define LCD_RST  4
+
+#if defined(BOARD_WAVESHARE_35B)
+// 3.5B: AXS15231B ueber QSPI (Herstellerbeispiel 08_gfx_helloworld).
+#define LCD_QSPI_CS  12
+#define LCD_QSPI_CLK 5
+#define LCD_QSPI_D0  1
+#define LCD_QSPI_D1  2
+#define LCD_QSPI_D2  3
+#define LCD_QSPI_D3  4
+#endif
+#define LCD_RST -1
 
 #define PANEL_WIDTH   320  // native Aufloesung (Hochformat)
 #define PANEL_HEIGHT  480
@@ -29,7 +39,11 @@
 // Der Touch-Interrupt laeuft ueber EXIO2 des Expanders, wird also gepollt.
 #define TOUCH_SDA  8
 #define TOUCH_SCL  7
+#if defined(BOARD_WAVESHARE_35B)
+#define TOUCH_ADDR 0x3B
+#else
 #define TOUCH_ADDR 0x38
+#endif
 #define I2C_FREQ   400000
 
 // ---- Drucker (ESC/POS ueber UART) ------------------------------------------
