@@ -1,23 +1,26 @@
 #include "Buzzer.h"
 
+#include "Audio.h"
 #include "config.h"
 
 Buzzer buzzer;
 
+// Die Toene gehen ueber den ES8311-Codec (siehe Audio) - das Board hat keinen
+// Piezo. BUZZER_PIN bleibt als Ausweichweg bestehen, falls doch einmal einer
+// angeloetet wird; standardmaessig ist er -1 und damit aus.
 void Buzzer::begin() {
-    // BUZZER_PIN < 0 bedeutet: kein Piezo bestueckt. Dann darf hier auch
-    // nichts angefasst werden - ein LEDC-Kanal auf einem Pin, der zum PSRAM
-    // gehoert, zerlegt den Heap (siehe Hinweis in config.h).
-    if (BUZZER_PIN < 0) {
-        _enabled = false;
+    const bool haveCodec = audio.begin();
+
+    if (!haveCodec && BUZZER_PIN >= 0) {
+        ledcAttach(BUZZER_PIN, 2000, 10);
+        ledcWriteTone(BUZZER_PIN, 0);
         return;
     }
-    ledcAttach(BUZZER_PIN, 2000, 10);
-    ledcWriteTone(BUZZER_PIN, 0);
+    if (!haveCodec) _enabled = false;
 }
 
 void Buzzer::play(const String &pattern) {
-    if (!_enabled || BUZZER_PIN < 0) return;
+    if (!_enabled) return;
 
     _count = 0;
     auto add = [&](uint16_t hz, uint16_t ms) {
@@ -42,17 +45,27 @@ void Buzzer::play(const String &pattern) {
 }
 
 void Buzzer::loop() {
-    if (!_active || BUZZER_PIN < 0) return;
+    // Der Codec will in jedem Durchlauf bedient werden, auch wenn gerade keine
+    // Tonfolge laeuft - er blendet danach noch die Endstufe ab.
+    audio.loop();
+
+    if (!_active) return;
     if ((int32_t)(millis() - _nextAt) < 0) return;
 
     if (_index >= _count) {
-        ledcWriteTone(BUZZER_PIN, 0);
+        if (BUZZER_PIN >= 0 && !audio.available()) ledcWriteTone(BUZZER_PIN, 0);
         _active = false;
         return;
     }
 
     const Tone &tone = _tones[_index];
-    ledcWriteTone(BUZZER_PIN, tone.hz);
+    if (audio.available()) {
+        // Eine Pause ist ein Ton mit 0 Hz - da wird schlicht nichts erzeugt,
+        // die Laufzeit steuert weiterhin _nextAt.
+        audio.playTone(tone.hz, tone.ms);
+    } else if (BUZZER_PIN >= 0) {
+        ledcWriteTone(BUZZER_PIN, tone.hz);
+    }
     _nextAt = millis() + tone.ms;
     _index++;
 }

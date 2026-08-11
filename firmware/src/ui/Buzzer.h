@@ -4,7 +4,8 @@
 
 #include "config.h"
 
-// Quittungstoene ueber einen passiven Piezo an BUZZER_PIN.
+// Quittungstoene. Ausgegeben werden sie ueber den ES8311-Codec (Audio);
+// ein Piezo an BUZZER_PIN dient nur noch als Ausweichweg.
 //
 // Nicht blockierend: `play()` legt eine kurze Tonfolge ab, `loop()` schaltet
 // sie weiter. Ein `delay()` im Hauptloop wuerde die Bedienung traege machen
@@ -16,7 +17,7 @@ public:
 
     // pattern: ok | error | warn | scan | print
     void play(const String &pattern);
-    void setEnabled(bool enabled) { _enabled = enabled && (BUZZER_PIN >= 0); }
+    void setEnabled(bool enabled) { _enabled = enabled; }
 
 private:
     struct Tone { uint16_t hz; uint16_t ms; };

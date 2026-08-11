@@ -22,9 +22,8 @@ public:
     bool expanderFound() const { return _expanderOk; }
     TwoWire &i2c() { return Wire; }
 
-    // Lautsprecherverstaerker (EXIO7). Der ES8311-Codec wird derzeit nicht
-    // benutzt; die Leitung wird beim Start einmal freigegeben, damit ein
-    // spaeterer Ausbau nichts nachziehen muss.
+    // Lautsprecherverstaerker (EXIO7). Audio schaltet ihn zum Ton ein und kurz
+    // danach wieder aus - dauerhaft an rauscht der Lautsprecher leise.
     void setAmplifier(bool on);
 
 private:

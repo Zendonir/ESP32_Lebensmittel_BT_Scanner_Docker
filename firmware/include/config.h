@@ -59,10 +59,36 @@
 #define PRINTER_RX   43
 #define PRINTER_BAUD 9600
 
+// ---- Ton (ES8311-Codec ueber I2S) ------------------------------------------
+// Das Board hat keinen Piezo. Toene laufen ueber den ES8311-Audiocodec
+// (I2C 0x18), dessen Spannungsschienen der AXP2101 (I2C 0x34) liefert und
+// dessen Endstufe am TCA9554 haengt (EXIO7, siehe Board::setAmplifier).
+//
+// AUDIO_ENABLED 0 schaltet den ganzen Zweig ab; die Firmware laeuft dann
+// unveraendert, nur eben stumm.
+#if defined(BOARD_WAVESHARE_35B)
+// Fuer die 3.5B ist die Belegung nicht gesichert. GPIO12 - im Datenblatt der
+// 3.5 der I2S-Takt - ist hier die Display-Auswahlleitung LCD_QSPI_CS. Geraten
+// wird hier nichts: ein falscher Pin am QSPI-Display kostet die Anzeige.
+// Sobald die Belegung feststeht, hier eintragen und AUDIO_ENABLED auf 1.
+#define AUDIO_ENABLED 0
+#define I2S_MCLK -1
+#define I2S_BCLK -1
+#define I2S_LRCK -1
+#define I2S_DOUT -1
+#else
+#define AUDIO_ENABLED 1
+#define I2S_MCLK 12
+#define I2S_BCLK 13
+#define I2S_LRCK 15
+#define I2S_DOUT 16
+#endif
+
 // ---- Signalton -------------------------------------------------------------
-// Standardmaessig AUS (-1). Das Board hat keinen Piezo; die Toene wuerden ueber
-// den ES8311-Codec laufen, was I2S und die Verstaerkerfreigabe am Expander
-// braucht - dafuer ist die Quittung zu wenig wert.
+// Ausweichweg fuer einen nachtraeglich angeloeteten Piezo. Standardmaessig AUS
+// (-1): das Board hat keinen, die Toene laufen ueber den ES8311-Codec (siehe
+// oben). Wird hier ein Pin gesetzt, benutzt Buzzer ihn nur, wenn sich der
+// Codec nicht meldet.
 //
 // ACHTUNG bei der Wahl eines eigenen Pins: auf dem N16R8-Modul (octal PSRAM,
 // board_build.arduino.memory_type = qio_opi) sind **GPIO 33-37 vom PSRAM

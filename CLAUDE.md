@@ -103,6 +103,10 @@ cd firmware && pio run --target upload # flashen
   fehlt.
 * Es bleibt immer **genau eine** Kopplung gespeichert. Sonst zeigt
   `getBondedAddress(0)` nach einem Scannerwechsel womöglich auf das alte Gerät.
+* Töne laufen über den **ES8311-Codec**, nicht über einen Piezo – das Board
+  hat keinen. Dazu gehören die Spannungsschienen des AXP2101, die I2S-Takte
+  und die Endstufe am Expander (EXIO7). Auf der 3.5B ist die Belegung
+  ungeklärt (GPIO12 liegt dort am Display), deshalb `AUDIO_ENABLED 0`.
 * Umlaute auf dem Drucker gehen über `toCp1252()`; der Drucker kennt kein UTF-8.
 
 ## Bekannte Fallstricke
