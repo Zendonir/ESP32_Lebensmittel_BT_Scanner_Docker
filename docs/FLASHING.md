@@ -43,6 +43,50 @@ Für das *Espressif Flash Download Tool* einzeln:
 `firmware.bin` allein ist außerdem das Abbild für ein OTA-Update.
 Prüfsummen stehen in `SHA256SUMS.txt`.
 
+### Über die Luft aktualisieren (OTA)
+
+Ab dem ersten Flashen per USB geht jedes weitere Update ohne Kabel. Der
+**Server** hält das Abbild, das Terminal holt es sich dort ab – es braucht
+dafür weder Internetzugang noch Zertifikate.
+
+**1. Abbild in den Server legen** – entweder automatisch aus dem neuesten
+GitHub-Release:
+
+```bash
+curl -X POST http://<server>:8080/api/firmware/fetch
+```
+
+oder von Hand, wenn der Server kein Internet hat (Datei aus den
+[Releases](https://github.com/Zendonir/ESP32_Lebensmittel_BT_Scanner_Docker/releases)):
+
+```bash
+curl -X POST "http://<server>:8080/api/firmware/upload?board=35" \
+     -F file=@firmware-35.bin
+```
+
+> **`firmware-35.bin`, nicht `firmware-35.factory.bin`.** Die Factory-Datei
+> enthält Bootloader und Partitionstabelle und lässt sich nur über USB
+> einspielen. Der Server weist sie ab, statt ein Gerät unbrauchbar zu machen.
+
+**2. Update auslösen** – am Terminal selbst unter **System → Firmware Update**,
+oder vom Server aus für ein bestimmtes Gerät:
+
+```bash
+curl -X POST http://<server>:8080/api/firmware/push/<geraete-id>
+```
+
+Das Terminal zeigt einen Fortschrittsbalken und startet danach neu. Welche
+Variante (3.5 oder 3.5B) es braucht, meldet es beim Verbinden selbst – der
+Server wählt das passende Abbild aus, ein Vertauschen ist nicht möglich.
+
+Schlägt das Update fehl, läuft das Gerät mit der **alten** Firmware weiter:
+geschrieben wird in den jeweils anderen der beiden App-Slots, umgeschaltet
+wird erst nach einem vollständig und korrekt empfangenen Abbild.
+
+Die Abbilder liegen im Datenvolumen unter `/data/firmware` und überstehen einen
+Neustart des Containers. Bereits aktuelle Geräte lehnen das Update ab, statt
+den Flash ohne Grund neu zu beschreiben.
+
 ### Ein Release erzeugen
 
 Die Dateien entstehen, sobald ein Tag geschoben wird:

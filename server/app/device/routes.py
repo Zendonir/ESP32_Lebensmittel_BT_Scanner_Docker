@@ -43,7 +43,7 @@ async def _upsert_device(device_id: str, info: dict) -> Device:
         # geaenderte Werte fuers System-Panel, die sonst mit der naechsten
         # Telemetrie (30s) ueberschrieben wuerden, wenn sie dort fehlen.
         telemetry = dict(device.telemetry or {})
-        for key in ("ssid", "flash_mb", "res", "sd"):
+        for key in ("ssid", "flash_mb", "res", "sd", "board"):
             if key in info:
                 telemetry[key] = info[key]
         device.telemetry = telemetry

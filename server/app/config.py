@@ -87,6 +87,19 @@ class Settings:
     expiry_warn_days: int = field(default_factory=lambda: _int("EXPIRY_WARN_DAYS", 3))
     expiry_check_hour: int = field(default_factory=lambda: _int("EXPIRY_CHECK_HOUR", 8))
 
+    # --- Firmware-Verteilung (OTA) ---------------------------------------
+    # Ablage der Abbilder. Liegt im selben Volume wie die Datenbank, damit ein
+    # hochgeladenes Abbild einen Containerneustart ueberlebt.
+    firmware_dir: str = field(
+        default_factory=lambda: os.getenv("FIRMWARE_DIR", "/data/firmware")
+    )
+    # Repository, aus dessen neuestem Release die Abbilder geholt werden.
+    firmware_repo: str = field(
+        default_factory=lambda: os.getenv(
+            "FIRMWARE_REPO", "Zendonir/ESP32_Lebensmittel_BT_Scanner_Docker"
+        )
+    )
+
     # --- Betrieb ---------------------------------------------------------
     timezone: str = field(default_factory=lambda: os.getenv("TZ", "Europe/Berlin"))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))

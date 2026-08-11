@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..models import Category, Device, InventoryItem, Location, PrintJob, Template
 from ..services import inventory as inv
-from ..services import labels, openfoodfacts, settings_store
+from ..services import firmware, labels, openfoodfacts, settings_store
 from ..services.dates import days_left, shift_iso, to_display, to_iso_date
 from . import protocol as proto
 from .hub import hub
@@ -780,10 +780,38 @@ async def _tap_system(session, sess, item) -> None:
     # "WLAN einrichten" und "Verbinden/Trennen" behandelt das Geraet lokal
     # (__local_-Aktionen erreichen den Server gar nicht, siehe main.cpp) -
     # hier landet nur, was tatsaechlich der Server entscheiden muss.
-    if item == "firmware_update":
+    if item != "firmware_update":
+        return
+
+    device = (
+        await session.execute(select(Device).where(Device.device_id == sess.device_id))
+    ).scalar_one_or_none()
+    board = str(((device.telemetry if device else None) or {}).get("board") or "")
+
+    image = firmware.meta(board) if board in firmware.BOARDS else None
+    if image is None:
         await hub.send_to(
-            sess.device_id, proto.toast("Firmware-Update noch nicht verfuegbar", "warn")
+            sess.device_id, proto.toast("Keine Firmware hinterlegt", "warn")
         )
+        return
+
+    # Schon aktuell? Dann nicht ohne Not neu schreiben - ein OTA kostet einen
+    # Neustart und einen kompletten Schreibvorgang im Flash.
+    if device is not None and device.firmware == image["version"]:
+        await hub.send_to(
+            sess.device_id, proto.toast(f"Bereits aktuell ({image['version']})")
+        )
+        return
+
+    await hub.send_to(
+        sess.device_id,
+        proto.ota(
+            path=f"/firmware/{board}.bin",
+            version=image["version"],
+            size=image["size"],
+            sha256=image["sha256"],
+        ),
+    )
 
 
 async def _tap_roll_new(session, sess, item) -> None:

@@ -23,6 +23,7 @@ Server -> Geraet
     config      {brightness, beep, idle_seconds}
     ping        {}
     reboot      {}
+    ota         {path, version, size, sha256}
 """
 
 from __future__ import annotations
@@ -106,6 +107,17 @@ def ping() -> dict:
 
 def reboot() -> dict:
     return {"t": "reboot"}
+
+
+def ota(path: str, version: str, size: int, sha256: str) -> dict:
+    """Aufforderung, sich neue Firmware beim Server abzuholen.
+
+    Uebergeben wird bewusst nur der *Pfad*, nicht die vollstaendige URL: der
+    Server kennt seine von aussen erreichbare Adresse nicht zuverlaessig (NAT,
+    Reverse Proxy, mehrere Netze). Das Geraet setzt die URL aus dem Host und
+    Port zusammen, unter dem es ohnehin schon mit dem Server spricht.
+    """
+    return {"t": "ota", "path": path, "version": version, "size": size, "sha256": sha256}
 
 
 BTN_BACK = {"id": "back", "label": "Zurueck", "style": "ghost"}

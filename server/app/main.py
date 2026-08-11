@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
-from .api import catalog, inventory, labels, system
+from .api import catalog, firmware, inventory, labels, system
 from .config import settings
 from .db import init_db, session_scope
 from .device import routes as device_routes
@@ -86,6 +86,10 @@ app.include_router(inventory.router, dependencies=_guard)
 app.include_router(catalog.router, dependencies=_guard)
 app.include_router(labels.router, dependencies=_guard)
 app.include_router(system.router, dependencies=_guard)
+app.include_router(firmware.router, dependencies=_guard)
+# Beide ohne _guard - sie melden sich ueber DEVICE_TOKEN an, nicht ueber
+# das Web-Passwort, das die Terminals gar nicht kennen.
+app.include_router(firmware.public_router)
 app.include_router(device_routes.router)  # WebSockets, eigene Authentifizierung
 
 

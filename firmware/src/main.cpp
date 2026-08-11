@@ -11,6 +11,8 @@
 // ============================================================================
 
 #include <Arduino.h>
+#include <HTTPUpdate.h>
+#include <WiFiClient.h>
 #include <esp_system.h>    // esp_reset_reason()
 #include <esp_task_wdt.h>
 
@@ -53,6 +55,50 @@ static void logResetReason() {
 }
 
 // ---------------------------------------------------------------------------
+// Firmware-Update
+//
+// Das Abbild liegt beim Server; der Pfad kommt in der ota-Nachricht, Host und
+// Port sind dieselben wie fuer den WebSocket. Der Ablauf blockiert bewusst -
+// waehrend eines Updates soll ohnehin nichts anderes passieren -, deshalb wird
+// der Watchdog im Fortschrittsrueckruf ausdruecklich gefuettert. Ohne das
+// wuerde ein langsamer Download mitten im Schreiben einen Neustart ausloesen
+// und eine halb geschriebene Partition hinterlassen.
+// ---------------------------------------------------------------------------
+static void runOta(const String &path, const String &version) {
+    if (path.isEmpty()) return;
+
+    screen.showBoot("Firmware-Update", version.isEmpty() ? "wird geladen…" : version);
+    bleScanner.disconnect();   // Funk und Rechenzeit dem Download ueberlassen
+
+    WiFiClient client;
+    httpUpdate.rebootOnUpdate(true);
+    httpUpdate.onProgress([](int done, int total) {
+        esp_task_wdt_reset();
+        static int lastPercent = -1;
+        const int percent = total > 0 ? (done * 100 / total) : 0;
+        if (percent == lastPercent) return;      // nur bei echter Aenderung zeichnen
+        lastPercent = percent;
+        screen.showBoot("Firmware-Update", String(percent) + " %");
+    });
+
+    const String url = String("http://") + settings.serverHost + ":" +
+                       String(settings.serverPort) + path + "?token=" + settings.token;
+
+    const t_httpUpdate_return result = httpUpdate.update(client, url);
+    // Bei Erfolg startet das Geraet in rebootOnUpdate() neu und kehrt hier nie
+    // zurueck - alles Weitere ist also ein Fehlschlag.
+    const String reason = httpUpdate.getLastErrorString();
+    log_e("Firmware-Update fehlgeschlagen (%d): %s", (int)result, reason.c_str());
+    screen.showBoot("Update fehlgeschlagen", reason);
+    delay(2500);
+
+    // Weiterlaufen statt neu starten: die alte Firmware ist unversehrt, das
+    // Geraet bleibt bedienbar.
+    net.sendEvent("ota_failed");
+    screen.showBoot("Verbinde…", settings.serverHost + ":" + String(settings.serverPort));
+}
+
+// ---------------------------------------------------------------------------
 // Nachrichten vom Server
 // ---------------------------------------------------------------------------
 static void onServerMessage(JsonDocument &doc) {
@@ -91,6 +137,9 @@ static void onServerMessage(JsonDocument &doc) {
         screen.showBoot("Neustart", "vom Server ausgeloest");
         delay(400);
         ESP.restart();
+
+    } else if (type == "ota") {
+        runOta(String(doc["path"] | ""), String(doc["version"] | ""));
     }
 }
 

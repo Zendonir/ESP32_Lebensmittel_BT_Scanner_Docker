@@ -137,6 +137,8 @@ Alles über Umgebungsvariablen in der `.env` (Vorlage: `.env.example`):
 | `EXPIRY_WARN_DAYS` | Vorwarnzeit im MHD-Bericht | `3` |
 | `EXPIRY_CHECK_HOUR` | Uhrzeit des Berichts | `8` |
 | `RESTORE_WINDOW_HOURS` | Fenster fürs Zurückbuchen per Re-Scan | `48` |
+| `FIRMWARE_DIR` | Ablage der OTA-Abbilder | `/data/firmware` |
+| `FIRMWARE_REPO` | Repository für `POST /api/firmware/fetch` | dieses Repo |
 | `NTFY_URL` / `NTFY_TOPIC` | ntfy-Benachrichtigung | – |
 | `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID` | Telegram-Benachrichtigung | – |
 | `MQTT_HOST` / `MQTT_PORT` / … | MQTT für Home Assistant | – |

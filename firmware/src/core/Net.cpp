@@ -205,6 +205,15 @@ void Net::sendHello() {
     doc["res"]      = String(UI_WIDTH) + "x" + String(UI_HEIGHT);
     doc["sd"]       = sdStore.mounted();
 
+    // Boardvariante: entscheidet serverseitig, welches OTA-Abbild das Geraet
+    // bekommt. Die beiden Varianten haben unterschiedliche Displaytreiber -
+    // das falsche Abbild ergaebe ein schwarzes Geraet ohne Bedienung.
+#if defined(BOARD_WAVESHARE_35B)
+    doc["board"] = "35b";
+#else
+    doc["board"] = "35";
+#endif
+
     send(doc);
     _helloAt = millis();
 }
