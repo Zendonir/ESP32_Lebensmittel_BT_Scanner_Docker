@@ -104,6 +104,20 @@ void DisplayCanvas::drawString(const String &text, int16_t x, int16_t y) {
 #endif
 }
 
+uint16_t DisplayCanvas::textWidth(const String &text) {
+#if defined(BOARD_WAVESHARE_35B)
+    if (!_canvas) return 0;
+    const uint8_t scale = _font >= 7 ? 4 : _font >= 6 ? 3 : _font >= 4 ? 2 : 1;
+    _canvas->setTextSize(scale);
+    int16_t bx = 0, by = 0;
+    uint16_t bw = 0, bh = 0;
+    _canvas->getTextBounds(text, 0, 0, &bx, &by, &bw, &bh);
+    return bw;
+#else
+    return _sprite.textWidth(text);
+#endif
+}
+
 void DisplayCanvas::pushSprite(int16_t x, int16_t y) {
 #if defined(BOARD_WAVESHARE_35B)
     (void)x;

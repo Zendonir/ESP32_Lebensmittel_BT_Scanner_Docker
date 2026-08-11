@@ -32,6 +32,7 @@ public:
     void drawRoundRect(int16_t x, int16_t y, int16_t w, int16_t h, int16_t radius, uint16_t color);
     void fillCircle(int16_t x, int16_t y, int16_t radius, uint16_t color);
     void drawString(const String &text, int16_t x, int16_t y);
+    uint16_t textWidth(const String &text);
     void pushSprite(int16_t x, int16_t y);
 
 private:

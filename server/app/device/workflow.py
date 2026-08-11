@@ -191,16 +191,16 @@ async def _screen_home(session, sess, sid, status) -> dict:
     counts = await inv.stats(session)
     roll = await labels.roll_state(session)
     items = [
-        {"id": "templates", "label": "Kategorie", "sub": "ohne Barcode", "color": "#1e88e5"},
-        {"id": "manual_entry", "label": "Manuelle Eingabe", "color": "#43a047"},
-        {"id": "inventory", "label": "Inventar", "color": "#f9a825"},
-        {"id": "system", "label": "System", "color": "#546e7a"},
+        {"id": "templates", "label": "Kategorie", "sub": "ohne Barcode", "color": "#4c9eff"},
+        {"id": "manual_entry", "label": "Manuelle Eingabe", "color": "#2eb048"},
+        {"id": "inventory", "label": "Inventar", "color": "#cc9218"},
+        {"id": "system", "label": "System", "color": "#1c222a"},
     ]
     stats = [
-        {"label": "Produkte", "value": counts["total"], "color": "#1e88e5"},
-        {"label": "Ablaufend", "value": counts["expiring"], "color": "#f9a825"},
-        {"label": "Kritisch", "value": counts["expired"], "color": "#e53935"},
-        {"label": "Label-Rest", "value": max(0, roll["remaining"]), "color": "#43a047"},
+        {"label": "Produkte", "value": counts["total"], "color": "#4c9eff"},
+        {"label": "Ablaufend", "value": counts["expiring"], "color": "#cc9218"},
+        {"label": "Kritisch", "value": counts["expired"], "color": "#f04640"},
+        {"label": "Label-Rest", "value": max(0, roll["remaining"]), "color": "#2eb048"},
     ]
     subtitle = (
         "Barcode scannen zum Auslagern"
@@ -231,11 +231,11 @@ async def _screen_locations(session, sess, sid, status) -> dict:
             "id": f"loc:{row.name}",
             "label": row.name,
             "sub": "aktiv" if row.name == sess.location else "",
-            "color": "#43a047" if row.name == sess.location else "#546e7a",
+            "color": "#2eb048" if row.name == sess.location else "#1c222a",
         }
         for row in rows
     ]
-    items.append({"id": "new", "label": "+ Neuer Ort", "color": "#1e88e5"})
+    items.append({"id": "new", "label": "+ Neuer Ort", "color": "#4c9eff"})
     return proto.screen(
         screen_id=sid,
         kind="list",
@@ -279,16 +279,16 @@ async def _screen_expiring(session, sess, sid, status) -> dict:
         left = days_left(row.expiry_date)
         if left is None:
             sub = ""
-            color = "#546e7a"
+            color = "#1c222a"
         elif left < 0:
             sub = f"abgelaufen seit {abs(left)} T"
-            color = "#e53935"
+            color = "#f04640"
         elif left == 0:
             sub = "heute"
-            color = "#e53935"
+            color = "#f04640"
         else:
             sub = f"noch {left} Tage"
-            color = "#fb8c00" if left <= 3 else "#43a047"
+            color = "#fb8c00" if left <= 3 else "#2eb048"
         items.append(
             {
                 "id": f"item:{row.label}",
@@ -302,7 +302,7 @@ async def _screen_expiring(session, sess, sid, status) -> dict:
         kind="list",
         title="Ablaufend",
         subtitle="Antippen = auslagern",
-        items=items or [{"id": "none", "label": "Nichts laeuft ab", "color": "#43a047"}],
+        items=items or [{"id": "none", "label": "Nichts laeuft ab", "color": "#2eb048"}],
         buttons=[proto.BTN_BACK],
         status=status,
     )
@@ -316,10 +316,10 @@ def _screen_unknown(sess, sid, status) -> dict:
         subtitle=sess.draft.barcode,
         lines=["Kein Produkt gefunden.", "Ueber eine Vorlage anlegen oder verwerfen."],
         items=[
-            {"id": "templates", "label": "Vorlage", "color": "#1e88e5"},
-            {"id": "name", "label": "Namen eingeben", "color": "#1e88e5"},
-            {"id": "generic", "label": "Ohne Namen", "sub": "nur MHD", "color": "#546e7a"},
-            {"id": "home", "label": "Verwerfen", "color": "#e53935"},
+            {"id": "templates", "label": "Vorlage", "color": "#4c9eff"},
+            {"id": "name", "label": "Namen eingeben", "color": "#4c9eff"},
+            {"id": "generic", "label": "Ohne Namen", "sub": "nur MHD", "color": "#1c222a"},
+            {"id": "home", "label": "Verwerfen", "color": "#f04640"},
         ],
         buttons=[proto.BTN_HOME],
         status=status,
@@ -389,7 +389,7 @@ def _screen_result(sess, sid, status) -> dict:
         title="Gespeichert",
         subtitle=sess.draft.name,
         lines=sess.last_result,
-        items=[{"id": "home", "label": "Weiter", "color": "#43a047"}],
+        items=[{"id": "home", "label": "Weiter", "color": "#2eb048"}],
         buttons=[proto.BTN_HOME],
         status=status,
     )
@@ -407,10 +407,10 @@ async def _screen_tmpl_category(session, sess, sid, status) -> dict:
         ).all()
     )
     items = [
-        {"id": f"cat:{c}", "label": c, "color": colors.get(c, "#1e88e5")}
+        {"id": f"cat:{c}", "label": c, "color": colors.get(c, "#4c9eff")}
         for c in sorted(cats)
     ]
-    items.append({"id": "cat:", "label": "Ohne Kategorie", "color": "#546e7a"})
+    items.append({"id": "cat:", "label": "Ohne Kategorie", "color": "#1c222a"})
     return proto.screen(
         screen_id=sid,
         kind="tiles",
@@ -434,7 +434,7 @@ async def _screen_tmpl_product(session, sess, sid, status) -> dict:
             "id": f"tpl:{row.id}",
             "label": row.name,
             "sub": f"{row.shelf_days} T" if row.shelf_days else "",
-            "color": "#1e88e5",
+            "color": "#4c9eff",
         }
         for row in rows
     ]
@@ -442,7 +442,7 @@ async def _screen_tmpl_product(session, sess, sid, status) -> dict:
         screen_id=sid,
         kind="list",
         title=sess.draft.category or "Vorlagen",
-        items=items or [{"id": "none", "label": "Keine Vorlagen", "color": "#546e7a"}],
+        items=items or [{"id": "none", "label": "Keine Vorlagen", "color": "#1c222a"}],
         buttons=[proto.BTN_BACK, proto.BTN_HOME],
         status=status,
     )
@@ -451,8 +451,8 @@ async def _screen_tmpl_product(session, sess, sid, status) -> dict:
 async def _screen_tmpl_brand(session, sess, sid, status) -> dict:
     tpl = await session.get(Template, sess.draft.template_id)
     brands = list(tpl.brands or []) if tpl else []
-    items = [{"id": f"brand:{b}", "label": b, "color": "#1e88e5"} for b in brands]
-    items.append({"id": "brand:", "label": "Ohne Marke", "color": "#546e7a"})
+    items = [{"id": f"brand:{b}", "label": b, "color": "#4c9eff"} for b in brands]
+    items.append({"id": "brand:", "label": "Ohne Marke", "color": "#1c222a"})
     return proto.screen(
         screen_id=sid,
         kind="list",
@@ -467,8 +467,8 @@ async def _screen_tmpl_brand(session, sess, sid, status) -> dict:
 async def _screen_tmpl_sorte(session, sess, sid, status) -> dict:
     tpl = await session.get(Template, sess.draft.template_id)
     sorten = list(tpl.sorten or []) if tpl else []
-    items = [{"id": f"sorte:{s}", "label": s, "color": "#1e88e5"} for s in sorten]
-    items.append({"id": "sorte:", "label": "Ohne Sorte", "color": "#546e7a"})
+    items = [{"id": f"sorte:{s}", "label": s, "color": "#4c9eff"} for s in sorten]
+    items.append({"id": "sorte:", "label": "Ohne Sorte", "color": "#1c222a"})
     return proto.screen(
         screen_id=sid,
         kind="list",
@@ -542,13 +542,13 @@ async def _screen_inventory(session, sess, sid, status) -> dict:
     for g in values[:200]:
         left = days_left(g["expiry"]) if g["expiry"] else None
         if left is None:
-            color = "#546e7a"
+            color = "#1c222a"
         elif left < 0:
-            color = "#e53935"
+            color = "#f04640"
         elif left <= 3:
             color = "#fb8c00"
         else:
-            color = "#43a047"
+            color = "#2eb048"
         qty = f"{g['qty']:g} {g['unit']}".strip() if g["unit"] else f"{int(g['qty'])}x"
         parts = [g["category"] or "-"]
         if g["location"]:
@@ -572,7 +572,7 @@ async def _screen_inventory(session, sess, sid, status) -> dict:
         title="Inventar",
         subtitle=f"Sortiert: {sort_label}  ·  {len(values)} Artikel"
         + (f"  ·  Suche: {sess.inv_search}" if sess.inv_search else ""),
-        items=items or [{"id": "none", "label": "Nichts im Bestand", "color": "#546e7a"}],
+        items=items or [{"id": "none", "label": "Nichts im Bestand", "color": "#1c222a"}],
         buttons=[
             proto.BTN_BACK,
             {"id": "sort", "label": "Sortierung", "style": "ghost"},
@@ -613,34 +613,34 @@ async def _screen_system(session, sess, sid, status) -> dict:
     cards = [
         {
             "title": "NETZWERK",
-            "title_color": "#43a047" if net_connected else "#e53935",
+            "title_color": "#2eb048" if net_connected else "#f04640",
             "status": "Verbunden" if net_connected else "Getrennt",
-            "status_color": "#43a047" if net_connected else "#e53935",
+            "status_color": "#2eb048" if net_connected else "#f04640",
             "lines": [f"{tel.get('ssid') or '-'}  ·  {(device.ip if device else '') or '-'}"],
-            "button": {"id": "__local_wifi_setup", "label": "WLAN einrichten", "color": "#f9a825"},
+            "button": {"id": "__local_wifi_setup", "label": "WLAN einrichten", "color": "#cc9218"},
         },
         {
             "title": "BLE SCANNER",
-            "title_color": "#f9a825",
+            "title_color": "#cc9218",
             "status": "Verbunden" if ble_connected else "Getrennt",
-            "status_color": "#43a047" if ble_connected else "#f9a825",
+            "status_color": "#2eb048" if ble_connected else "#cc9218",
             "lines": [scanner.get("name") or "kein Geraet gekoppelt"],
-            "button": {"id": "__local_ble_toggle", "label": "Verbinden / Trennen", "color": "#1e88e5"},
+            "button": {"id": "__local_ble_toggle", "label": "Verbinden / Trennen", "color": "#4c9eff"},
         },
         {
             "title": "GERAET",
-            "title_color": "#1e88e5",
+            "title_color": "#4c9eff",
             "status": (device.name if device else "") or "Terminal",
             "status_color": "#e6edf3",
             "lines": [
                 f"FW: {(device.firmware if device else '') or '-'}  ·  "
                 f"{tel.get('res', '?')}  ·  {tel.get('flash_mb', '?')} MB Flash",
             ],
-            "button": {"id": "firmware_update", "label": "Firmware Update", "color": "#43a047"},
+            "button": {"id": "firmware_update", "label": "Firmware Update", "color": "#2eb048"},
         },
         {
             "title": "SYSTEM",
-            "title_color": "#546e7a",
+            "title_color": "#1c222a",
             "status": "",
             "status_color": "#e6edf3",
             "lines": [

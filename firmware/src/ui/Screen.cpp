@@ -13,14 +13,18 @@ static constexpr int16_t FOOTER_H = 46;
 static constexpr int16_t BODY_Y = STATUS_H + TITLE_H;
 static constexpr int16_t BODY_H = H - BODY_Y - FOOTER_H;
 
-static constexpr uint16_t C_BG = 0x1082;      // #12171b
-static constexpr uint16_t C_SURFACE = 0x2124; // #1f2a24 -> dunkle Kachel
-static constexpr uint16_t C_TEXT = 0xEF7D;
-static constexpr uint16_t C_MUTED = 0x8410;
-static constexpr uint16_t C_PRIMARY = 0x1C7B;
-static constexpr uint16_t C_OK = 0x4C69;
-static constexpr uint16_t C_WARN = 0xFC40;
-static constexpr uint16_t C_DANGER = 0xE9E5;
+// Exakt die Farbwerte aus dem Vorgaengerprojekt (display.cpp, RGB()-Makro auf
+// RGB565 abgebildet) - nicht neu erfunden, 1:1 uebernommen.
+static constexpr uint16_t C_BG = 0x0862;        // RGB(0x08,0x0C,0x10)
+static constexpr uint16_t C_SURFACE = 0x10A3;   // RGB(0x12,0x17,0x1E)
+static constexpr uint16_t C_SURFACE2 = 0x1905;  // RGB(0x1C,0x22,0x2A)
+static constexpr uint16_t C_BORDER = 0x2967;    // RGB(0x28,0x2E,0x38)
+static constexpr uint16_t C_TEXT = 0xEF9E;      // RGB(0xEC,0xF0,0xF4)
+static constexpr uint16_t C_MUTED = 0x7C32;     // RGB(0x7A,0x84,0x90) - C_SUBTEXT
+static constexpr uint16_t C_PRIMARY = 0x4CFF;   // RGB(0x4C,0x9E,0xFF) - C_ACCENT
+static constexpr uint16_t C_OK = 0x2D89;        // RGB(0x2E,0xB0,0x48) - C_GREEN
+static constexpr uint16_t C_WARN = 0xCC83;      // RGB(0xCC,0x92,0x18) - C_YELLOW
+static constexpr uint16_t C_DANGER = 0xF228;    // RGB(0xF0,0x46,0x40) - C_RED
 
 void Screen::begin() {
     if (!_spr.begin()) {
@@ -485,53 +489,58 @@ void Screen::drawMessage() {
     }
 }
 
-// Startbildschirm: Kennzahlenreihe, WLAN/BLE-Kurzstatus + Etikettenrolle,
-// darunter das Kachelraster mit den eigentlichen Wegen (Kategorie, Manuelle
-// Eingabe, Inventar, System) - siehe device/workflow.py::_screen_home.
+// Startbildschirm - Portierung von draw_panel_store() aus dem
+// Vorgaengerprojekt (display.cpp): Kennzahlenreihe mit farbigem Streifen,
+// WLAN/BLE-Pillen + Etikettenrolle, darunter das 2x2-Kachelraster.
 void Screen::drawHome() {
     int16_t y = BODY_Y;
 
     JsonArray stats = _screen["meta"]["stats"].as<JsonArray>();
     const int statCount = stats.size();
     if (statCount > 0) {
-        const int16_t gap = 6;
-        const int16_t h = 58;
+        const int16_t gap = 4;
+        const int16_t h = 64;
         const int16_t w = (W - gap * (statCount + 1)) / statCount;
         int index = 0;
         for (JsonObject s : stats) {
             const uint16_t color = parseColor(s["color"] | "", C_PRIMARY);
             const int16_t x = gap + index * (w + gap);
-            _spr.drawRoundRect(x, y, w, h, 6, color);
-            _spr.setTextDatum(MC_DATUM);
+            _spr.fillRoundRect(x, y, w, h, 10, C_SURFACE);
+            _spr.drawRoundRect(x, y, w, h, 10, color);
+            _spr.fillRect(x + 1, y + 1, 4, h - 2, color);
+            _spr.setTextColor(color, C_SURFACE);
             _spr.setTextFont(4);
-            _spr.setTextColor(color, C_BG);
-            _spr.drawString(String((long)(s["value"] | 0)), x + w / 2, y + 18);
+            _spr.drawString(String((long)(s["value"] | 0)), x + 10, y + 8);
+            _spr.setTextColor(C_MUTED, C_SURFACE);
             _spr.setTextFont(2);
-            _spr.setTextColor(C_MUTED, C_BG);
-            _spr.drawString(String(s["label"] | ""), x + w / 2, y + 42);
-            _spr.setTextDatum(TL_DATUM);
+            _spr.drawString(String(s["label"] | ""), x + 10, y + 38);
+            // Wie im Vorgaengerprojekt: Produkte- und Ablaufend-Karten sind
+            // Abkuerzungen in die jeweilige Ansicht.
+            if (index == 0) addHit(x, y, w, h, "inventory");
+            else if (index == 1 || index == 2) addHit(x, y, w, h, "expiring");
             index++;
         }
         y += h + 8;
     }
 
-    // WLAN/BLE-Kurzstatus - reine Anzeige, nicht antippbar (das Detail steht
-    // im System-Panel). "Neue Rolle" ist der einzige aktive Knopf hier.
+    // WLAN/BLE-Pillen, Breite nach Textinhalt (wie draw_pill im
+    // Vorgaengerprojekt) - reine Anzeige, das Detail steht im System-Panel.
     const bool wifiOk = _screen["meta"]["wifi"] | true;
     const bool bleOk  = _screen["meta"]["ble"]  | false;
-    const int16_t pillH = 26;
-    auto pill = [&](int16_t x, int16_t w, const String &label, uint16_t bg) {
-        _spr.fillRoundRect(x, y, w, pillH, pillH / 2, bg);
+    _spr.setTextFont(2);
+    auto pill = [&](int16_t px, const String &label, uint16_t bg) -> int16_t {
+        const int16_t tw = _spr.textWidth(label) + 16;
+        _spr.fillRoundRect(px, y, tw, 22, 11, bg);
         _spr.setTextDatum(MC_DATUM);
-        _spr.setTextFont(2);
-        _spr.setTextColor(TFT_WHITE, bg);
-        _spr.drawString(label, x + w / 2, y + pillH / 2 + 1);
+        _spr.setTextColor(C_TEXT, bg);
+        _spr.drawString(label, px + tw / 2, y + 11);
         _spr.setTextDatum(TL_DATUM);
+        return px + tw + 6;
     };
-    pill(6, 92, wifiOk ? "WLAN OK" : "KEIN WLAN", wifiOk ? C_OK : C_DANGER);
-    pill(102, 92, bleOk ? "BLE OK" : "BLE ---", bleOk ? C_OK : C_MUTED);
-    button(W - 110, y, 104, pillH, "Neue Rolle", C_SURFACE, "new_roll");
-    y += pillH + 8;
+    const int16_t afterWifi = pill(4, wifiOk ? "WLAN OK" : "WLAN FEHLT", wifiOk ? C_OK : C_DANGER);
+    pill(afterWifi, bleOk ? "BLE OK" : "BLE ---", bleOk ? C_OK : C_SURFACE2);
+    button(W - 120, y - 2, 116, 26, "Neue Rolle", C_SURFACE2, "new_roll");
+    y += 30;
 
     // Kachelraster mit den verbleibenden Bildschirmaktionen.
     JsonArray items = _screen["items"].as<JsonArray>();
@@ -539,7 +548,7 @@ void Screen::drawHome() {
     if (count == 0) return;
     const int cols = 2;
     const int rows = (count + cols - 1) / cols;
-    const int16_t gap = 8;
+    const int16_t gap = 4;
     const int16_t tw = (W - gap * (cols + 1)) / cols;
     const int16_t th = max<int16_t>(40, (BODY_Y + BODY_H - y - gap * (rows + 1)) / rows);
     int index = 0;
