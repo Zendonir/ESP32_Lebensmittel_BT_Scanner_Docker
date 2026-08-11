@@ -207,8 +207,14 @@ void Screen::tile(int16_t x, int16_t y, int16_t w, int16_t h, const String &labe
                   const String &sub, uint16_t color, const String &id) {
     _spr.fillRoundRect(x, y, w, h, 8, color);
     _spr.setTextDatum(MC_DATUM);
-    _spr.setTextFont(4);
     _spr.setTextColor(TFT_WHITE, color);
+
+    // Lange Beschriftungen ("Fleisch & Fisch") liefen mit fester Schriftgroesse
+    // ueber den Kachelrand in die naechste Kachel - deshalb bei Bedarf auf die
+    // kleinere Schrift ausweichen, statt blind font4 zu erzwingen.
+    const int16_t maxTextW = w - 12;
+    _spr.setTextFont(4);
+    if (_spr.textWidth(label) > maxTextW) _spr.setTextFont(2);
     _spr.drawString(label, x + w / 2, y + h / 2 - (sub.isEmpty() ? 0 : 10));
     if (!sub.isEmpty()) {
         _spr.setTextFont(2);
@@ -222,8 +228,13 @@ void Screen::button(int16_t x, int16_t y, int16_t w, int16_t h, const String &la
                     uint16_t bg, const String &id) {
     _spr.fillRoundRect(x, y, w, h, 6, bg);
     _spr.setTextDatum(MC_DATUM);
-    _spr.setTextFont(2);
     _spr.setTextColor(TFT_WHITE, bg);
+
+    // Gleiche Absicherung wie bei tile(): "Verbinden / Trennen" o.ae. darf
+    // nicht ueber den Knopfrand hinauslaufen.
+    const int16_t maxTextW = w - 8;
+    _spr.setTextFont(2);
+    if (_spr.textWidth(label) > maxTextW) _spr.setTextFont(1);
     _spr.drawString(label, x + w / 2, y + h / 2);
     _spr.setTextDatum(TL_DATUM);
     addHit(x, y, w, h, id);

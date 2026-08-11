@@ -39,6 +39,14 @@ async def _upsert_device(device_id: str, info: dict) -> Device:
         device.has_printer = bool(info.get("has_printer", device.has_printer))
         device.online = True
         device.last_seen = utcnow()
+        # Statische Geraetedaten aus hello() (siehe Net::sendHello) - selten
+        # geaenderte Werte fuers System-Panel, die sonst mit der naechsten
+        # Telemetrie (30s) ueberschrieben wuerden, wenn sie dort fehlen.
+        telemetry = dict(device.telemetry or {})
+        for key in ("ssid", "flash_mb", "res", "sd"):
+            if key in info:
+                telemetry[key] = info[key]
+        device.telemetry = telemetry
         await session.commit()
         await session.refresh(device)
         return device
@@ -177,11 +185,17 @@ async def _store_telemetry(session, device_id: str, sess, msg: dict) -> None:
     ).scalar_one_or_none()
     if device is None:
         return
-    telemetry = {
-        k: msg[k]
-        for k in ("heap", "min_heap", "psram", "rssi", "uptime", "wifi")
-        if k in msg
-    }
+    # Zusammenfuehren statt ersetzen - sonst loescht die naechste Telemetrie
+    # (alle 30s) die statischen hello()-Felder (ssid, flash_mb, res, sd)
+    # wieder, weil die dort schlicht nicht mitgeschickt werden.
+    telemetry = dict(device.telemetry or {})
+    telemetry.update(
+        {
+            k: msg[k]
+            for k in ("heap", "min_heap", "psram", "rssi", "uptime", "wifi")
+            if k in msg
+        }
+    )
     scanner = msg.get("scanner") or {}
     if scanner:
         telemetry["scanner"] = scanner
