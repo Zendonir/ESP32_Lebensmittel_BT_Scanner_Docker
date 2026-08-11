@@ -98,12 +98,17 @@
 // ============================================================================
 // Zeitverhalten
 // ============================================================================
-#define WS_RECONNECT_MS      3000   // Wiederverbindung nach Abriss
+// Wiederverbindung nach Abriss. Jeder vergebliche Versuch haelt den Loop um
+// WEBSOCKETS_TCP_TIMEOUT (siehe platformio.ini) auf, weil der TCP-Aufbau in
+// ws.loop() blockierend ist - der Abstand bestimmt also mit, wie fluessig sich
+// das Geraet bei ausgefallenem Server noch bedienen laesst.
+#define WS_RECONNECT_MS      5000
 #define TELEMETRY_INTERVAL_MS 30000
 #define BATTERY_POLL_MS      300000 // Scanner-Akku alle 5 Minuten
 #define WDT_TIMEOUT_S        30
 #define TOUCH_POLL_MS        20
 #define BLE_CONNECT_TIMEOUT_MS 30000
+#define BLE_SCAN_DURATION_MS   4000   // Dauer eines Suchlaufs (blockiert nicht)
 
 // Gestufte Wiederherstellung, wenn WLAN oder Server dauerhaft nicht
 // erreichbar sind (falsches Passwort nach einem Routertausch, Server-IP hat

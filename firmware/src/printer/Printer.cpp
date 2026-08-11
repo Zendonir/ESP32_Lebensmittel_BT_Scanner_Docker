@@ -7,6 +7,11 @@ Printer printer;
 static HardwareSerial uart(1);
 
 void Printer::begin(uint32_t baud) {
+    // Grosser Sendepuffer: bei 9600 Baud braucht ein Etikett rund eine halbe
+    // Sekunde Leitungszeit. Passt es komplett in den Puffer, kehrt write()
+    // sofort zurueck und der UART-Treiber sendet im Hintergrund weiter - sonst
+    // steht der ganze Loop (und damit die Bedienung) waehrend des Druckens.
+    uart.setTxBufferSize(2048);
     uart.begin(baud, SERIAL_8N1, PRINTER_RX, PRINTER_TX);
     _ready = true;
     reset();
@@ -60,13 +65,22 @@ int Printer::process(bool &ok, String &error) {
         return id;
     }
 
+    // Erst anfangen, wenn das komplette Etikett in den Sendepuffer passt.
+    // Sonst laeuft der Puffer bei mehreren Auftraegen hintereinander voll und
+    // write() wartet doch wieder auf die 9600-Baud-Leitung. Der Auftrag bleibt
+    // solange in der Warteschlange und kommt im naechsten Durchlauf dran.
+    if (uart.availableForWrite() < 1024) return 0;
+
     Job &job = _queue[_head];
     const int id = job.jobId;
 
     _chars = job.doc["chars"] | 32;
     reset();
     writeBlocks(job.doc["blocks"].as<JsonArray>());
-    uart.flush();
+    // Bewusst kein uart.flush(): das wartet, bis das letzte Bit auf der
+    // Leitung ist, und blockiert damit genau die halbe Sekunde, die der
+    // Sendepuffer gerade vermeiden soll. Der Treiber sendet zuverlaessig zu
+    // Ende; nur ein Neustart mitten im Druck koennte etwas abschneiden.
 
     job.doc.clear();
     _head = (_head + 1) % MAX_QUEUE;

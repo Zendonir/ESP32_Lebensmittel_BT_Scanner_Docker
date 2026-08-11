@@ -10,9 +10,15 @@ Touch touch;
 // uebernommen - dort ueber viele Geraete hinweg erprobt.
 static constexpr int16_t  SWIPE_MIN_DIST  = 60;   // px Mindestweg fuer einen Swipe
 static constexpr int16_t  SWIPE_MAX_OFFAX = 40;   // px max. Abweichung quer zur Richtung
-static constexpr uint32_t TAP_MAX_MS      = 250;  // ms max. Dauer fuer einen Tap
 static constexpr int16_t  TAP_MAX_DIST    = 15;   // px max. Bewegung fuer einen Tap
 static constexpr int16_t  SCROLL_DEAD_PX  = 8;     // px Totzone, bevor der Drag beginnt
+
+// Der FT6336 meldet zwischendurch ein einzelnes "nicht beruehrt", obwohl der
+// Finger noch aufliegt. Ohne Entprellung wird daraus ein vorzeitiges Abheben:
+// aus einem Tippen werden zwei Taps (der zweite trifft dann schon den neu
+// aufgebauten Bildschirm), und ein Ziehen bricht mittendrin ab. Das
+// Vorgaengerprojekt hatte dafuer denselben Zaehler.
+static constexpr uint8_t RELEASE_DEBOUNCE_TICKS = 2;
 
 bool Touch::begin() {
     // Wire wurde bereits in Board::begin() gestartet - dort muss der Bus
@@ -76,25 +82,25 @@ Gesture Touch::poll(bool scrollable) {
     Gesture g;
     if (!_ok) return g;
 
-    const uint32_t now = millis();
-    if (now - _lastPoll < TOUCH_POLL_MS) return g;
-    _lastPoll = now;
+    if (millis() - _lastPoll < TOUCH_POLL_MS) return g;
+    _lastPoll = millis();
 
     int16_t px = 0, py = 0;
     const bool contact = read(px, py);
 
-    if (contact && !_down) {
-        // Neuer Fingerkontakt - erst beim Loslassen entscheidet sich, ob es
-        // ein Tap oder ein Swipe war (Distanz/Dauer, siehe unten).
-        _down     = true;
-        _dragging = false;
-        _startX = _lastX = px;
-        _startY = _lastY = py;
-        _downAt   = now;
-        return g;
-    }
+    if (contact) {
+        _releaseDebounce = 0;
 
-    if (contact && _down) {
+        if (!_down) {
+            // Neuer Fingerkontakt - erst beim Loslassen entscheidet sich ueber
+            // die zurueckgelegte Strecke, ob es ein Tap oder ein Swipe war.
+            _down     = true;
+            _dragging = false;
+            _startX = _lastX = px;
+            _startY = _lastY = py;
+            return g;
+        }
+
         const int16_t dx = px - _startX;
         const int16_t dy = py - _startY;
 
@@ -110,22 +116,30 @@ Gesture Touch::poll(bool scrollable) {
         return g;
     }
 
-    if (!contact && _down) {
-        // Finger abgehoben - jetzt auswerten, was es war.
+    if (_down) {
+        // Erst nach mehreren aufeinanderfolgenden Leermessungen gilt der Finger
+        // als abgehoben - siehe RELEASE_DEBOUNCE_TICKS.
+        if (++_releaseDebounce < RELEASE_DEBOUNCE_TICKS) return g;
+
         _down = false;
+        _releaseDebounce = 0;
         if (_dragging) {
             _dragging = false;
             g.type = GestureType::ScrollEnd;
             return g;
         }
 
-        const int16_t  dx      = _lastX - _startX;
-        const int16_t  dy      = _lastY - _startY;
-        const int16_t  absDx   = abs(dx);
-        const int16_t  absDy   = abs(dy);
-        const uint32_t elapsed = now - _downAt;
+        const int16_t dx    = _lastX - _startX;
+        const int16_t dy    = _lastY - _startY;
+        const int16_t absDx = abs(dx);
+        const int16_t absDy = abs(dy);
 
-        if (elapsed <= TAP_MAX_MS && absDx <= TAP_MAX_DIST && absDy <= TAP_MAX_DIST) {
+        // Ein Tippen wird allein ueber die Bewegung erkannt, nicht zusaetzlich
+        // ueber die Dauer. Mit der frueheren 250-ms-Schranke fiel ein bewusst
+        // laenger gehaltener Druck durch beide Raster und loeste gar nichts
+        // aus - genau das Verhalten, das sich wie ein toter Touch anfuehlt.
+        // Zum Unterscheiden von Tippen und Wischen genuegt die Strecke.
+        if (absDx <= TAP_MAX_DIST && absDy <= TAP_MAX_DIST) {
             g.type = GestureType::Tap;
             g.x    = _startX;
             g.y    = _startY;

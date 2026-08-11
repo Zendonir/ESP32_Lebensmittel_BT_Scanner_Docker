@@ -44,7 +44,7 @@ private:
     bool     _dragging = false;
     int16_t  _startX = 0, _startY = 0;
     int16_t  _lastX  = 0, _lastY  = 0;
-    uint32_t _downAt   = 0;
+    uint8_t  _releaseDebounce = 0;
     uint32_t _lastPoll = 0;
 };
 

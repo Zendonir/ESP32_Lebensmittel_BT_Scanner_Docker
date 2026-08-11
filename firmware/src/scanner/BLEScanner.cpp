@@ -49,6 +49,13 @@ static char hidToChar(uint8_t key, bool shift) {
 // NimBLE-Rueckrufe
 // ---------------------------------------------------------------------------
 class ClientCallbacks : public NimBLEClientCallbacks {
+    void onConnect(NimBLEClient *) override { bleScanner._onConnect(); }
+
+    void onConnectFail(NimBLEClient *, int reason) override {
+        log_w("Verbindung zum Scanner fehlgeschlagen (Grund %d)", reason);
+        bleScanner._onConnectFail();
+    }
+
     void onDisconnect(NimBLEClient *, int reason) override {
         log_w("Scanner getrennt (Grund %d)", reason);
         bleScanner._onDisconnect();
@@ -89,14 +96,26 @@ void BLEScanner::begin() {
     client->setConnectionParams(12, 12, 0, 200);
     client->setConnectTimeout(10 * 1000);
 
+    _started = true;
     log_i("BLE bereit");
 }
 
 void BLEScanner::_onDisconnect() {
-    _connected = false;
-    _connecting = false;          // auch hier, nicht nur im Fehlerpfad
+    _state = State::Idle;         // auch hier, nicht nur im Fehlerpfad
     _battery = -1;
     _nextTryMs = millis() + 2000;
+}
+
+void BLEScanner::_onConnect() {
+    // Nur umschalten - die Dienstsuche blockiert und gehoert deshalb in den
+    // Hauptloop, nicht in diesen Rueckruf auf dem NimBLE-Task.
+    _state = State::Discovering;
+}
+
+void BLEScanner::_onConnectFail() {
+    _state = State::Idle;
+    _failures++;
+    _nextTryMs = millis() + 3000;
 }
 
 void BLEScanner::_onBattery(uint8_t level) {
@@ -142,9 +161,19 @@ bool BLEScanner::readCode(String &code) {
     return code.length() > 0;
 }
 
-void BLEScanner::scanAndConnect() {
-    _connecting = true;
-    _connectStartedMs = millis();
+// Gestaffelter Rueckzug in den Ruhezustand. Ohne Angabe waechst die Wartezeit
+// mit der Zahl der Fehlversuche (2 s, 4 s, ... bis 30 s), damit ein
+// abgeschalteter Scanner nicht dauernd Funkzeit und Strom kostet.
+void BLEScanner::backoff(uint32_t delayMs) {
+    _state = State::Idle;
+    if (delayMs == 0) {
+        _failures++;
+        delayMs = min<uint32_t>(30000, 2000UL * _failures);
+    }
+    _nextTryMs = millis() + delayMs;
+}
+
+void BLEScanner::startScan() {
     haveTarget = false;
 
     NimBLEScan *scan = NimBLEDevice::getScan();
@@ -152,29 +181,40 @@ void BLEScanner::scanAndConnect() {
     scan->setActiveScan(true);
     scan->setInterval(100);
     scan->setWindow(80);
-    scan->getResults(4 * 1000, false);   // blockierend, aber nur 4 s
-    scan->clearResults();
 
-    if (!haveTarget) {
-        _connecting = false;             // Ausstiegspfad 1
-        _failures++;
-        _nextTryMs = millis() + min<uint32_t>(30000, 2000UL * _failures);
+    // start() statt getResults(): kehrt sofort zurueck, das Ergebnis holt
+    // loop() ueber isScanning() ab. Genau hier stand vorher der 4-Sekunden-
+    // Stillstand des ganzen Geraets.
+    if (!scan->start(BLE_SCAN_DURATION_MS, false, true)) {
+        log_w("BLE-Suche konnte nicht gestartet werden");
+        backoff();
         return;
     }
+    _state = State::Scanning;
+    _connectStartedMs = millis();
+}
 
+void BLEScanner::beginConnect() {
     log_i("Verbinde mit %s", targetDevice.getName().c_str());
-    if (!client->connect(&targetDevice)) {
-        _connecting = false;             // Ausstiegspfad 2
-        _failures++;
-        _nextTryMs = millis() + 3000;
-        return;
-    }
+    _state = State::Connecting;
+    _connectStartedMs = millis();
 
+    // asyncConnect = true: kehrt sofort zurueck, das Ergebnis kommt ueber
+    // onConnect bzw. onConnectFail.
+    if (!client->connect(&targetDevice, true, true, true)) {
+        backoff(3000);
+    }
+}
+
+// Dienstsuche nach erfolgreicher Verbindung. Diese GATT-Abfragen blockieren
+// (die Bibliothek bietet dafuer keine asynchrone Variante), aber sie laufen
+// genau einmal pro Kopplung und nur, wenn wirklich ein Scanner geantwortet
+// hat - nicht mehr bei jedem erfolglosen Suchlauf.
+void BLEScanner::finishConnect() {
     NimBLERemoteService *hid = client->getService(NimBLEUUID(SVC_HID));
     if (hid == nullptr) {
         client->disconnect();
-        _connecting = false;             // Ausstiegspfad 3
-        _nextTryMs = millis() + 5000;
+        backoff(5000);
         return;
     }
 
@@ -190,8 +230,7 @@ void BLEScanner::scanAndConnect() {
 
     if (subscribed == 0) {
         client->disconnect();
-        _connecting = false;             // Ausstiegspfad 4
-        _nextTryMs = millis() + 5000;
+        backoff(5000);
         return;
     }
 
@@ -204,15 +243,14 @@ void BLEScanner::scanAndConnect() {
 
     _deviceName = String(targetDevice.getName().c_str());
     _address = String(targetDevice.getAddress().toString().c_str());
-    _connected = true;
-    _connecting = false;                 // Erfolgspfad
+    _state = State::Connected;           // Erfolgspfad
     _failures = 0;
     _nextBattMs = millis() + BATTERY_POLL_MS;
     log_i("Scanner verbunden: %s (%d Reports)", _deviceName.c_str(), subscribed);
 }
 
 void BLEScanner::readBatteryNow() {
-    if (!_connected || client == nullptr) return;
+    if (_state != State::Connected || client == nullptr) return;
     NimBLERemoteService *batt = client->getService(NimBLEUUID(SVC_BATTERY));
     if (batt == nullptr) return;
     NimBLERemoteCharacteristic *chr = batt->getCharacteristic(NimBLEUUID(CHR_BATTERY));
@@ -220,35 +258,66 @@ void BLEScanner::readBatteryNow() {
 }
 
 void BLEScanner::loop() {
+    if (!_started) return;
     const uint32_t now = millis();
 
-    // Sicherheitsnetz: ein Verbindungsversuch, der nicht zurueckkehrt, darf das
-    // Geraet nicht dauerhaft blockieren.
-    if (_connecting && now - _connectStartedMs > BLE_CONNECT_TIMEOUT_MS) {
-        log_w("Verbindungsversuch abgebrochen (Zeitueberschreitung)");
-        _connecting = false;
-        if (client && client->isConnected()) client->disconnect();
-        _nextTryMs = now + 3000;
-    }
-
-    if (!_connected && !_connecting && now >= _nextTryMs) {
-        scanAndConnect();
+    // Sicherheitsnetz: haengt ein Suchlauf oder Verbindungsversuch, darf das
+    // die Kopplung nicht dauerhaft lahmlegen. Anders als zuvor wird das hier
+    // auch wirklich erreicht - loop() kehrt in jedem Zustand sofort zurueck.
+    if ((_state == State::Scanning || _state == State::Connecting) &&
+        now - _connectStartedMs > BLE_CONNECT_TIMEOUT_MS) {
+        log_w("Kopplungsversuch abgebrochen (Zeitueberschreitung)");
+        NimBLEDevice::getScan()->stop();
+        client->cancelConnect();
+        backoff(3000);
         return;
     }
 
-    if (_connected && now >= _nextBattMs) {
-        readBatteryNow();
-        _nextBattMs = now + BATTERY_POLL_MS;
+    switch (_state) {
+        case State::Idle:
+            if (now >= _nextTryMs && now >= _pauseUntilMs) startScan();
+            break;
+
+        case State::Scanning: {
+            NimBLEScan *scan = NimBLEDevice::getScan();
+            if (scan->isScanning()) break;      // laeuft noch, naechster Durchlauf
+            scan->clearResults();
+            if (haveTarget) beginConnect();
+            else            backoff();
+            break;
+        }
+
+        case State::Connecting:
+            break;                              // wartet auf onConnect/onConnectFail
+
+        case State::Discovering:
+            finishConnect();
+            break;
+
+        case State::Connected:
+            if (now >= _nextBattMs) {
+                readBatteryNow();
+                _nextBattMs = now + BATTERY_POLL_MS;
+            }
+            break;
     }
 }
 
 void BLEScanner::disconnect() {
-    if (client && client->isConnected()) client->disconnect();
-    _connected = false;
-    _connecting = false;
+    if (!_started) return;
+    // Von Hand getrennt - eine Weile nicht selbsttaetig neu verbinden, sonst
+    // haengt der Scanner nach zwei Sekunden wieder dran (siehe _pauseUntilMs).
+    _pauseUntilMs = millis() + 60000;
+    NimBLEDevice::getScan()->stop();
+    if (client) {
+        client->cancelConnect();
+        if (client->isConnected()) client->disconnect();
+    }
+    _state = State::Idle;
 }
 
 void BLEScanner::forget() {
+    if (!_started) return;
     disconnect();
     NimBLEDevice::deleteAllBonds();
     _nextTryMs = millis() + 1000;
