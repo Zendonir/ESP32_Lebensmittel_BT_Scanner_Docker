@@ -49,23 +49,17 @@
 // ---- SD-Karte (SDMMC, 1-Bit-Modus) -----------------------------------------
 // Derselbe physische Kartensteckplatz wie im Vorgaengerprojekt
 // (SD_MMC.setPins(CLK, CMD, D0)). Keine CS-Leitung - SDMMC ist kein SPI.
-#if defined(BOARD_WAVESHARE_35B)
-// Auf der 3.5B liegen GPIO 9, 10 und 11 auf der Stiftleiste (siehe
-// Pinbelegung im Handbuch) - dort steckt also nicht die SD-Karte. Welche Pins
-// es stattdessen sind, geht aus dem Handbuch nicht hervor. Bis das geklaert
-// ist, bleibt der Kartenleser hier aus: mit den Pins der 3.5 wuerde die
-// Firmware Leitungen der Stiftleiste als SDMMC-Bus treiben und damit stoeren,
-// was dort angeschlossen ist.
-#define SD_ENABLED 0
-#define SD_CLK -1
-#define SD_CMD -1
-#define SD_D0  -1
-#else
+// Beide Boardvarianten benutzen dieselben Pins.
+//
+// ACHTUNG, hier lag ich schon einmal falsch: im Handbuch der 3.5B stehen
+// GPIO 9, 10 und 11 auch auf der Stiftleiste. Daraus folgt *nicht*, dass dort
+// keine SD-Karte haengt - die Leitungen sind auf beides gefuehrt. Wer das
+// verwechselt und den Kartenleser abschaltet, nimmt dem Geraet die
+// Wiederherstellung der Zugangsdaten nach einem Werksreset.
 #define SD_ENABLED 1
 #define SD_CLK 11
 #define SD_CMD 10
 #define SD_D0  9
-#endif
 
 // ---- Drucker (ESC/POS ueber UART) ------------------------------------------
 #define PRINTER_TX   44
