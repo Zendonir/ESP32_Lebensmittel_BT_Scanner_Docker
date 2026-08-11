@@ -108,7 +108,11 @@ bringt.
   Cache abgeschaltet und ein Stack in PSRAM unerreichbar
   (`assert esp_task_stack_is_sane_cache_disabled()`).
 * Im NVS stehen nur WLAN-Zugang, Server, Token und Anzeigename. Kein
-  Dateisystem, kein JSON, kein Produktcache.
+  Dateisystem, kein JSON, kein Produktcache. Dieselben Werte werden zusätzlich
+  still auf eine eingelegte SD-Karte gespiegelt (`core/SdStore`) - beim
+  allerersten Start (leeres NVS) liest das Gerät sie von dort, statt das
+  Einrichtungsportal zu verlangen. Kein Ersatz für das NVS, nur eine
+  Vorbelegung fürs Tauschen defekter Geräte.
 
 ### Partitionen
 

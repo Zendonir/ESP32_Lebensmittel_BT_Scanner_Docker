@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <esp_mac.h>   // esp_read_mac() - nicht ueber Arduino.h eingebunden
 
+#include "SdStore.h"
 #include "config.h"
 
 Settings settings;
@@ -28,6 +29,15 @@ void Settings::begin() {
     prefs.end();
 
     if (deviceName.isEmpty()) deviceName = "Terminal-" + deviceId().substring(6);
+
+    // Erster Start (oder nach einem Werksreset): im NVS steht noch nichts,
+    // eine SD-Karte mit einer fruehreren Sicherung aber vielleicht schon.
+    // Uebernommene Werte wandern sofort ins NVS, damit die Karte danach
+    // nicht mehr gezogen werden muss.
+    if (!configured() && sdStore.loadSettings()) {
+        log_i("Zugangsdaten von der SD-Karte uebernommen");
+        save();
+    }
 }
 
 void Settings::save() {
@@ -40,6 +50,10 @@ void Settings::save() {
     prefs.putString("name", deviceName);
     prefs.putBool("tls", useTls);
     prefs.end();
+
+    // Stille Spiegelung; ohne Karte oder bei vollem Speicher passiert
+    // einfach nichts - das NVS bleibt in jedem Fall die verbindliche Quelle.
+    sdStore.saveSettings();
 }
 
 void Settings::clear() {

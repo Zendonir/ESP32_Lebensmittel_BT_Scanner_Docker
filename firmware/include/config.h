@@ -46,6 +46,14 @@
 #endif
 #define I2C_FREQ   400000
 
+// ---- SD-Karte (SDMMC, 1-Bit-Modus) -----------------------------------------
+// Derselbe physische Kartensteckplatz wie im Vorgaengerprojekt
+// (SD_MMC.setPins(CLK, CMD, D0)); beide Boardvarianten teilen sich denselben
+// Steckplatz, unabhaengig vom Display. Keine CS-Leitung - SDMMC ist kein SPI.
+#define SD_CLK 11
+#define SD_CMD 10
+#define SD_D0  9
+
 // ---- Drucker (ESC/POS ueber UART) ------------------------------------------
 #define PRINTER_TX   44
 #define PRINTER_RX   43

@@ -189,6 +189,20 @@ Web-Interface taucht es unter **Terminals** auf.
 Später lässt sich das Portal jederzeit wieder erzwingen: **BOOT** halten und
 das Gerät einschalten.
 
+### Sicherung auf der SD-Karte
+
+Steckt eine SD-Karte im Gerät, spiegelt das Terminal WLAN-Zugang,
+Server-Adresse, Port und Token automatisch nach `/terminal_settings.json` -
+still, ohne Bedienung. Bei einem **leeren** Gerät (frisch geflasht oder nach
+Werksreset) liest es diese Datei beim Start selbst ein, statt das
+Einrichtungsportal zu verlangen. Praktisch beim Tausch eines defekten
+Geräts: SD-Karte umstecken, fertig, kein erneutes Eintippen von WLAN-Passwort
+und Token.
+
+Das NVS bleibt dabei die verbindliche Quelle - die Karte wird nur einmalig
+gelesen, wenn im NVS noch nichts steht, und ist danach für den Betrieb nicht
+mehr nötig.
+
 ---
 
 ## Häufige Fehler
