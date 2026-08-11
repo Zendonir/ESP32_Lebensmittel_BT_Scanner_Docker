@@ -170,6 +170,15 @@ void loop() {
     net.loop();
 
     if (net.portalActive()) {
+        // Das Portal kann auch mitten im Betrieb aufgehen (anhaltender
+        // WLAN-/Server-Ausfall, siehe Net::trackConnectionHealth) - dann fehlt
+        // der Bildschirmaufruf aus setup() und das Display wuerde einfach
+        // weiter den letzten Zustand zeigen.
+        static bool wasPortalActive = false;
+        if (!wasPortalActive) {
+            screen.showBoot("Einrichtung", String("WLAN ") + AP_SSID + " - 192.168.4.1");
+        }
+        wasPortalActive = true;
         delay(5);
         return;
     }

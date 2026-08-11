@@ -37,6 +37,7 @@ private:
     void startSocket();
     void handleSocketEvent(uint8_t type, uint8_t *payload, size_t length);
     void sendHello();
+    void trackConnectionHealth(bool fullyConnected);
 
     MessageHandler _handler;
     bool _wsConnected   = false;
@@ -44,6 +45,10 @@ private:
     bool _portalActive  = false;
     uint32_t _lastWifiTry = 0;
     uint32_t _helloAt     = 0;
+
+    // Gestufte Wiederherstellung bei anhaltendem Ausfall - siehe config.h.
+    uint32_t _disconnectedSince = 0;   // 0 = gerade verbunden
+    bool     _sdRetryDone       = false;
 };
 
 extern Net net;

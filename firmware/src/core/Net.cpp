@@ -5,6 +5,7 @@
 #include <WebSocketsClient.h>
 #include <WiFi.h>
 
+#include "SdStore.h"
 #include "Settings.h"
 #include "config.h"
 
@@ -154,6 +155,8 @@ void Net::handleSocketEvent(uint8_t type, uint8_t *payload, size_t length) {
     switch (type) {
         case WStype_CONNECTED:
             _wsConnected = true;
+            _disconnectedSince = 0;   // Ausfall vorbei - naechster faengt wieder bei 0 an
+            _sdRetryDone = false;
             log_i("Server verbunden");
             sendHello();
             break;
@@ -219,6 +222,9 @@ void Net::loop() {
 
     if (WiFi.status() != WL_CONNECTED) {
         _wsConnected = false;
+        trackConnectionHealth(false);
+        if (_portalActive) return;   // trackConnectionHealth kann das Portal ausgeloest haben
+
         // WiFi.setAutoReconnect() greift nicht in jedem Fehlerfall (z.B. wenn
         // der Router waehrend des DHCP-Vorgangs verschwindet). Deshalb alle
         // 20 s ein expliziter Neuversuch.
@@ -231,8 +237,51 @@ void Net::loop() {
         return;
     }
 
+    trackConnectionHealth(_wsConnected);
+    if (_portalActive) return;
+
     if (!_wsStarted) startSocket();
     ws.loop();
+}
+
+// Bewertet einen anhaltenden Ausfall (WLAN oder Server) und eskaliert in zwei
+// Stufen - siehe die Zeitleiste in config.h. Beide Stufen laufen genau
+// einmal pro Ausfall, nicht bei jedem Loop-Durchlauf.
+void Net::trackConnectionHealth(bool fullyConnected) {
+    if (fullyConnected) {
+        _disconnectedSince = 0;
+        _sdRetryDone = false;
+        return;
+    }
+
+    if (_disconnectedSince == 0) {
+        _disconnectedSince = millis();
+        return;
+    }
+    const uint32_t downFor = millis() - _disconnectedSince;
+
+    if (!_sdRetryDone && downFor >= SD_RETRY_AFTER_MS) {
+        _sdRetryDone = true;
+        log_w("Keine Verbindung seit %u s - lese Zugangsdaten erneut von der SD-Karte",
+              downFor / 1000);
+        if (sdStore.loadSettings()) {
+            settings.save();
+            log_i("Zugangsdaten von der SD-Karte uebernommen - neuer Versuch");
+        } else {
+            log_i("Keine (neue) Datei auf der SD-Karte - Zugangsdaten unveraendert");
+        }
+        // Sofort neu verbinden statt auf den naechsten 20-s-Takt zu warten -
+        // eine gerade erst geaenderte Karte soll nicht unnoetig lange warten.
+        WiFi.disconnect();
+        WiFi.begin(settings.wifiSsid.c_str(), settings.wifiPass.c_str());
+        _lastWifiTry = millis();
+    }
+
+    if (downFor >= PORTAL_FALLBACK_AFTER_MS) {
+        log_w("Weiterhin keine Verbindung nach %u s - Einrichtungsportal wird geoeffnet",
+              downFor / 1000);
+        startPortal();
+    }
 }
 
 bool Net::wifiConnected() const { return WiFi.status() == WL_CONNECTED; }

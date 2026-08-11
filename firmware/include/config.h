@@ -104,3 +104,16 @@
 #define WDT_TIMEOUT_S        30
 #define TOUCH_POLL_MS        20
 #define BLE_CONNECT_TIMEOUT_MS 30000
+
+// Gestufte Wiederherstellung, wenn WLAN oder Server dauerhaft nicht
+// erreichbar sind (falsches Passwort nach einem Routertausch, Server-IP hat
+// sich geaendert, ...). Beide Zeiten zaehlen ab dem Beginn desselben
+// Ausfalls, nicht ab dem Geraetestart.
+//
+//   0 ................ SD_RETRY_AFTER_MS ................ PORTAL_FALLBACK_AFTER_MS
+//   |  normale WLAN-Neuversuche (alle 20 s)  |  einmalig SD lesen  |  Portal
+//
+// Ein kurzer Routerneustart faellt in die erste Phase und bleibt unbemerkt;
+// erst ein wirklich anhaltender Ausfall fuehrt zum Portal.
+#define SD_RETRY_AFTER_MS       90000    // 1,5 Minuten
+#define PORTAL_FALLBACK_AFTER_MS 180000  // 3 Minuten

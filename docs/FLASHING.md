@@ -199,9 +199,26 @@ Einrichtungsportal zu verlangen. Praktisch beim Tausch eines defekten
 Geräts: SD-Karte umstecken, fertig, kein erneutes Eintippen von WLAN-Passwort
 und Token.
 
-Das NVS bleibt dabei die verbindliche Quelle - die Karte wird nur einmalig
-gelesen, wenn im NVS noch nichts steht, und ist danach für den Betrieb nicht
-mehr nötig.
+Das NVS bleibt dabei die verbindliche Quelle - die Karte wird beim Start nur
+einmalig gelesen, wenn im NVS noch nichts steht, und ist danach für den
+Betrieb nicht mehr nötig.
+
+### Wenn WLAN oder Server dauerhaft nicht erreichbar sind
+
+Bricht die Verbindung nicht nur kurz ab, sondern bleibt sie es (falsches
+WLAN-Passwort nach einem Routertausch, Server-IP hat sich geändert, ...),
+eskaliert das Terminal in zwei Stufen - jede genau einmal pro Ausfall:
+
+1. **Nach 1,5 Minuten** liest es die Zugangsdaten erneut von der SD-Karte
+   (falls eine steckt) und versucht sofort neu zu verbinden. So reicht es,
+   nach einem Umzug oder Routertausch die `terminal_settings.json` auf der
+   Karte zu aktualisieren, ohne das Gerät anzufassen.
+2. **Nach 3 Minuten** ohne Verbindung öffnet es von selbst das
+   Einrichtungsportal (`Lebensmittel-Terminal`, `192.168.4.1`) - genau wie
+   beim Halten von BOOT beim Einschalten.
+
+Ein kurzer Routerneustart fällt in die normalen 20-Sekunden-Neuversuche und
+bleibt unbemerkt; erst ein wirklich anhaltender Ausfall führt zum Portal.
 
 ---
 
