@@ -17,6 +17,14 @@
 #include <TFT_eSPI.h>
 #endif
 
+// Nach dem Displaytreiber einbinden: beide definieren GFXfont/GFXglyph, und
+// zwar byteidentisch - dieselben Schriftdateien passen deshalb auf beide
+// Boardvarianten.
+#include "fonts/UiSans12.h"
+#include "fonts/UiSans16.h"
+#include "fonts/UiSansBold21.h"
+#include "fonts/UiSansBold38.h"
+
 // Kleine Kompatibilitaetsschicht fuer die beiden elektrisch unterschiedlichen
 // 3,5-Zoll-Boards. Screen kennt dadurch weder TFT_eSPI noch Arduino_GFX.
 class DisplayCanvas {
@@ -36,6 +44,8 @@ public:
     void pushSprite(int16_t x, int16_t y);
 
 private:
+    static const GFXfont *fontFor(uint8_t font);
+
     bool _created = false;
     uint8_t _datum = TL_DATUM;
     uint8_t _font = 2;

@@ -21,14 +21,29 @@ bool DisplayCanvas::begin() {
     _tft.setRotation(1);
     _sprite.setColorDepth(16);
     _created = _sprite.createSprite(UI_WIDTH, UI_HEIGHT) != nullptr;
+    // Startschrift setzen, damit vor dem ersten setTextFont() nicht die
+    // eingebaute Bitmapschrift durchschlaegt.
+    if (_created) _sprite.setFreeFont(fontFor(_font));
 #endif
     return _created;
+}
+
+// Die Bildschirme sprechen weiterhin in den gewohnten Nummern (1/2/4/6/7) der
+// eingebauten TFT_eSPI-Schriften. Hier wird daraus eine echte Vektorschrift -
+// die eingebauten sind grob gerastert und sehen auf diesem Panel entsprechend
+// kantig aus. Die Groessen sind so gewaehlt, dass sie die bisherigen
+// Zeilenhoehen moeglichst genau treffen, damit kein Layout verrutscht.
+const GFXfont *DisplayCanvas::fontFor(uint8_t font) {
+    if (font >= 6) return &UiSansBold38;   // grosse Datums-/Zahlenanzeige
+    if (font >= 4) return &UiSansBold21;   // Titel, Kachelbeschriftung
+    if (font >= 2) return &UiSans16;       // Fliesstext
+    return &UiSans12;                      // Kleingedrucktes
 }
 
 void DisplayCanvas::setTextFont(uint8_t font) {
     _font = font;
 #if !defined(BOARD_WAVESHARE_35B)
-    _sprite.setTextFont(font);
+    _sprite.setFreeFont(fontFor(font));
 #endif
 }
 
@@ -84,21 +99,52 @@ void DisplayCanvas::fillCircle(int16_t x, int16_t y, int16_t radius, uint16_t co
 #endif
 }
 
+#if defined(BOARD_WAVESHARE_35B)
+// Arduino_GFX dekodiert UTF-8 nur fuer u8g2-Schriften, nicht fuer die hier
+// verwendeten GFX-Schriften - ohne diese Umsetzung wuerde aus einem "ue" nicht
+// ein Zeichen, sondern zwei falsche. TFT_eSPI bringt das selbst mit, deshalb
+// steht es nur in diesem Zweig.
+static String toLatin1(const String &utf8) {
+    String out;
+    out.reserve(utf8.length());
+    for (size_t i = 0; i < utf8.length(); i++) {
+        const uint8_t c = utf8[i];
+        if (c < 0x80) {
+            out += (char)c;
+        } else if ((c & 0xE0) == 0xC0 && i + 1 < utf8.length()) {
+            const uint16_t cp = ((c & 0x1F) << 6) | (utf8[++i] & 0x3F);
+            out += (cp <= 0xFF) ? (char)cp : '?';
+        } else if ((c & 0xF0) == 0xE0) {
+            i += 2;            // 3-Byte-Zeichen kennt Latin-1 nicht
+            out += '?';
+        } else {
+            out += '?';
+        }
+    }
+    return out;
+}
+#endif
+
 void DisplayCanvas::drawString(const String &text, int16_t x, int16_t y) {
 #if defined(BOARD_WAVESHARE_35B)
     if (!_canvas) return;
-    const uint8_t scale = _font >= 7 ? 4 : _font >= 6 ? 3 : _font >= 4 ? 2 : 1;
-    _canvas->setTextSize(scale);
+    const String out = toLatin1(text);
+    _canvas->setFont(fontFor(_font));
+    _canvas->setTextSize(1);
     _canvas->setTextColor(_fg, _bg);
+
+    // Bei einer GFX-Schrift ist die Cursorposition die Grundlinie, nicht die
+    // linke obere Ecke; bx/by geben den Versatz dorthin an. Ohne diese
+    // Umrechnung saesse jede Zeile um die Schrifthoehe zu hoch.
     int16_t bx = 0, by = 0;
     uint16_t bw = 0, bh = 0;
-    _canvas->getTextBounds(text, 0, 0, &bx, &by, &bw, &bh);
+    _canvas->getTextBounds(out, 0, 0, &bx, &by, &bw, &bh);
     if (_datum == MC_DATUM) {
-        x -= static_cast<int16_t>(bw / 2);
-        y -= static_cast<int16_t>(bh / 2);
+        _canvas->setCursor(x - bx - bw / 2, y - by - bh / 2);
+    } else {
+        _canvas->setCursor(x - bx, y - by);
     }
-    _canvas->setCursor(x, y);
-    _canvas->print(text);
+    _canvas->print(out);
 #else
     _sprite.drawString(text, x, y);
 #endif
@@ -107,11 +153,11 @@ void DisplayCanvas::drawString(const String &text, int16_t x, int16_t y) {
 uint16_t DisplayCanvas::textWidth(const String &text) {
 #if defined(BOARD_WAVESHARE_35B)
     if (!_canvas) return 0;
-    const uint8_t scale = _font >= 7 ? 4 : _font >= 6 ? 3 : _font >= 4 ? 2 : 1;
-    _canvas->setTextSize(scale);
+    _canvas->setFont(fontFor(_font));
+    _canvas->setTextSize(1);
     int16_t bx = 0, by = 0;
     uint16_t bw = 0, bh = 0;
-    _canvas->getTextBounds(text, 0, 0, &bx, &by, &bw, &bh);
+    _canvas->getTextBounds(toLatin1(text), 0, 0, &bx, &by, &bw, &bh);
     return bw;
 #else
     return _sprite.textWidth(text);
