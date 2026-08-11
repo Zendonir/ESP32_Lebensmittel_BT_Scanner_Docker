@@ -200,30 +200,54 @@ void loop() {
     }
 
     // --- Beruehrung -------------------------------------------------------
-    int16_t x = 0, y = 0;
-    if (touch.pressed(x, y)) {
-        const Action action = screen.handleTouch(x, y);
-        if (action.type == ActionType::Tap) {
+    const Gesture gesture = touch.poll(screen.scrollable());
+    switch (gesture.type) {
+        case GestureType::Tap: {
+            const Action action = screen.handleTouch(gesture.x, gesture.y);
+            if (action.type == ActionType::Tap) {
+                JsonDocument doc;
+                doc["t"] = "tap";
+                doc["screen"] = screen.screenId();
+                doc["item"] = action.id;
+                net.send(doc);
+            } else if (action.type == ActionType::Input) {
+                // Erst den Wert, dann den Tipp: der Server soll beides in
+                // dieser Reihenfolge sehen, sonst speichert er den vorherigen
+                // Wert.
+                JsonDocument value;
+                value["t"] = "input";
+                value["screen"] = screen.screenId();
+                value["value"] = action.value;
+                net.send(value);
+
+                JsonDocument tap;
+                tap["t"] = "tap";
+                tap["screen"] = screen.screenId();
+                tap["item"] = action.id;
+                net.send(tap);
+            }
+            break;
+        }
+
+        case GestureType::SwipeLeft:
+        case GestureType::SwipeRight: {
+            // Bildschirmweite Zurueck-Geste - "back" existiert als Aktion
+            // bereits auf jedem Bildschirm (device/workflow.py::on_tap), die
+            // Geste loest also nur aus, was auch der Zurueck-Knopf ausloest.
             JsonDocument doc;
             doc["t"] = "tap";
             doc["screen"] = screen.screenId();
-            doc["item"] = action.id;
+            doc["item"] = "back";
             net.send(doc);
-        } else if (action.type == ActionType::Input) {
-            // Erst den Wert, dann den Tipp: der Server soll beides in dieser
-            // Reihenfolge sehen, sonst speichert er den vorherigen Wert.
-            JsonDocument value;
-            value["t"] = "input";
-            value["screen"] = screen.screenId();
-            value["value"] = action.value;
-            net.send(value);
-
-            JsonDocument tap;
-            tap["t"] = "tap";
-            tap["screen"] = screen.screenId();
-            tap["item"] = action.id;
-            net.send(tap);
+            break;
         }
+
+        case GestureType::ScrollDrag:
+            screen.scrollBy(gesture.deltaY);
+            break;
+
+        default:
+            break;
     }
 
     // --- Drucken ----------------------------------------------------------

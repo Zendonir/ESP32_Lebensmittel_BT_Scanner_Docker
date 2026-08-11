@@ -61,6 +61,7 @@ void Screen::apply(JsonDocument &doc) {
     _screenId = _screen["id"] | 0;
     _kind = String(_screen["kind"] | "message");
     _scroll = 0;
+    _scrollAccumPx = 0;
 
     if (_kind == "date") {
         _dateValue = String(_screen["value"] | "");
@@ -232,11 +233,30 @@ void Screen::drawTiles() {
     }
 }
 
+void Screen::scrollBy(int16_t deltaYPx) {
+    if (_kind != "list" || _listTotal <= _pageSize) return;
+
+    // Zeilen laufen mit dem Finger mit: nach oben ziehen (deltaY negativ)
+    // blaettert vorwaerts durch die Liste.
+    _scrollAccumPx -= deltaYPx;
+    const int16_t rowH = 44;
+    const int prevScroll = _scroll;
+    while (_scrollAccumPx >= rowH) { _scrollAccumPx -= rowH; _scroll++; }
+    while (_scrollAccumPx <= -rowH) { _scrollAccumPx += rowH; _scroll--; }
+
+    const int maxScroll = max(0, _listTotal - _pageSize);
+    if (_scroll < 0) { _scroll = 0; _scrollAccumPx = 0; }
+    if (_scroll > maxScroll) { _scroll = maxScroll; _scrollAccumPx = 0; }
+
+    if (_scroll != prevScroll) redraw();
+}
+
 void Screen::drawList() {
     JsonArray items = _screen["items"].as<JsonArray>();
     const int total = items.size();
     const int16_t rowH = 44;
     _pageSize = BODY_H / rowH;
+    _listTotal = total;
 
     if (_scroll > max(0, total - _pageSize)) _scroll = max(0, total - _pageSize);
 

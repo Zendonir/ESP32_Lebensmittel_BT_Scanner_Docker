@@ -46,6 +46,15 @@ public:
     // Beruehrung auswerten. Liefert die auszuloesende Aktion.
     Action handleTouch(int16_t x, int16_t y);
 
+    // Kann der aktuelle Bildschirm ueberhaupt scrollen? Steuert bei Touch, ob
+    // eine anhaltende Vertikalbewegung als Scroll-Drag statt als Swipe zaehlt.
+    bool scrollable() const { return _kind == "list" && _listTotal > _pageSize; }
+
+    // Um die uebergebenen Pixel weiterscrollen (Finger nach oben = Liste
+    // laeuft weiter). Rechnet intern in ganze Zeilen um und zeichnet nur bei
+    // tatsaechlicher Verschiebung neu.
+    void scrollBy(int16_t deltaYPx);
+
     int screenId() const { return _screenId; }
     bool ready() const { return _ready; }
 
@@ -92,8 +101,10 @@ private:
     bool     _kbNumeric = false;   // Ziffern/Symbole statt Buchstaben
 
     // Liste
-    int      _scroll     = 0;
-    int      _pageSize   = 4;
+    int      _scroll        = 0;
+    int      _pageSize      = 4;
+    int      _listTotal     = 0;
+    int16_t  _scrollAccumPx = 0;   // Restweg unterhalb einer ganzen Zeile
 
     String   _toastText;
     String   _toastLevel;

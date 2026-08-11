@@ -6,6 +6,14 @@
 
 Touch touch;
 
+// Schwellwerte aus dem Vorgaengerprojekt (Display::tick(), display.cpp)
+// uebernommen - dort ueber viele Geraete hinweg erprobt.
+static constexpr int16_t  SWIPE_MIN_DIST  = 60;   // px Mindestweg fuer einen Swipe
+static constexpr int16_t  SWIPE_MAX_OFFAX = 40;   // px max. Abweichung quer zur Richtung
+static constexpr uint32_t TAP_MAX_MS      = 250;  // ms max. Dauer fuer einen Tap
+static constexpr int16_t  TAP_MAX_DIST    = 15;   // px max. Bewegung fuer einen Tap
+static constexpr int16_t  SCROLL_DEAD_PX  = 8;     // px Totzone, bevor der Drag beginnt
+
 bool Touch::begin() {
     // Wire wurde bereits in Board::begin() gestartet - dort muss der Bus
     // stehen, bevor der Expander den Display-Reset loesen kann.
@@ -64,26 +72,68 @@ bool Touch::read(int16_t &x, int16_t &y) {
 #endif
 }
 
-bool Touch::pressed(int16_t &x, int16_t &y) {
-    if (!_ok) return false;
+Gesture Touch::poll(bool scrollable) {
+    Gesture g;
+    if (!_ok) return g;
 
     const uint32_t now = millis();
-    if (now - _lastPoll < TOUCH_POLL_MS) return false;
+    if (now - _lastPoll < TOUCH_POLL_MS) return g;
     _lastPoll = now;
 
     int16_t px = 0, py = 0;
     const bool contact = read(px, py);
 
-    if (!contact) {
-        _down = false;
-        return false;
+    if (contact && !_down) {
+        // Neuer Fingerkontakt - erst beim Loslassen entscheidet sich, ob es
+        // ein Tap oder ein Swipe war (Distanz/Dauer, siehe unten).
+        _down     = true;
+        _dragging = false;
+        _startX = _lastX = px;
+        _startY = _lastY = py;
+        _downAt   = now;
+        return g;
     }
-    if (_down) return false;             // Finger liegt noch auf: kein neues Ereignis
-    if (now - _lastEvent < 220) return false;  // Entprellen gegen Doppelausloesung
 
-    _down = true;
-    _lastEvent = now;
-    x = px;
-    y = py;
-    return true;
+    if (contact && _down) {
+        const int16_t dx = px - _startX;
+        const int16_t dy = py - _startY;
+
+        if (!_dragging && scrollable && abs(dy) > SCROLL_DEAD_PX && abs(dy) > abs(dx)) {
+            _dragging = true;
+        }
+        if (_dragging) {
+            g.type    = GestureType::ScrollDrag;
+            g.deltaY  = py - _lastY;
+        }
+        _lastX = px;
+        _lastY = py;
+        return g;
+    }
+
+    if (!contact && _down) {
+        // Finger abgehoben - jetzt auswerten, was es war.
+        _down = false;
+        if (_dragging) {
+            _dragging = false;
+            g.type = GestureType::ScrollEnd;
+            return g;
+        }
+
+        const int16_t  dx      = _lastX - _startX;
+        const int16_t  dy      = _lastY - _startY;
+        const int16_t  absDx   = abs(dx);
+        const int16_t  absDy   = abs(dy);
+        const uint32_t elapsed = now - _downAt;
+
+        if (elapsed <= TAP_MAX_MS && absDx <= TAP_MAX_DIST && absDy <= TAP_MAX_DIST) {
+            g.type = GestureType::Tap;
+            g.x    = _startX;
+            g.y    = _startY;
+        } else if (absDx >= SWIPE_MIN_DIST && absDy <= SWIPE_MAX_OFFAX) {
+            g.type = dx < 0 ? GestureType::SwipeLeft : GestureType::SwipeRight;
+        }
+        return g;
+    }
+
+    return g;
 }
