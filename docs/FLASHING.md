@@ -49,29 +49,33 @@ Ab dem ersten Flashen per USB geht jedes weitere Update ohne Kabel. Der
 **Server** hält das Abbild, das Terminal holt es sich dort ab – es braucht
 dafür weder Internetzugang noch Zertifikate.
 
-**1. Abbild in den Server legen** – entweder automatisch aus dem neuesten
-GitHub-Release:
+Alles dafür steht im Web-Interface unter **Terminals**.
 
-```bash
-curl -X POST http://<server>:8080/api/firmware/fetch
-```
+**1. Abbild in den Server legen** – in der Karte *Firmware*:
 
-oder von Hand, wenn der Server kein Internet hat (Datei aus den
-[Releases](https://github.com/Zendonir/ESP32_Lebensmittel_BT_Scanner_Docker/releases)):
-
-```bash
-curl -X POST "http://<server>:8080/api/firmware/upload?board=35" \
-     -F file=@firmware-35.bin
-```
+* **Aus GitHub-Release holen** – ein Klick, holt beide Boardvarianten aus dem
+  neuesten Release. Setzt Internetzugang des **Servers** voraus (nicht des
+  Terminals).
+* **Hochladen** – für einen Server ohne Internet: Datei aus den
+  [Releases](https://github.com/Zendonir/ESP32_Lebensmittel_BT_Scanner_Docker/releases)
+  laden, Variante wählen, hochladen. Das Versionsfeld ist optional, aber
+  hilfreich – daran erkennt der Server später, ob ein Gerät schon aktuell ist.
 
 > **`firmware-35.bin`, nicht `firmware-35.factory.bin`.** Die Factory-Datei
 > enthält Bootloader und Partitionstabelle und lässt sich nur über USB
 > einspielen. Der Server weist sie ab, statt ein Gerät unbrauchbar zu machen.
 
-**2. Update auslösen** – am Terminal selbst unter **System → Firmware Update**,
-oder vom Server aus für ein bestimmtes Gerät:
+**2. Update auslösen** – bei jedem Terminal steht dafür ein **Update**-Knopf.
+Ist er ausgegraut, sagt der Tooltip warum (nicht verbunden, kein Abbild für
+die Variante, oder schon aktuell). Alternativ am Terminal selbst unter
+**System → Firmware Update**.
+
+Für Skripte gibt es dieselben Wege über die API:
 
 ```bash
+curl -X POST http://<server>:8080/api/firmware/fetch
+curl -X POST "http://<server>:8080/api/firmware/upload?board=35&version=v2.1.0" \
+     -F file=@firmware-35.bin
 curl -X POST http://<server>:8080/api/firmware/push/<geraete-id>
 ```
 

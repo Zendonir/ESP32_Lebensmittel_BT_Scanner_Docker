@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -37,12 +38,21 @@ async def list_firmware():
 
 
 @router.post("/upload")
-async def upload_firmware(board: str = Query(...), file: UploadFile = ...):
-    """Ein selbst gebautes oder heruntergeladenes `firmware-<board>.bin` ablegen."""
+async def upload_firmware(
+    board: str = Query(...),
+    version: str = Query("", description="z.B. v2.1.0 - leer: Datum des Uploads"),
+    file: UploadFile = ...,
+):
+    """Ein selbst gebautes oder heruntergeladenes `firmware-<board>.bin` ablegen.
+
+    Der Dateiname taugt nicht als Version - er heisst im Release immer
+    `firmware-<board>.bin`. Ohne Angabe wird deshalb das Datum genommen, damit
+    zumindest unterscheidbar bleibt, was wann hinterlegt wurde.
+    """
     data = await file.read()
-    version = (file.filename or "upload").removesuffix(".bin")
+    label = version.strip() or f"upload-{datetime.now():%Y-%m-%d}"
     try:
-        return fw.store(board, data, version, "upload")
+        return fw.store(board, data, label, "upload")
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

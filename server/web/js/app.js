@@ -11,6 +11,7 @@ const state = {
   locations: [],
   templates: [],
   devices: [],
+  firmware: [],
   settings: {},
 };
 
@@ -416,6 +417,33 @@ document.addEventListener('click', async (ev) => {
 });
 
 // ------------------------------------------------------------------- Terminals
+
+// Der Update-Knopf bleibt sichtbar, sagt aber beim Darueberfahren, warum er
+// gerade nichts bringt - ein verschwindender Knopf laesst einen nur raten.
+function updateHint(d) {
+  if (!d.online) return ' disabled title="Terminal ist nicht verbunden"';
+  const board = (d.telemetry || {}).board;
+  const image = state.firmware.find((f) => f.board === board);
+  if (!board) return ' disabled title="Boardvariante noch unbekannt – Terminal einmal neu verbinden lassen"';
+  if (!image) return ` disabled title="Kein Abbild für Variante ${board} hinterlegt"`;
+  if (image.version === d.firmware) return ` disabled title="Bereits auf ${image.version}"`;
+  return ` title="Auf ${image.version} aktualisieren"`;
+}
+
+async function loadFirmware() {
+  try {
+    state.firmware = (await get('/api/firmware')).images;
+  } catch { state.firmware = []; }
+
+  const box = $('#fw-list');
+  if (!box) return;
+  box.innerHTML = state.firmware.length
+    ? state.firmware.map((f) =>
+        `<div>Variante <b>${esc(f.board)}</b> · ${esc(f.version)} ·
+         ${Math.round(f.size / 1024)} KB · ${esc(f.source)}</div>`).join('')
+    : '<span class="muted">Noch kein Abbild hinterlegt.</span>';
+}
+
 async function loadDevices() {
   state.devices = await get('/api/devices');
   $('#devices-list').innerHTML = state.devices.length ? state.devices.map((d) => {
@@ -439,6 +467,7 @@ async function loadDevices() {
           ${state.locations.map((l) => `<option ${l.name === d.active_location ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
         </select>
         <button class="sm" data-dev-beep="${esc(d.device_id)}">Ton</button>
+        <button class="sm" data-dev-update="${esc(d.device_id)}"${updateHint(d)}>Update</button>
         <button class="sm danger" data-dev-reboot="${esc(d.device_id)}">Neustart</button>
       </div></div>`;
   }).join('') : '<div class="card empty">Noch kein Terminal verbunden.</div>';
@@ -448,14 +477,58 @@ async function loadDevices() {
 }
 
 document.addEventListener('click', async (ev) => {
-  const b = ev.target.closest('button[data-dev-beep],button[data-dev-reboot]');
+  const b = ev.target.closest('button[data-dev-beep],button[data-dev-reboot],button[data-dev-update]');
   if (!b) return;
   try {
-    if (b.dataset.devBeep) { await post(`/api/devices/${b.dataset.devBeep}/beep`); toast('Ton gesendet'); }
-    else {
+    if (b.dataset.devBeep) {
+      await post(`/api/devices/${b.dataset.devBeep}/beep`); toast('Ton gesendet');
+    } else if (b.dataset.devUpdate) {
+      if (!confirm('Firmware jetzt aufspielen? Das Terminal startet danach neu.')) return;
+      const res = await post(`/api/firmware/push/${b.dataset.devUpdate}`);
+      toast(`Update auf ${res.version} gestartet`, 'success');
+    } else {
       if (!confirm('Terminal neu starten?')) return;
       await post(`/api/devices/${b.dataset.devReboot}/reboot`); toast('Neustart ausgelöst');
     }
+  } catch (e) { toast(e.message, 'error'); }
+});
+
+$('#fw-fetch')?.addEventListener('click', async (ev) => {
+  const button = ev.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Wird geholt…';
+  try {
+    const res = await post('/api/firmware/fetch');
+    toast(`${res.images.length} Abbild(er) geholt: ${res.images[0].version}`, 'success');
+    await loadFirmware();
+    await loadDevices();
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Aus GitHub-Release holen';
+  }
+});
+
+$('#fw-upload-form')?.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const file = $('#fw-file').files[0];
+  if (!file) return;
+  const body = new FormData();
+  body.append('file', file);
+  try {
+    const query = new URLSearchParams({
+      board: $('#fw-board').value,
+      version: $('#fw-version').value.trim(),
+    });
+    const res = await fetch(`/api/firmware/upload?${query}`, { method: 'POST', body });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Upload fehlgeschlagen');
+    toast(`${data.version} hinterlegt (Variante ${data.board})`, 'success');
+    $('#fw-file').value = '';
+    $('#fw-version').value = '';
+    await loadFirmware();
+    await loadDevices();
   } catch (e) { toast(e.message, 'error'); }
 });
 
@@ -612,7 +685,9 @@ const PAGE_LOADERS = {
   templates: loadTemplates,
   catalog: loadCatalogPage,
   shopping: loadShopping,
-  devices: loadDevices,
+  // Erst die Abbilder, dann die Geraete: updateHint() vergleicht die laufende
+  // Version mit der hinterlegten und braucht state.firmware bereits gefuellt.
+  devices: async () => { await loadFirmware(); await loadDevices(); },
   system: loadSystem,
 };
 

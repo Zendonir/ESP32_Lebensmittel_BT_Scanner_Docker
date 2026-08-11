@@ -193,6 +193,32 @@
   <!-- ------------------------------------------------------------- Terminals -->
   <section class="page" id="page-devices">
     <div id="devices-list" class="grid cols2"></div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="row">
+        <h2 style="margin:0;flex:1">Firmware</h2>
+        <button id="fw-fetch" class="ghost">Aus GitHub-Release holen</button>
+      </div>
+      <p class="muted">
+        Der Server hält die Abbilder, die Terminals holen sie sich dort ab.
+        Danach steht bei jedem Gerät oben „Update“ bereit.
+      </p>
+      <div id="fw-list" class="mono" style="margin:10px 0"></div>
+      <form class="row" id="fw-upload-form">
+        <select id="fw-board">
+          <option value="35">3.5 (ST7796)</option>
+          <option value="35b">3.5B (AXS15231B)</option>
+        </select>
+        <input type="file" id="fw-file" accept=".bin" required style="flex:1;min-width:180px">
+        <input id="fw-version" placeholder="Version, z. B. v2.1.0" style="width:180px">
+        <button class="primary">Hochladen</button>
+      </form>
+      <p class="muted" style="margin-top:8px">
+        <b>firmware-35.bin</b>, nicht <b>firmware-35.factory.bin</b> – Letztere
+        lässt sich nur über USB einspielen und wird hier abgewiesen.
+      </p>
+    </div>
+
     <div class="card" style="margin-top:14px">
       <h2>Scan simulieren</h2>
       <p class="muted">Schickt einen Code in den Workflow eines Terminals – zum Testen ohne BLE-Scanner.</p>
