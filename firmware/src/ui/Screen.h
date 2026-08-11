@@ -71,6 +71,11 @@ private:
     void drawKeyboard();
     void drawHome();
     void drawCards();
+    void drawDatePad();
+
+    // Welche Ziffern an der aktuellen Stelle ueberhaupt moeglich sind.
+    // Bit N gesetzt = Ziffer N erlaubt.
+    uint16_t datePadValidDigits() const;
     void drawToast();
     void commit();
 
@@ -100,6 +105,7 @@ private:
 
     // Zustand der Eingabeelemente
     String   _dateValue;
+    String   _dateDigits;      // bis zu 6 getippte Ziffern (TTMMJJ)
     float    _numberValue = 1;
     String   _textValue;
     bool     _kbShift   = false;   // Grossbuchstaben

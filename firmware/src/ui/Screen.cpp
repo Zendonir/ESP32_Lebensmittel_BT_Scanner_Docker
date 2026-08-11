@@ -75,6 +75,8 @@ void Screen::apply(JsonDocument &doc) {
         _textValue = String(_screen["value"] | "");
         _kbShift = false;
         _kbNumeric = false;
+    } else if (_kind == "datepad") {
+        _dateDigits = "";
     }
     redraw();
 }
@@ -131,6 +133,7 @@ void Screen::redraw() {
     else if (_kind == "keyboard") drawKeyboard();
     else if (_kind == "home") drawHome();
     else if (_kind == "cards") drawCards();
+    else if (_kind == "datepad") drawDatePad();
     else drawMessage();
 
     drawFooter();
@@ -151,12 +154,13 @@ void Screen::drawStatusBar() {
     _spr.setTextFont(2);
 
     JsonObject status = _screen["status"].as<JsonObject>();
-    const bool removeMode = status["mode"] == "remove";
     const char *location = status["location"] | "";
 
-    _spr.setTextColor(removeMode ? C_DANGER : C_OK, C_SURFACE);
-    _spr.drawString(removeMode ? "AUSLAGERN" : "EINLAGERN", 8, 5);
-    addHit(0, 0, 108, STATUS_H, "mode");
+    // Kein Ein-/Auslagern-Umschalter mehr: die Richtung entscheidet der
+    // gescannte Code (Produktbarcode einlagern, Etikett auslagern). Ein
+    // Umschalter waere nicht nur ueberfluessig, sondern irrefuehrend - und
+    // eine Bestandsaenderung soll am Geraet nicht aus Versehen per Finger
+    // ausloesbar sein.
 
     // Lagerort als antippbare Pille rechts - oeffnet die Ortsauswahl, wie im
     // Vorgaengerprojekt das Badge oben rechts.
@@ -666,6 +670,112 @@ void Screen::drawCards() {
     }
 }
 
+// Welche Ziffern an der aktuellen Stelle moeglich sind - 1:1 aus dem
+// Vorgaengerprojekt (showDateEntry). Unmoegliche Tasten werden ausgegraut und
+// nehmen keine Beruehrung an; damit kann gar kein unsinniges Datum entstehen.
+uint16_t Screen::datePadValidDigits() const {
+    switch (_dateDigits.length()) {
+        case 0:                                   // Zehner des Tages: 0-3
+            return 0x000F;
+        case 1:                                   // Einer des Tages
+            if (_dateDigits[0] == '0') return 0x03FE;   // 1-9, kein Tag 00
+            if (_dateDigits[0] == '3') return 0x0003;   // nur 30 und 31
+            return 0x03FF;
+        case 2:                                   // Zehner des Monats: 0-1
+            return 0x0003;
+        case 3:                                   // Einer des Monats
+            if (_dateDigits[2] == '0') return 0x03FE;   // 1-9, kein Monat 00
+            return 0x0007;                              // 10, 11, 12
+        default:                                  // Jahr: alles erlaubt
+            return 0x03FF;
+    }
+}
+
+// MHD-Eingabe, nachgebaut nach showDateEntry() aus dem Vorgaengerprojekt:
+// links Produktangaben und die grosse Datumsanzeige, rechts ein Ziffernblock.
+// Nach der sechsten Ziffer wird von selbst uebernommen - ohne Bestaetigen.
+void Screen::drawDatePad() {
+    static constexpr int16_t DIV_X = 240;
+    _spr.fillRect(DIV_X, BODY_Y, 1, H - BODY_Y, C_BORDER);
+
+    // ---- linke Haelfte: Produkt und Datum -------------------------------
+    JsonArray lines = _screen["lines"].as<JsonArray>();
+    int16_t ly = BODY_Y + 8;
+    int index = 0;
+    for (JsonVariant line : lines) {
+        if (index > 1) break;
+        _spr.setTextColor(index == 0 ? C_TEXT : C_MUTED, C_BG);
+        _spr.drawString(fitText(String(line.as<const char *>()), DIV_X - 20, 2), 10, ly);
+        ly += 20;
+        index++;
+    }
+
+    _spr.fillRect(10, BODY_Y + 52, DIV_X - 20, 1, C_BORDER);
+    _spr.setTextFont(2);
+    _spr.setTextColor(C_MUTED, C_BG);
+    _spr.drawString("MHD Eingabe:", 10, BODY_Y + 58);
+
+    const int16_t boxX = 10, boxY = BODY_Y + 76, boxW = DIV_X - 20, boxH = 76;
+    _spr.fillRoundRect(boxX, boxY, boxW, boxH, 10, C_SURFACE);
+    _spr.drawRoundRect(boxX, boxY, boxW, boxH, 10, C_PRIMARY);
+
+    // Platzhalter TT.MM.JJ, von links mit den getippten Ziffern gefuellt.
+    static const char PLACEHOLDER[6] = {'T', 'T', 'M', 'M', 'J', 'J'};
+    String shown;
+    for (int i = 0; i < 6; i++) {
+        shown += (i < (int)_dateDigits.length()) ? _dateDigits[i] : PLACEHOLDER[i];
+        if (i == 1 || i == 3) shown += '.';
+    }
+    _spr.setTextDatum(MC_DATUM);
+    _spr.setTextColor(C_PRIMARY, C_SURFACE);
+    _spr.drawString(fitText(shown, boxW - 12, 6), boxX + boxW / 2, boxY + boxH / 2);
+    _spr.setTextDatum(TL_DATUM);
+
+    // Knoepfe unter der Anzeige - was dort steht, bestimmt der Server.
+    JsonArray items = _screen["items"].as<JsonArray>();
+    const int count = items.size();
+    if (count > 0) {
+        const int16_t bh = 40, gap = 6;
+        int16_t by = H - 6 - count * bh - (count - 1) * gap;
+        for (JsonObject item : items) {
+            button(10, by, DIV_X - 20, bh, String(item["label"] | ""),
+                   parseColor(item["color"] | "", C_SURFACE2), String(item["id"] | ""));
+            by += bh + gap;
+        }
+    }
+
+    // ---- rechte Haelfte: Ziffernblock -----------------------------------
+    const int16_t npX = DIV_X + 1;
+    const int16_t npW = W - npX;
+    const int16_t btnW = npW / 3;
+    const int16_t btnH = (H - BODY_Y) / 4;
+    const uint16_t valid = datePadValidDigits();
+
+    auto key = [&](int16_t x, int16_t y, int16_t w, const String &label,
+                   bool enabled, const String &id, uint16_t bg) {
+        _spr.fillRect(x, y, w, btnH, bg);
+        _spr.fillRect(x, y, w, 1, C_BORDER);
+        _spr.fillRect(x, y, 1, btnH, C_BORDER);
+        _spr.setTextDatum(MC_DATUM);
+        _spr.setTextColor(enabled ? C_TEXT : C_MUTED, bg);
+        _spr.drawString(fitText(label, w - 8, 6), x + w / 2, y + btnH / 2);
+        _spr.setTextDatum(TL_DATUM);
+        if (enabled) addHit(x, y, w, btnH, id);
+    };
+
+    for (int i = 0; i < 9; i++) {
+        const int digit = i + 1;
+        const bool enabled = (valid >> digit) & 1;
+        key(npX + (i % 3) * btnW, BODY_Y + (i / 3) * btnH, btnW, String(digit),
+            enabled, "__dp" + String(digit), enabled ? C_SURFACE2 : C_SURFACE);
+    }
+
+    const int16_t lastY = BODY_Y + 3 * btnH;
+    const bool zeroOk = valid & 1;
+    key(npX, lastY, btnW * 2, "0", zeroOk, "__dp0", zeroOk ? C_SURFACE2 : C_SURFACE);
+    key(npX + btnW * 2, lastY, btnW, "<-", true, "__dpback", C_DANGER);
+}
+
 void Screen::drawFooter() {
     JsonArray buttons = _screen["buttons"].as<JsonArray>();
     if (buttons.isNull() || buttons.size() == 0) return;
@@ -713,6 +823,29 @@ Action Screen::handleTouch(int16_t x, int16_t y) {
         // keinen Netzverkehr. Erst "OK" schickt den Wert an den Server.
         if (id == "__up") { _scroll = max(0, _scroll - _pageSize); redraw(); return action; }
         if (id == "__down") { _scroll += _pageSize; redraw(); return action; }
+
+        if (id == "__dpback") {
+            if (_dateDigits.length()) _dateDigits.remove(_dateDigits.length() - 1);
+            redraw();
+            return action;
+        }
+        if (id.startsWith("__dp")) {
+            if (_dateDigits.length() < 6) _dateDigits += id[4];
+            if (_dateDigits.length() < 6) {
+                redraw();
+                return action;
+            }
+            // Sechste Ziffer: uebernehmen, ohne dass noch bestaetigt werden
+            // muss - so war es im Vorgaengerprojekt und es spart bei jedem
+            // Artikel einen Tastendruck.
+            const String iso = "20" + _dateDigits.substring(4, 6) + "-" +
+                               _dateDigits.substring(2, 4) + "-" +
+                               _dateDigits.substring(0, 2);
+            action.type  = ActionType::Input;
+            action.value = iso;
+            action.id    = "ok";
+            return action;
+        }
 
         if (id == "__d-") { _dateValue = shiftDate(_dateValue, -1, 0); redraw(); return action; }
         if (id == "__d+") { _dateValue = shiftDate(_dateValue, 1, 0); redraw(); return action; }

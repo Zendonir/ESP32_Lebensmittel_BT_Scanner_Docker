@@ -80,7 +80,6 @@ class DeviceSession:
     device_id: str
     stack: list[str] = field(default_factory=lambda: [HOME])
     draft: Draft = field(default_factory=Draft)
-    remove_mode: bool = False
     location: str = ""
     screen_id: int = 0
     last_result: list[str] = field(default_factory=list)
@@ -131,7 +130,6 @@ async def _status_bar(session: AsyncSession, sess: DeviceSession) -> dict:
     counts = await inv.stats(session)
     return {
         "location": sess.location,
-        "mode": "remove" if sess.remove_mode else "store",
         "total": counts["total"],
         "expiring": counts["expiring"] + counts["expired"],
         "battery": sess.scanner.get("battery", -1),
@@ -202,11 +200,7 @@ async def _screen_home(session, sess, sid, status) -> dict:
         {"label": "Kritisch", "value": counts["expired"], "color": "#f04640"},
         {"label": "Label-Rest", "value": max(0, roll["remaining"]), "color": "#2eb048"},
     ]
-    subtitle = (
-        "Barcode scannen zum Auslagern"
-        if sess.remove_mode
-        else "Barcode scannen zum Einlagern"
-    )
+    subtitle = "Produkt scannen = einlagern  ·  Etikett scannen = auslagern"
     return proto.screen(
         screen_id=sid,
         kind="home",
@@ -340,29 +334,28 @@ def _screen_unknown_name(sess, sid, status) -> dict:
 
 
 def _screen_date(sess, sid, status) -> dict:
+    """MHD eintippen - Ziffernblock wie im Vorgaengerprojekt.
+
+    Links Produktangaben und die grosse Anzeige TT.MM.JJ, rechts der
+    Ziffernblock. Das Geraet nimmt nach der sechsten Ziffer von selbst an;
+    unmoegliche Ziffern sind dort gar nicht erst antippbar.
+    """
     draft = sess.draft
     lines = [draft.name or "(ohne Namen)"]
-    if draft.brand:
-        lines.append(draft.brand)
-    if draft.barcode:
-        lines.append(draft.barcode)
-    presets = [
-        {"id": "p:3", "label": "+3 T"},
-        {"id": "p:7", "label": "+1 W"},
-        {"id": "p:30", "label": "+1 M"},
-        {"id": "p:180", "label": "+6 M"},
-        {"id": "p:365", "label": "+1 J"},
-        {"id": "p:0", "label": "Kein MHD"},
-    ]
+    lines.append(draft.brand or draft.barcode or "")
     return proto.screen(
         screen_id=sid,
-        kind="date",
+        kind="datepad",
         title="Mindesthaltbarkeit",
-        subtitle=to_display(draft.expiry_date) or "kein Datum",
         lines=lines,
         value=draft.expiry_date,
-        meta={"presets": presets},
-        buttons=[proto.BTN_BACK, proto.BTN_OK],
+        # Zwei Wege an der Tastatur vorbei. "Kein MHD" gab es im
+        # Vorgaengerprojekt auf diesem Bildschirm nicht, hier aber schon -
+        # sonst liesse sich Ware ohne Datum ueberhaupt nicht einlagern.
+        items=[
+            {"id": "p:0", "label": "Kein MHD", "color": "#1c222a"},
+            {"id": "cancel", "label": "Abbrechen", "color": "#cc9218"},
+        ],
         status=status,
     )
 
@@ -731,10 +724,7 @@ async def on_tap(session: AsyncSession, sess: DeviceSession, item: str) -> None:
 
 
 async def _tap_home(session, sess, item) -> None:
-    if item == "mode":
-        sess.remove_mode = not sess.remove_mode
-        await hub.send_to(sess.device_id, proto.beep("warn" if sess.remove_mode else "ok"))
-    elif item == "templates":
+    if item == "templates":
         sess.draft = Draft()
         sess.push(TMPL_CATEGORY)
     elif item == "locations":
@@ -758,17 +748,8 @@ async def _tap_inventory(session, sess, item) -> None:
         sess.inv_sort = INV_SORT_MODES[(idx + 1) % len(INV_SORT_MODES)]
     elif item == "search":
         sess.push(INV_SEARCH)
-    elif item.startswith("item:"):
-        label = item[5:]
-        row = await inv.find_active_by_label(session, label)
-        if row is None:
-            await hub.send_to(sess.device_id, proto.toast("Schon ausgelagert", "warn"))
-            return
-        await inv.remove_item(session, row, reason="device_list", device_id=sess.device_id)
-        await session.commit()
-        await hub.send_to(sess.device_id, proto.beep("ok"))
-        await hub.send_to(sess.device_id, proto.toast(f"{row.name} ausgelagert"))
-        await hub.notify_ui("inventory")
+    # Antippen einer Zeile bucht bewusst nichts aus: Auslagern geht
+    # ausschliesslich ueber den Scanner. Die Liste ist reine Anzeige.
 
 
 async def _tap_inv_search(session, sess, item) -> None:
@@ -881,18 +862,8 @@ async def _tap_location_new(session, sess, item) -> None:
 
 
 async def _tap_expiring(session, sess, item) -> None:
-    if not item.startswith("item:"):
-        return
-    label = item[5:]
-    row = await inv.find_active_by_label(session, label)
-    if row is None:
-        await hub.send_to(sess.device_id, proto.toast("Schon ausgelagert", "warn"))
-        return
-    await inv.remove_item(session, row, reason="device_list", device_id=sess.device_id)
-    await session.commit()
-    await hub.send_to(sess.device_id, proto.beep("ok"))
-    await hub.send_to(sess.device_id, proto.toast(f"{row.name} ausgelagert"))
-    await hub.notify_ui("inventory")
+    # Wie im Inventar: reine Anzeige. Ausgelagert wird nur ueber den Scanner.
+    return
 
 
 async def _tap_unknown(session, sess, item) -> None:
@@ -919,6 +890,7 @@ async def _tap_date(session, sess, item) -> None:
     if item.startswith("p:"):
         days = int(item[2:])
         sess.draft.expiry_date = shift_iso(days) if days > 0 else ""
+        sess.push(ENTER_QTY)          # "Kein MHD" fuehrt gleich weiter
     elif item == "ok":
         sess.push(ENTER_QTY)
 
@@ -1100,19 +1072,6 @@ async def _scan_label(session, sess, code) -> None:
 
 async def _scan_barcode(session, sess, code) -> None:
     """Ein Produkt-Barcode wurde gescannt."""
-    if sess.remove_mode:
-        item = await inv.find_removable_by_barcode(session, code)
-        if item is None:
-            await hub.send_to(sess.device_id, proto.beep("error"))
-            await hub.send_to(sess.device_id, proto.toast("Nicht im Bestand", "error"))
-            return
-        await inv.remove_item(session, item, reason="scan", device_id=sess.device_id)
-        await session.commit()
-        await hub.send_to(sess.device_id, proto.beep("ok"))
-        await hub.send_to(sess.device_id, proto.toast(f"{item.name} ausgelagert"))
-        await hub.notify_ui("inventory")
-        return
-
     await hub.send_to(sess.device_id, proto.beep("scan"))
     product = await openfoodfacts.lookup(session, code)
     await session.commit()

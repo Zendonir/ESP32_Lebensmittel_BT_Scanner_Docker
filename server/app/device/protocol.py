@@ -34,7 +34,7 @@ PROTOCOL_VERSION = 1
 
 ScreenKind = Literal[
     "tiles", "list", "date", "number", "message", "confirm", "text", "keyboard",
-    "home", "cards",
+    "home", "cards", "datepad",
 ]
 
 
