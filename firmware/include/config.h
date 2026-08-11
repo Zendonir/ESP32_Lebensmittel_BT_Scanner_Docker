@@ -48,11 +48,24 @@
 
 // ---- SD-Karte (SDMMC, 1-Bit-Modus) -----------------------------------------
 // Derselbe physische Kartensteckplatz wie im Vorgaengerprojekt
-// (SD_MMC.setPins(CLK, CMD, D0)); beide Boardvarianten teilen sich denselben
-// Steckplatz, unabhaengig vom Display. Keine CS-Leitung - SDMMC ist kein SPI.
+// (SD_MMC.setPins(CLK, CMD, D0)). Keine CS-Leitung - SDMMC ist kein SPI.
+#if defined(BOARD_WAVESHARE_35B)
+// Auf der 3.5B liegen GPIO 9, 10 und 11 auf der Stiftleiste (siehe
+// Pinbelegung im Handbuch) - dort steckt also nicht die SD-Karte. Welche Pins
+// es stattdessen sind, geht aus dem Handbuch nicht hervor. Bis das geklaert
+// ist, bleibt der Kartenleser hier aus: mit den Pins der 3.5 wuerde die
+// Firmware Leitungen der Stiftleiste als SDMMC-Bus treiben und damit stoeren,
+// was dort angeschlossen ist.
+#define SD_ENABLED 0
+#define SD_CLK -1
+#define SD_CMD -1
+#define SD_D0  -1
+#else
+#define SD_ENABLED 1
 #define SD_CLK 11
 #define SD_CMD 10
 #define SD_D0  9
+#endif
 
 // ---- Drucker (ESC/POS ueber UART) ------------------------------------------
 #define PRINTER_TX   44
@@ -67,15 +80,26 @@
 // AUDIO_ENABLED 0 schaltet den ganzen Zweig ab; die Firmware laeuft dann
 // unveraendert, nur eben stumm.
 #if defined(BOARD_WAVESHARE_35B)
-// Fuer die 3.5B ist die Belegung nicht gesichert. GPIO12 - im Datenblatt der
-// 3.5 der I2S-Takt - ist hier die Display-Auswahlleitung LCD_QSPI_CS. Geraten
-// wird hier nichts: ein falscher Pin am QSPI-Display kostet die Anzeige.
-// Sobald die Belegung feststeht, hier eintragen und AUDIO_ENABLED auf 1.
+// Die 3.5B hat dieselben Bausteine (ES8311, AXP2101, TCA9554), nur ist ihre
+// I2S-Belegung nicht dokumentiert. Aus dem Handbuch laesst sich eingrenzen:
+// belegt sind 0 (BOOT), 1-5 (LCD QSPI), 6 (Beleuchtung), 7/8 (I2C),
+// 12 (LCD CS), 19/20 (USB), 26-37 (Flash und PSRAM), 43/44 (UART); auf der
+// Stiftleiste liegen 9, 10, 11, 17, 18, 21, 38-42 und 45-48. Uebrig bleiben
+// genau 13, 14, 15 und 16 - und das ist exakt die Belegung der 3.5
+// (BCLK 13, DIN 14, LRCK 15, DOUT 16).
+//
+// Offen bleibt der Takt: auf der 3.5 ist MCLK GPIO12, das ist hier die
+// Auswahlleitung des Displays. Die 3.5B muss den Codec also ohne eigenen
+// MCLK betreiben (Takt aus SCLK), was eine andere Registerfolge braucht als
+// die portierte. Das laesst sich nicht erraten, deshalb bleibt es aus.
+//
+// Zum Freischalten fehlt genau eine Angabe aus dem Schaltplan: ob und an
+// welchem Pin MCLK liegt. Danach hier eintragen und AUDIO_ENABLED auf 1.
 #define AUDIO_ENABLED 0
 #define I2S_MCLK -1
-#define I2S_BCLK -1
-#define I2S_LRCK -1
-#define I2S_DOUT -1
+#define I2S_BCLK 13
+#define I2S_LRCK 15
+#define I2S_DOUT 16
 #else
 #define AUDIO_ENABLED 1
 #define I2S_MCLK 12

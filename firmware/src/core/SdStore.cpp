@@ -14,6 +14,12 @@ void SdStore::ensureMounted() {
     if (_mountTried) return;
     _mountTried = true;
 
+#if !SD_ENABLED
+    // Boardvariante, deren Kartensteckplatz nicht belegt ist - siehe config.h.
+    log_i("Kartenleser auf dieser Boardvariante nicht angeschlossen");
+    return;
+#else
+
     SD_MMC.end();  // nach einem Soft-Reset kann der Treiber halb initialisiert sein
     SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0);
     _mounted = SD_MMC.begin("/sdcard", true);  // 1-Bit-Modus, kein CS noetig
@@ -23,6 +29,7 @@ void SdStore::ensureMounted() {
     } else {
         log_i("Keine SD-Karte gefunden - Zugangsdaten bleiben nur im NVS");
     }
+#endif
 }
 
 void SdStore::saveSettings() {
