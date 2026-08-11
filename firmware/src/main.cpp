@@ -17,6 +17,7 @@
 #include "config.h"
 #include "core/Board.h"
 #include "core/Net.h"
+#include "core/SdStore.h"
 #include "core/Settings.h"
 #include "printer/Printer.h"
 #include "scanner/BLEScanner.h"
@@ -131,6 +132,10 @@ void setup() {
     // gar nicht erst auf dem I2C-Bus.
     board.begin();
 
+    // Einmaliger Erkennungsversuch fuers System-Panel - unabhaengig davon, ob
+    // die Karte gleich fuer Settings::begin() gebraucht wird.
+    sdStore.probe();
+
     screen.begin();
     screen.showBoot("Lebensmittel-Terminal", FIRMWARE_VERSION);
 
@@ -204,7 +209,14 @@ void loop() {
     switch (gesture.type) {
         case GestureType::Tap: {
             const Action action = screen.handleTouch(gesture.x, gesture.y);
-            if (action.type == ActionType::Tap) {
+            if (action.type == ActionType::Tap && action.id == "__local_wifi_setup") {
+                // WLAN ist reine Geraetesache (Radio, Zugangsdaten lokal im
+                // NVS) - dafuer keine Serverfahrt, das Portal geht direkt auf.
+                net.forcePortal();
+            } else if (action.type == ActionType::Tap && action.id == "__local_ble_toggle") {
+                if (bleScanner.isConnected()) bleScanner.disconnect();
+                else bleScanner.retryNow();
+            } else if (action.type == ActionType::Tap) {
                 JsonDocument doc;
                 doc["t"] = "tap";
                 doc["screen"] = screen.screenId();

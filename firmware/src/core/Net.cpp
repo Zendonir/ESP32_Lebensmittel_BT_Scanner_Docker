@@ -197,6 +197,14 @@ void Net::sendHello() {
     doc["firmware"]    = FIRMWARE_VERSION;
     doc["ip"]          = ip();
     doc["has_printer"] = true;
+
+    // Statische Geraetedaten fuers System-Panel - aendern sich nicht waehrend
+    // der Verbindung, deshalb hier statt in der periodischen Telemetrie.
+    doc["ssid"]     = settings.wifiSsid;
+    doc["flash_mb"] = ESP.getFlashChipSize() / (1024 * 1024);
+    doc["res"]      = String(UI_WIDTH) + "x" + String(UI_HEIGHT);
+    doc["sd"]       = sdStore.mounted();
+
     send(doc);
     _helloAt = millis();
 }

@@ -125,6 +125,8 @@ void Screen::redraw() {
     else if (_kind == "date") drawDate();
     else if (_kind == "number") drawNumber();
     else if (_kind == "keyboard") drawKeyboard();
+    else if (_kind == "home") drawHome();
+    else if (_kind == "cards") drawCards();
     else drawMessage();
 
     drawFooter();
@@ -150,9 +152,20 @@ void Screen::drawStatusBar() {
 
     _spr.setTextColor(removeMode ? C_DANGER : C_OK, C_SURFACE);
     _spr.drawString(removeMode ? "AUSLAGERN" : "EINLAGERN", 8, 5);
+    addHit(0, 0, 108, STATUS_H, "mode");
 
-    _spr.setTextColor(C_MUTED, C_SURFACE);
-    _spr.drawString(location, 116, 5);
+    // Lagerort als antippbare Pille rechts - oeffnet die Ortsauswahl, wie im
+    // Vorgaengerprojekt das Badge oben rechts.
+    const int16_t pillH = STATUS_H - 6;
+    const int16_t pillW = 150;
+    const int16_t pillX = W - 84 - pillW;
+    const int16_t pillY = 3;
+    _spr.fillRoundRect(pillX, pillY, pillW, pillH, pillH / 2, C_PRIMARY);
+    _spr.setTextDatum(MC_DATUM);
+    _spr.setTextColor(TFT_WHITE, C_PRIMARY);
+    _spr.drawString(location[0] ? location : "kein Ort", pillX + pillW / 2, pillY + pillH / 2 + 1);
+    _spr.setTextDatum(TL_DATUM);
+    addHit(pillX, pillY, pillW, pillH, "locations");
 
     // Rechts: Scanner-Akku und Verbindungspunkt.
     const int battery = status["battery"] | -1;
@@ -381,9 +394,9 @@ void Screen::drawNumber() {
 // Reihen sind unterschiedlich breit wie bei einer echten Tastatur - das ist
 // bewusst kein einheitliches Raster, sondern an app/DisplayCanvas'
 // Textbreite orientiert.
-static const char KB_ROW1[] = "qwertyuiop";               // 10 Zeichen
-static const char KB_ROW2[] = "asdfghjkl";                 // 9 Zeichen
-static const char KB_ROW3[] = "zxcvbnm";                   // 7 Zeichen + Ruecktaste
+static const char KB_ROW1[] = "qwertzuiop";                // 10 Zeichen, QWERTZ
+static const char KB_ROW2[] = "asdfghjkl";                  // 9 Zeichen
+static const char KB_ROW3[] = "yxcvbnm";                    // 7 Zeichen + Ruecktaste
 static const char KB_NUM1[] = "1234567890";
 static const char KB_NUM2[] = "-_/:;()&@";
 static const char KB_NUM3[] = ".,?!'\"";
@@ -469,6 +482,130 @@ void Screen::drawMessage() {
                  parseColor(item["color"] | "", C_PRIMARY), String(item["id"] | ""));
             index++;
         }
+    }
+}
+
+// Startbildschirm: Kennzahlenreihe, WLAN/BLE-Kurzstatus + Etikettenrolle,
+// darunter das Kachelraster mit den eigentlichen Wegen (Kategorie, Manuelle
+// Eingabe, Inventar, System) - siehe device/workflow.py::_screen_home.
+void Screen::drawHome() {
+    int16_t y = BODY_Y;
+
+    JsonArray stats = _screen["meta"]["stats"].as<JsonArray>();
+    const int statCount = stats.size();
+    if (statCount > 0) {
+        const int16_t gap = 6;
+        const int16_t h = 58;
+        const int16_t w = (W - gap * (statCount + 1)) / statCount;
+        int index = 0;
+        for (JsonObject s : stats) {
+            const uint16_t color = parseColor(s["color"] | "", C_PRIMARY);
+            const int16_t x = gap + index * (w + gap);
+            _spr.drawRoundRect(x, y, w, h, 6, color);
+            _spr.setTextDatum(MC_DATUM);
+            _spr.setTextFont(4);
+            _spr.setTextColor(color, C_BG);
+            _spr.drawString(String((long)(s["value"] | 0)), x + w / 2, y + 18);
+            _spr.setTextFont(2);
+            _spr.setTextColor(C_MUTED, C_BG);
+            _spr.drawString(String(s["label"] | ""), x + w / 2, y + 42);
+            _spr.setTextDatum(TL_DATUM);
+            index++;
+        }
+        y += h + 8;
+    }
+
+    // WLAN/BLE-Kurzstatus - reine Anzeige, nicht antippbar (das Detail steht
+    // im System-Panel). "Neue Rolle" ist der einzige aktive Knopf hier.
+    const bool wifiOk = _screen["meta"]["wifi"] | true;
+    const bool bleOk  = _screen["meta"]["ble"]  | false;
+    const int16_t pillH = 26;
+    auto pill = [&](int16_t x, int16_t w, const String &label, uint16_t bg) {
+        _spr.fillRoundRect(x, y, w, pillH, pillH / 2, bg);
+        _spr.setTextDatum(MC_DATUM);
+        _spr.setTextFont(2);
+        _spr.setTextColor(TFT_WHITE, bg);
+        _spr.drawString(label, x + w / 2, y + pillH / 2 + 1);
+        _spr.setTextDatum(TL_DATUM);
+    };
+    pill(6, 92, wifiOk ? "WLAN OK" : "KEIN WLAN", wifiOk ? C_OK : C_DANGER);
+    pill(102, 92, bleOk ? "BLE OK" : "BLE ---", bleOk ? C_OK : C_MUTED);
+    button(W - 110, y, 104, pillH, "Neue Rolle", C_SURFACE, "new_roll");
+    y += pillH + 8;
+
+    // Kachelraster mit den verbleibenden Bildschirmaktionen.
+    JsonArray items = _screen["items"].as<JsonArray>();
+    const int count = items.size();
+    if (count == 0) return;
+    const int cols = 2;
+    const int rows = (count + cols - 1) / cols;
+    const int16_t gap = 8;
+    const int16_t tw = (W - gap * (cols + 1)) / cols;
+    const int16_t th = max<int16_t>(40, (BODY_Y + BODY_H - y - gap * (rows + 1)) / rows);
+    int index = 0;
+    for (JsonObject item : items) {
+        const int row = index / cols, col = index % cols;
+        tile(gap + col * (tw + gap), y + gap + row * (th + gap), tw, th,
+             String(item["label"] | ""), String(item["sub"] | ""),
+             parseColor(item["color"] | "", C_PRIMARY), String(item["id"] | ""));
+        index++;
+    }
+}
+
+// System-Panel: bis zu vier umrandete Statuskarten (Netzwerk, BLE-Scanner,
+// Geraet, System) mit optionalem Knopf am unteren Kartenrand.
+void Screen::drawCards() {
+    JsonArray cards = _screen["meta"]["cards"].as<JsonArray>();
+    const int count = cards.size();
+    if (count == 0) return;
+
+    const int cols = 2;
+    const int rows = (count + cols - 1) / cols;
+    const int16_t gap = 8;
+    const int16_t w = (W - gap * (cols + 1)) / cols;
+    const int16_t h = (BODY_H - gap * (rows + 1)) / rows;
+
+    int index = 0;
+    for (JsonObject card : cards) {
+        const int row = index / cols, col = index % cols;
+        const int16_t x = gap + col * (w + gap);
+        const int16_t y = BODY_Y + gap + row * (h + gap);
+        const uint16_t titleColor = parseColor(card["title_color"] | "", C_PRIMARY);
+
+        _spr.drawRoundRect(x, y, w, h, 8, titleColor);
+
+        _spr.setTextFont(2);
+        _spr.setTextColor(titleColor, C_BG);
+        _spr.drawString(String(card["title"] | ""), x + 10, y + 6);
+
+        // Die grosse Statuszeile ist optional - Karten ohne Schlagzeile (z.B.
+        // "System") gewinnen den Platz fuer eine Zeile mehr.
+        int16_t ly = y + 20;
+        const char *statusText = card["status"] | "";
+        if (statusText[0]) {
+            _spr.setTextFont(4);
+            _spr.setTextColor(parseColor(card["status_color"] | "", C_TEXT), C_BG);
+            _spr.drawString(statusText, x + 10, ly);
+            ly += 26;
+        }
+
+        JsonObject btn = card["button"];
+        const int16_t bottomLimit = btn.isNull() ? (y + h - 6) : (y + h - 28);
+
+        _spr.setTextFont(2);
+        _spr.setTextColor(C_MUTED, C_BG);
+        JsonArray lines = card["lines"].as<JsonArray>();
+        for (JsonVariant line : lines) {
+            if (ly + 13 > bottomLimit) break;
+            _spr.drawString(String(line.as<const char *>()), x + 10, ly);
+            ly += 14;
+        }
+
+        if (!btn.isNull()) {
+            button(x + 8, y + h - 26, w - 16, 20, String(btn["label"] | ""),
+                   parseColor(btn["color"] | "", C_SURFACE), String(btn["id"] | ""));
+        }
+        index++;
     }
 }
 

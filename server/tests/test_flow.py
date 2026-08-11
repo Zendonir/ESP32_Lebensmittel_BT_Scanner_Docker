@@ -192,7 +192,7 @@ def test_geraeteworkflow_ohne_hardware(client):
         async with session_scope() as session:
             # 1. Startbildschirm
             home = await workflow.render(session, sess)
-            assert home["kind"] == "tiles"
+            assert home["kind"] == "home"
 
             # 2. Vorlagen-Weg statt Netzabfrage
             await workflow.on_tap(session, sess, "templates")

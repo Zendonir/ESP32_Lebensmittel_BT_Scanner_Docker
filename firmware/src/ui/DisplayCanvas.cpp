@@ -67,6 +67,15 @@ void DisplayCanvas::fillRoundRect(int16_t x, int16_t y, int16_t w, int16_t h,
 #endif
 }
 
+void DisplayCanvas::drawRoundRect(int16_t x, int16_t y, int16_t w, int16_t h,
+                                  int16_t radius, uint16_t color) {
+#if defined(BOARD_WAVESHARE_35B)
+    if (_canvas) _canvas->drawRoundRect(x, y, w, h, radius, color);
+#else
+    _sprite.drawRoundRect(x, y, w, h, radius, color);
+#endif
+}
+
 void DisplayCanvas::fillCircle(int16_t x, int16_t y, int16_t radius, uint16_t color) {
 #if defined(BOARD_WAVESHARE_35B)
     if (_canvas) _canvas->fillCircle(x, y, radius, color);

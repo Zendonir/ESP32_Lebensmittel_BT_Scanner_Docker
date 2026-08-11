@@ -21,6 +21,10 @@ public:
     bool wifiConnected() const;
     bool serverConnected() const { return _wsConnected; }
     bool portalActive() const { return _portalActive; }
+
+    // Einrichtungsportal von Hand oeffnen (System-Panel, "WLAN einrichten"),
+    // ohne auf BOOT-beim-Start oder einen anhaltenden Ausfall zu warten.
+    void forcePortal() { if (!_portalActive) startPortal(); }
     String ip() const;
     int  rssi() const;
 

@@ -32,7 +32,8 @@ from typing import Any, Literal
 PROTOCOL_VERSION = 1
 
 ScreenKind = Literal[
-    "tiles", "list", "date", "number", "message", "confirm", "text", "keyboard"
+    "tiles", "list", "date", "number", "message", "confirm", "text", "keyboard",
+    "home", "cards",
 ]
 
 
@@ -58,6 +59,9 @@ def screen(
     `value`   : Startwert fuer date/number/keyboard
     `meta`    : {min, max, step, unit, presets:[{id,label}], max_len}
                 `max_len` begrenzt die Eingabe bei `keyboard` (Standard 40).
+                Bei `home`  : {stats:[{label,value,color}], wifi, ble, battery}
+                Bei `cards` : {cards:[{title,title_color,status,status_color,
+                               lines:[...], button:{id,label,color}}]}
     """
     return {
         "t": "screen",

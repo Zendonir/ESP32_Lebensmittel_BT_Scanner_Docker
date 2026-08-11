@@ -69,6 +69,8 @@ private:
     void drawNumber();
     void drawMessage();
     void drawKeyboard();
+    void drawHome();
+    void drawCards();
     void drawToast();
     void commit();
 

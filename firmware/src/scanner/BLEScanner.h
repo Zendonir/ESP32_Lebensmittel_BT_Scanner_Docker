@@ -27,6 +27,10 @@ public:
     void disconnect();
     void forget();
 
+    // Sofortigen Neuversuch erzwingen (System-Panel, "Verbinden"), statt auf
+    // die gestaffelte Rueckversuchszeit nach einem Fehlschlag zu warten.
+    void retryNow() { _nextTryMs = 0; }
+
     // Aus NimBLE-Rueckrufen aufgerufen - nicht direkt verwenden.
     void _onDisconnect();
     void _onReport(const uint8_t *data, size_t length);

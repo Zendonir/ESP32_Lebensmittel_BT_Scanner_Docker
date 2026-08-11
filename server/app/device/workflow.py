@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..models import Category, Device, InventoryItem, Location, PrintJob, Template
 from ..services import inventory as inv
-from ..services import openfoodfacts, settings_store
+from ..services import labels, openfoodfacts, settings_store
 from ..services.dates import days_left, shift_iso, to_display, to_iso_date
 from . import protocol as proto
 from .hub import hub
@@ -42,6 +42,14 @@ TMPL_AMOUNT = "tmpl_amount"
 CONFIRM_REMOVE = "confirm_remove"
 UNKNOWN_NAME = "unknown_name"
 LOCATION_NEW = "location_new"
+INVENTORY = "inventory"
+SYSTEM = "system"
+INV_SEARCH = "inv_search"
+ROLL_NEW = "roll_new"
+
+# Sortiermodi der Inventarliste, zyklisch per Tap auf den Spaltenkopf -
+# genau wie im Vorgaengerprojekt (App.cpp, INV_SORT).
+INV_SORT_MODES = ("mhd", "name", "location")
 
 
 @dataclass
@@ -79,6 +87,9 @@ class DeviceSession:
     location_draft: str = ""
     scanner: dict = field(default_factory=dict)
     online_since: datetime = field(default_factory=datetime.utcnow)
+    inv_sort: str = "mhd"
+    inv_search: str = ""
+    roll_size_draft: str = ""
 
     @property
     def current(self) -> str:
@@ -163,34 +174,33 @@ async def render(session: AsyncSession, sess: DeviceSession) -> dict:
         return await _screen_tmpl_sorte(session, sess, sid, status)
     if name == TMPL_AMOUNT:
         return _screen_tmpl_amount(sess, sid, status)
+    if name == INVENTORY:
+        return await _screen_inventory(session, sess, sid, status)
+    if name == INV_SEARCH:
+        return _screen_inv_search(sess, sid, status)
+    if name == SYSTEM:
+        return await _screen_system(session, sess, sid, status)
+    if name == ROLL_NEW:
+        return await _screen_roll_new(session, sess, sid, status)
 
     sess.reset()
     return await _screen_home(session, sess, sid, status)
 
 
 async def _screen_home(session, sess, sid, status) -> dict:
-    mode_label = "Auslagern" if sess.remove_mode else "Einlagern"
+    counts = await inv.stats(session)
+    roll = await labels.roll_state(session)
     items = [
-        {
-            "id": "mode",
-            "label": mode_label,
-            "sub": "umschalten",
-            "color": "#e53935" if sess.remove_mode else "#43a047",
-        },
-        {"id": "templates", "label": "Vorlagen", "sub": "ohne Barcode", "color": "#1e88e5"},
-        {
-            "id": "locations",
-            "label": "Lagerort",
-            "sub": sess.location or "keiner",
-            "color": "#8e24aa",
-        },
-        {
-            "id": "expiring",
-            "label": "Ablaufend",
-            "sub": str(status["expiring"]),
-            "color": "#fb8c00",
-            "badge": status["expiring"],
-        },
+        {"id": "templates", "label": "Kategorie", "sub": "ohne Barcode", "color": "#1e88e5"},
+        {"id": "manual_entry", "label": "Manuelle Eingabe", "color": "#43a047"},
+        {"id": "inventory", "label": "Inventar", "color": "#f9a825"},
+        {"id": "system", "label": "System", "color": "#546e7a"},
+    ]
+    stats = [
+        {"label": "Produkte", "value": counts["total"], "color": "#1e88e5"},
+        {"label": "Ablaufend", "value": counts["expiring"], "color": "#f9a825"},
+        {"label": "Kritisch", "value": counts["expired"], "color": "#e53935"},
+        {"label": "Label-Rest", "value": max(0, roll["remaining"]), "color": "#43a047"},
     ]
     subtitle = (
         "Barcode scannen zum Auslagern"
@@ -199,10 +209,15 @@ async def _screen_home(session, sess, sid, status) -> dict:
     )
     return proto.screen(
         screen_id=sid,
-        kind="tiles",
-        title=f"{status['total']} Artikel",
+        kind="home",
+        title="HOME",
         subtitle=subtitle,
         items=items,
+        meta={
+            "stats": stats,
+            "wifi": True,
+            "ble": bool(status["scanner"]),
+        },
         status=status,
     )
 
@@ -481,6 +496,186 @@ def _screen_tmpl_amount(sess, sid, status) -> dict:
     )
 
 
+async def _screen_inventory(session, sess, sid, status) -> dict:
+    rows = (
+        await session.execute(select(InventoryItem).where(InventoryItem.status == "active"))
+    ).scalars().all()
+
+    search = sess.inv_search.strip().lower()
+    if search:
+        rows = [r for r in rows if search in r.name.lower()]
+
+    # Gruppierung wie im Vorgaengerprojekt: gleicher Name/Kategorie/
+    # Unterkategorie zaehlt als ein Eintrag, Menge wird summiert, das
+    # fruehste MHD (und dessen Lagerort/Label) fuehrt die Gruppe an.
+    groups: dict[tuple[str, str, str], dict] = {}
+    for row in rows:
+        key = (row.name, row.category, row.subcategory)
+        g = groups.get(key)
+        if g is None:
+            g = {
+                "name": row.name,
+                "category": row.category,
+                "subcategory": row.subcategory,
+                "unit": row.unit,
+                "qty": 0.0,
+                "expiry": "",
+                "location": row.location,
+                "label": row.label,
+            }
+            groups[key] = g
+        g["qty"] += row.quantity or 0
+        if row.expiry_date and (not g["expiry"] or row.expiry_date < g["expiry"]):
+            g["expiry"] = row.expiry_date
+            g["location"] = row.location
+            g["label"] = row.label
+
+    values = list(groups.values())
+    if sess.inv_sort == "name":
+        values.sort(key=lambda g: g["name"].lower())
+    elif sess.inv_sort == "location":
+        values.sort(key=lambda g: (g["location"] or "￿", g["name"].lower()))
+    else:
+        values.sort(key=lambda g: g["expiry"] or "9999-99-99")
+
+    items = []
+    for g in values[:200]:
+        left = days_left(g["expiry"]) if g["expiry"] else None
+        if left is None:
+            color = "#546e7a"
+        elif left < 0:
+            color = "#e53935"
+        elif left <= 3:
+            color = "#fb8c00"
+        else:
+            color = "#43a047"
+        qty = f"{g['qty']:g} {g['unit']}".strip() if g["unit"] else f"{int(g['qty'])}x"
+        parts = [g["category"] or "-"]
+        if g["location"]:
+            parts.append(g["location"])
+        if g["expiry"]:
+            parts.append(to_display(g["expiry"]))
+        parts.append(qty)
+        items.append(
+            {
+                "id": f"item:{g['label']}",
+                "label": g["name"][:28],
+                "sub": "  ·  ".join(parts),
+                "color": color,
+            }
+        )
+
+    sort_label = {"mhd": "MHD", "name": "Name", "location": "Ort"}[sess.inv_sort]
+    return proto.screen(
+        screen_id=sid,
+        kind="list",
+        title="Inventar",
+        subtitle=f"Sortiert: {sort_label}  ·  {len(values)} Artikel"
+        + (f"  ·  Suche: {sess.inv_search}" if sess.inv_search else ""),
+        items=items or [{"id": "none", "label": "Nichts im Bestand", "color": "#546e7a"}],
+        buttons=[
+            proto.BTN_BACK,
+            {"id": "sort", "label": "Sortierung", "style": "ghost"},
+            {"id": "search", "label": "Suche", "style": "ghost"},
+        ],
+        status=status,
+    )
+
+
+def _screen_inv_search(sess, sid, status) -> dict:
+    return proto.screen(
+        screen_id=sid,
+        kind="keyboard",
+        title="Inventar durchsuchen",
+        subtitle="Nach Namen filtern",
+        value=sess.inv_search,
+        meta={"max_len": 40},
+        buttons=[proto.BTN_BACK, proto.BTN_OK],
+        status=status,
+    )
+
+
+async def _screen_system(session, sess, sid, status) -> dict:
+    device = (
+        await session.execute(select(Device).where(Device.device_id == sess.device_id))
+    ).scalar_one_or_none()
+    tel = (device.telemetry if device else None) or {}
+    roll = await labels.roll_state(session)
+
+    net_connected = bool(device and device.online)
+    scanner = tel.get("scanner") or {}
+    ble_connected = bool(scanner.get("connected"))
+
+    heap_kb = int(tel.get("heap", 0)) // 1024
+    uptime_s = int(tel.get("uptime", 0))
+    uptime = f"{uptime_s // 60}m {uptime_s % 60}s"
+
+    cards = [
+        {
+            "title": "NETZWERK",
+            "title_color": "#43a047" if net_connected else "#e53935",
+            "status": "Verbunden" if net_connected else "Getrennt",
+            "status_color": "#43a047" if net_connected else "#e53935",
+            "lines": [f"{tel.get('ssid') or '-'}  ·  {(device.ip if device else '') or '-'}"],
+            "button": {"id": "__local_wifi_setup", "label": "WLAN einrichten", "color": "#f9a825"},
+        },
+        {
+            "title": "BLE SCANNER",
+            "title_color": "#f9a825",
+            "status": "Verbunden" if ble_connected else "Getrennt",
+            "status_color": "#43a047" if ble_connected else "#f9a825",
+            "lines": [scanner.get("name") or "kein Geraet gekoppelt"],
+            "button": {"id": "__local_ble_toggle", "label": "Verbinden / Trennen", "color": "#1e88e5"},
+        },
+        {
+            "title": "GERAET",
+            "title_color": "#1e88e5",
+            "status": (device.name if device else "") or "Terminal",
+            "status_color": "#e6edf3",
+            "lines": [
+                f"FW: {(device.firmware if device else '') or '-'}  ·  "
+                f"{tel.get('res', '?')}  ·  {tel.get('flash_mb', '?')} MB Flash",
+            ],
+            "button": {"id": "firmware_update", "label": "Firmware Update", "color": "#43a047"},
+        },
+        {
+            "title": "SYSTEM",
+            "title_color": "#546e7a",
+            "status": "",
+            "status_color": "#e6edf3",
+            "lines": [
+                f"SD: {'eingelegt' if tel.get('sd') else 'nicht eingelegt'}",
+                f"Heap: {heap_kb} KB frei",
+                f"Uptime: {uptime}",
+                f"Labels: {max(0, roll['remaining'])} verbl.",
+            ],
+        },
+    ]
+    return proto.screen(
+        screen_id=sid,
+        kind="cards",
+        title="SYSTEM",
+        subtitle=sess.location or "",
+        meta={"cards": cards},
+        buttons=[proto.BTN_BACK],
+        status=status,
+    )
+
+
+async def _screen_roll_new(session, sess, sid, status) -> dict:
+    roll = await labels.roll_state(session)
+    return proto.screen(
+        screen_id=sid,
+        kind="number",
+        title="Neue Etikettenrolle",
+        subtitle=f"Bisherige Rolle: {roll['size'] or '-'} Etiketten",
+        value=float(roll["size"] or 200),
+        meta={"min": 10, "max": 2000, "step": 10, "unit": "Etiketten"},
+        buttons=[proto.BTN_BACK, proto.BTN_OK],
+        status=status,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Ereignisse
 # ---------------------------------------------------------------------------
@@ -524,6 +719,10 @@ async def on_tap(session: AsyncSession, sess: DeviceSession, item: str) -> None:
         TMPL_BRAND: _tap_tmpl_brand,
         TMPL_SORTE: _tap_tmpl_sorte,
         TMPL_AMOUNT: _tap_confirm_save,
+        INVENTORY: _tap_inventory,
+        INV_SEARCH: _tap_inv_search,
+        SYSTEM: _tap_system,
+        ROLL_NEW: _tap_roll_new,
     }.get(sess.current)
 
     if handler is not None:
@@ -542,6 +741,64 @@ async def _tap_home(session, sess, item) -> None:
         sess.push(LOCATIONS)
     elif item == "expiring":
         sess.push(EXPIRING)
+    elif item == "manual_entry":
+        sess.draft = Draft()
+        sess.push(UNKNOWN_NAME)
+    elif item == "inventory":
+        sess.push(INVENTORY)
+    elif item == "system":
+        sess.push(SYSTEM)
+    elif item == "new_roll":
+        sess.push(ROLL_NEW)
+
+
+async def _tap_inventory(session, sess, item) -> None:
+    if item == "sort":
+        idx = INV_SORT_MODES.index(sess.inv_sort) if sess.inv_sort in INV_SORT_MODES else 0
+        sess.inv_sort = INV_SORT_MODES[(idx + 1) % len(INV_SORT_MODES)]
+    elif item == "search":
+        sess.push(INV_SEARCH)
+    elif item.startswith("item:"):
+        label = item[5:]
+        row = await inv.find_active_by_label(session, label)
+        if row is None:
+            await hub.send_to(sess.device_id, proto.toast("Schon ausgelagert", "warn"))
+            return
+        await inv.remove_item(session, row, reason="device_list", device_id=sess.device_id)
+        await session.commit()
+        await hub.send_to(sess.device_id, proto.beep("ok"))
+        await hub.send_to(sess.device_id, proto.toast(f"{row.name} ausgelagert"))
+        await hub.notify_ui("inventory")
+
+
+async def _tap_inv_search(session, sess, item) -> None:
+    if item == "ok":
+        sess.pop()
+
+
+async def _tap_system(session, sess, item) -> None:
+    # "WLAN einrichten" und "Verbinden/Trennen" behandelt das Geraet lokal
+    # (__local_-Aktionen erreichen den Server gar nicht, siehe main.cpp) -
+    # hier landet nur, was tatsaechlich der Server entscheiden muss.
+    if item == "firmware_update":
+        await hub.send_to(
+            sess.device_id, proto.toast("Firmware-Update noch nicht verfuegbar", "warn")
+        )
+
+
+async def _tap_roll_new(session, sess, item) -> None:
+    if item != "ok":
+        return
+    try:
+        size = int(float(sess.roll_size_draft or 0))
+    except (TypeError, ValueError):
+        size = 0
+    if size <= 0:
+        await hub.send_to(sess.device_id, proto.toast("Ungueltige Groesse", "warn"))
+        return
+    await labels.new_roll(session, size)
+    sess.pop()
+    await hub.send_to(sess.device_id, proto.toast(f"Neue Rolle: {size} Etiketten", "success"))
 
 
 async def _tap_locations(session, sess, item) -> None:
@@ -716,6 +973,10 @@ async def on_input(session: AsyncSession, sess: DeviceSession, value) -> None:
         sess.draft.name = str(value or "").strip()
     elif current == LOCATION_NEW:
         sess.location_draft = str(value or "").strip()
+    elif current == INV_SEARCH:
+        sess.inv_search = str(value or "").strip()
+    elif current == ROLL_NEW:
+        sess.roll_size_draft = str(value or "")
     await push_screen(session, sess)
 
 

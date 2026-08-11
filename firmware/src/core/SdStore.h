@@ -19,6 +19,16 @@ public:
     void saveSettings();   // still; Fehler landen nur im Log
     bool loadSettings();   // true = gueltige Datei gefunden und uebernommen
 
+    // Einmaligen Mount-Versuch erzwingen, auch wenn loadSettings() nie
+    // aufgerufen wird (z.B. weil im NVS schon Zugangsdaten stehen). Nur so
+    // weiss mounted() beim System-Panel Bescheid.
+    void probe() { ensureMounted(); }
+
+    // Fuers System-Panel: ob beim Start eine Karte gefunden wurde. Kein neuer
+    // Mount-Versuch - ein Wechsel im laufenden Betrieb wird nicht erkannt,
+    // wie im Vorgaengerprojekt auch.
+    bool mounted() const { return _mounted; }
+
 private:
     void ensureMounted();
 
