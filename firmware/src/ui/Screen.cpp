@@ -203,11 +203,24 @@ void Screen::drawTitle() {
     }
 }
 
+// Schriftfarbe passend zur Flaeche: auf den bunten Knoepfen dunkel, auf den
+// grauen hell. Im Vorgaengerprojekt stand das je Knopf von Hand da (C_BG auf
+// Blau/Gruen/Gelb, C_TEXT auf Grau). Hier gerechnet statt aufgeschrieben,
+// damit es auch fuer Farben stimmt, die der Server frei mitschickt.
+static uint16_t textOn(uint16_t bg) {
+    const uint8_t r = ((bg >> 11) & 0x1F) << 3;
+    const uint8_t g = ((bg >> 5) & 0x3F) << 2;
+    const uint8_t b = (bg & 0x1F) << 3;
+    const uint16_t luminance = (299u * r + 587u * g + 114u * b) / 1000u;
+    return luminance > 110 ? C_BG : C_TEXT;
+}
+
 void Screen::tile(int16_t x, int16_t y, int16_t w, int16_t h, const String &label,
                   const String &sub, uint16_t color, const String &id) {
     _spr.fillRoundRect(x, y, w, h, 8, color);
+    _spr.drawRoundRect(x, y, w, h, 8, C_BORDER);
     _spr.setTextDatum(MC_DATUM);
-    _spr.setTextColor(TFT_WHITE, color);
+    _spr.setTextColor(textOn(color), color);
 
     // Lange Beschriftungen ("Fleisch & Fisch") liefen mit fester Schriftgroesse
     // ueber den Kachelrand in die naechste Kachel - deshalb bei Bedarf auf die
@@ -227,8 +240,9 @@ void Screen::tile(int16_t x, int16_t y, int16_t w, int16_t h, const String &labe
 void Screen::button(int16_t x, int16_t y, int16_t w, int16_t h, const String &label,
                     uint16_t bg, const String &id) {
     _spr.fillRoundRect(x, y, w, h, 6, bg);
+    _spr.drawRoundRect(x, y, w, h, 6, C_BORDER);
     _spr.setTextDatum(MC_DATUM);
-    _spr.setTextColor(TFT_WHITE, bg);
+    _spr.setTextColor(textOn(bg), bg);
 
     // Gleiche Absicherung wie bei tile(): "Verbinden / Trennen" o.ae. darf
     // nicht ueber den Knopfrand hinauslaufen.

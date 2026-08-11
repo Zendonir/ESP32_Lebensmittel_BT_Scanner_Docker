@@ -112,6 +112,18 @@ async def fetch_from_github(tag: str = "") -> list[dict]:
         timeout=60, follow_redirects=True, headers={"Accept": "application/vnd.github+json"}
     ) as client:
         response = await client.get(url)
+        if response.status_code == 404:
+            # Der haeufigste Fall, und ohne Erklaerung ratlos machend: die CI
+            # baut die Abbilder bei jedem Lauf, ein *Release* entsteht aber
+            # nur, wenn ein Tag geschoben wird.
+            raise ValueError(
+                f"Es gibt noch kein Release in {settings.firmware_repo}"
+                + (f" mit dem Tag {tag}." if tag else ".")
+                + " Ein Release entsteht erst, wenn ein Tag geschoben wird"
+                  " (git tag v2.0.0 && git push origin v2.0.0). Bis dahin die"
+                  " firmware-<variante>.bin von der Installer-Seite laden und"
+                  " hier hochladen."
+            )
         response.raise_for_status()
         release = response.json()
 

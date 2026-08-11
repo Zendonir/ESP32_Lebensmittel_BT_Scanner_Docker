@@ -94,12 +94,20 @@ void BLEScanner::begin() {
     client = NimBLEDevice::createClient();
     client->setClientCallbacks(&clientCallbacks, false);
 
-    // Verbindungsintervall 15 ms fuer sofortige Barcodes, aber Aufsichtszeit
-    // 6 s statt der bisherigen 2: BLE und WLAN teilen sich hier eine Antenne
-    // im 2,4-GHz-Band, und bei 2 s reicht eine kurze Stoerung, damit die
-    // Verbindung ohne Not abreisst. Die Latenz leidet darunter nicht - die
-    // Aufsichtszeit greift erst, wenn wirklich nichts mehr ankommt.
-    client->setConnectionParams(12, 12, 0, 600);
+    // Intervall 30-50 ms, Slave-Latenz 4, Aufsichtszeit 6 s.
+    //
+    // Die Latenz verzoegert keinen Barcode: sie erlaubt dem Scanner nur, ein
+    // Verbindungsereignis auszulassen, wenn er *nichts* zu senden hat. Sobald
+    // er etwas hat, sendet er sofort. Vorher stand hier 15 ms ohne Latenz -
+    // das zwang den Handscanner, siebzigmal pro Sekunde aufzuwachen, obwohl
+    // er stundenlang nichts zu melden hat. Das kostet dessen Akku und ist ein
+    // Grund, warum solche Geraete die Verbindung von sich aus fallen lassen
+    // (Trenngrund 0x08, Aufsichtszeit abgelaufen).
+    //
+    // Die 6 s Aufsichtszeit (vorher 2) geben Luft, wenn WLAN und BLE sich hier
+    // eine Antenne im 2,4-GHz-Band teilen. Bedingung ist erfuellt:
+    // (1+4) * 50 ms * 2 = 500 ms liegt weit unter 6 s.
+    client->setConnectionParams(24, 40, 4, 600);
     client->setConnectTimeout(BLE_CONNECT_TIMEOUT_MS);
 
     _started = true;
@@ -198,7 +206,12 @@ void BLEScanner::startAutoConnect() {
     _connectStartedMs = millis();
     client->setConnectTimeout(BLE_HS_FOREVER);
 
-    if (!client->connect(peer, false, true, true)) {
+    // deleteAttributes bewusst true: mit zwischengespeicherten Handles aus
+    // einer frueheren Verbindung schlaegt das Abonnieren fehl, wenn der
+    // Scanner seine Handles neu vergibt - dann legen wir in finishConnect()
+    // wieder auf (Trenngrund 0x16) und das Ganze beginnt von vorn. Die eine
+    // Dienstsuche pro Verbindung ist dagegen billig.
+    if (!client->connect(peer, true, true, true)) {
         log_w("Gerichtetes Warten auf %s nicht moeglich - es wird gesucht",
               peer.toString().c_str());
         _forceScan = true;
@@ -250,6 +263,10 @@ void BLEScanner::beginConnect() {
 void BLEScanner::finishConnect() {
     NimBLERemoteService *hid = client->getService(NimBLEUUID(SVC_HID));
     if (hid == nullptr) {
+        // Wichtig zu protokollieren: von aussen sieht das wie ein spontaner
+        // Verbindungsabbruch aus (Trenngrund 0x16 - "vom Geraet selbst
+        // getrennt"), obwohl wir es sind, die auflegen.
+        log_w("Kein HID-Dienst gefunden - Verbindung wird beendet");
         client->disconnect();
         backoff(5000);
         return;
@@ -266,6 +283,7 @@ void BLEScanner::finishConnect() {
     }
 
     if (subscribed == 0) {
+        log_w("Keine Report-Charakteristik abonnierbar - Verbindung wird beendet");
         client->disconnect();
         backoff(5000);
         return;
