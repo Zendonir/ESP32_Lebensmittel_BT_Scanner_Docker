@@ -8,13 +8,18 @@ import json
 import logging
 import os
 import platform
+import sqlite3
+import tempfile
 import time
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 from ..config import settings
 from ..db import get_session
@@ -321,6 +326,58 @@ async def import_v1(
         total_rows=result.total_rows,
         errors=result.errors[:50],
         dry_run=dry_run,
+    )
+
+
+@router.get("/backup/db")
+def backup_db():
+    """Die komplette Datenbank als eine Datei.
+
+    Anders als der JSON-Export unten ist das wirklich *alles*: auch das
+    Ereignisprotokoll, die Geraete und die Druckauftraege.
+
+    Bewusst ueber die Online-Sicherung von SQLite und nicht ueber ein Kopieren
+    der Datei: die Datenbank laeuft im WAL-Modus, die zuletzt geschriebenen
+    Aenderungen stehen also noch in `-wal` und nicht in der `.db`. Eine
+    schlichte Kopie waere damit unvollstaendig - und das faellt erst auf, wenn
+    man sie im Ernstfall braucht. backup() zieht stattdessen eine in sich
+    stimmige Momentaufnahme, auch waehrend nebenher geschrieben wird.
+
+    Die Funktion ist absichtlich synchron: FastAPI legt sie damit in einen
+    Arbeitsthread, statt den Ereignisschleifen-Thread zu blockieren.
+    """
+    url = make_url(settings.database_url)
+    if not url.drivername.startswith("sqlite") or not url.database:
+        raise HTTPException(
+            409,
+            "Nur fuer die eingebaute SQLite-Datenbank. Bei einer externen "
+            "Datenbank sichert deren eigenes Werkzeug (z.B. pg_dump); die "
+            "Nutzdaten gibt es hier ueber /api/export/json.",
+        )
+    if ":memory:" in url.database:
+        raise HTTPException(409, "Datenbank liegt nur im Arbeitsspeicher")
+
+    handle, temp_path = tempfile.mkstemp(prefix="backup-", suffix=".db")
+    os.close(handle)
+    try:
+        source = sqlite3.connect(url.database)
+        target = sqlite3.connect(temp_path)
+        with target:
+            source.backup(target)
+        target.close()
+        source.close()
+    except Exception:
+        os.unlink(temp_path)
+        raise
+
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    return FileResponse(
+        temp_path,
+        media_type="application/octet-stream",
+        filename=f"lebensmittel-{stamp}.db",
+        # Erst loeschen, wenn die Antwort durch ist - sonst zieht man dem
+        # laufenden Download die Datei unter den Fuessen weg.
+        background=BackgroundTask(os.unlink, temp_path),
     )
 
 

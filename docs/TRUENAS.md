@@ -72,9 +72,22 @@ Alles, was zählt, liegt im Dataset aus Schritt 1: Datenbank, Produktcache,
 Etikettenzähler, Einstellungen. Ein periodischer **Snapshot Task** auf
 `apps/lebensmittel` sichert damit den kompletten Zustand.
 
-Zusätzlich gibt es unter **System → Sicherung laden** einen JSON-Export aller
-Nutzdaten – praktisch für einen Umzug auf andere Hardware, wo ein
-ZFS-Snapshot nicht passt.
+Zusätzlich gibt es im Web-Interface unter **System → Wartung** zwei Wege, ohne
+Zugriff auf das Dateisystem an die Daten zu kommen:
+
+* **Datenbank laden** (`/api/backup/db`) – die komplette SQLite-Datenbank als
+  eine Datei, inklusive Ereignisprotokoll, Geräten und Druckaufträgen. Das ist
+  die vollständige Sicherung: die Datei einfach zurück ins Dataset legen (bei
+  gestopptem Container, als `lebensmittel.db`) und alles ist wieder da.
+* **Nutzdaten (JSON)** (`/api/export/json`) – Bestand, Vorlagen, Kategorien,
+  Orte und Einstellungen in lesbarer Form. Praktisch für einen Umzug oder
+  wenn nur die Inhalte gebraucht werden, nicht die Historie.
+
+Die Datenbank-Sicherung nutzt die Online-Backup-Funktion von SQLite, nicht ein
+schlichtes Kopieren der Datei. Das ist kein Detail: die Datenbank läuft im
+WAL-Modus, die zuletzt geschriebenen Änderungen stehen also noch in einer
+Nebendatei. Eine per Hand kopierte `.db` wäre unvollständig – und das merkt man
+erst, wenn man sie braucht.
 
 ## Aktualisieren
 
