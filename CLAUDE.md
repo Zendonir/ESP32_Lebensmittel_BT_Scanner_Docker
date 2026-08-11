@@ -90,9 +90,19 @@ cd firmware && pio run --target upload # flashen
 * `-DUSE_HSPI_PORT=1` ist Pflicht, keine Optimierung. Ohne das dereferenziert
   TFT_eSPI auf dem ESP32-S3 eine ungültige SPI-Registerbasis → Panic mit
   `EXCVADDR=0x10`.
-* Beim BLE-Verbindungsaufbau `_connecting` auf **jedem** Ausstiegspfad
-  zurücksetzen. Auf `onDisconnect` zu vertrauen reicht nicht – sonst bleibt der
-  Scanner für immer im Zustand „verbinde…".
+* Die BLE-Kopplung ist eine Zustandsmaschine (`BLEScanner::State`) und muss
+  es bleiben: **kein blockierender Aufruf im Loop.** `getResults()` und ein
+  synchrones `connect()` haben das Gerät sekundenlang stillstehen lassen –
+  inklusive Touch. Es gibt für beides eine asynchrone Variante.
+* Der Zustand wird auf **jedem** Ausstiegspfad zurückgesetzt, nicht nur in
+  `onDisconnect` – sonst bleibt der Scanner für immer im Zustand „verbinde…".
+* Ein bekannter Scanner wird **nicht gesucht**, sondern über einen gerichteten
+  Verbindungswunsch ohne Zeitgrenze erwartet (`AutoConnect`). Den hält der
+  Controller offen; die Verbindung steht in dem Moment, in dem der Scanner
+  eingeschaltet wird. Suchläufe kosten Funkzeit, die neben WLAN im selben Band
+  fehlt.
+* Es bleibt immer **genau eine** Kopplung gespeichert. Sonst zeigt
+  `getBondedAddress(0)` nach einem Scannerwechsel womöglich auf das alte Gerät.
 * Umlaute auf dem Drucker gehen über `toCp1252()`; der Drucker kennt kein UTF-8.
 
 ## Bekannte Fallstricke
@@ -100,7 +110,8 @@ cd firmware && pio run --target upload # flashen
 | Problem | Lösung |
 |---|---|
 | SPI-Panic `EXCVADDR=0x10` | `-DUSE_HSPI_PORT=1` |
-| Scanner koppelt nicht mehr | `_connecting` zurücksetzen, 30-s-Abbruch in `loop()` |
+| Scanner koppelt nicht mehr | Zustand auf jedem Ausstiegspfad zurücksetzen, Abbruch in `loop()` |
+| Gerät friert ein, Touch tot | Blockierender Aufruf im Loop (BLE-Suche, TCP-Aufbau, `uart.flush()`) |
 | Kryptische Zeichen auf dem Etikett | `toCp1252()` benutzen |
 | Doppelte Etikettennummern | nur `services/labels.next_labels()` verwenden (Lock!) |
 | MHD wird falsch angezeigt | ISO speichern, `to_display()` erst beim Ausgeben |

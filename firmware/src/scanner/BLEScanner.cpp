@@ -93,8 +93,14 @@ void BLEScanner::begin() {
 
     client = NimBLEDevice::createClient();
     client->setClientCallbacks(&clientCallbacks, false);
-    client->setConnectionParams(12, 12, 0, 200);
-    client->setConnectTimeout(10 * 1000);
+
+    // Verbindungsintervall 15 ms fuer sofortige Barcodes, aber Aufsichtszeit
+    // 6 s statt der bisherigen 2: BLE und WLAN teilen sich hier eine Antenne
+    // im 2,4-GHz-Band, und bei 2 s reicht eine kurze Stoerung, damit die
+    // Verbindung ohne Not abreisst. Die Latenz leidet darunter nicht - die
+    // Aufsichtszeit greift erst, wenn wirklich nichts mehr ankommt.
+    client->setConnectionParams(12, 12, 0, 600);
+    client->setConnectTimeout(BLE_CONNECT_TIMEOUT_MS);
 
     _started = true;
     log_i("BLE bereit");
@@ -103,7 +109,10 @@ void BLEScanner::begin() {
 void BLEScanner::_onDisconnect() {
     _state = State::Idle;         // auch hier, nicht nur im Fehlerpfad
     _battery = -1;
-    _nextTryMs = millis() + 2000;
+    // Kurz durchatmen, dann steht sofort wieder der gerichtete
+    // Verbindungswunsch - der kostet nichts und faengt den Scanner in dem
+    // Moment ein, in dem er sich wieder meldet.
+    _nextTryMs = millis() + 800;
 }
 
 void BLEScanner::_onConnect() {
@@ -123,6 +132,11 @@ void BLEScanner::_onBattery(uint8_t level) {
 }
 
 void BLEScanner::_onReport(const uint8_t *data, size_t length) {
+    // Jede Eingabe haelt die Verbindung am Leben - siehe BLE_IDLE_TIMEOUT_MS.
+    // Bewusst hier und nicht erst beim fertigen Barcode: auch ein halb
+    // getippter Code ist Benutzung.
+    _lastActivityMs = millis();
+
     // Standard-Tastaturreport: [Modifier][reserviert][6 Tasten]
     if (length < 3) return;
     const bool shift = data[0] & 0x22;
@@ -173,8 +187,30 @@ void BLEScanner::backoff(uint32_t delayMs) {
     _nextTryMs = millis() + delayMs;
 }
 
+// Gerichteter Verbindungswunsch an den bereits gekoppelten Scanner, ohne
+// Zeitgrenze. Das ist der schnellste Weg ueberhaupt: der Controller haelt den
+// Wunsch offen und verbindet in dem Augenblick, in dem der Scanner zu werben
+// beginnt - ohne Suchlauf, ohne Zutun der Firmware, ohne Wartezeit dazwischen.
+void BLEScanner::startAutoConnect() {
+    const NimBLEAddress peer = NimBLEDevice::getBondedAddress(0);
+
+    _state = State::AutoConnect;
+    _connectStartedMs = millis();
+    client->setConnectTimeout(BLE_HS_FOREVER);
+
+    if (!client->connect(peer, false, true, true)) {
+        log_w("Gerichtetes Warten auf %s nicht moeglich - es wird gesucht",
+              peer.toString().c_str());
+        _forceScan = true;
+        backoff(1000);
+        return;
+    }
+    log_i("Warte auf bekannten Scanner %s", peer.toString().c_str());
+}
+
 void BLEScanner::startScan() {
     haveTarget = false;
+    _forceScan = false;
 
     NimBLEScan *scan = NimBLEDevice::getScan();
     scan->setScanCallbacks(&scanCallbacks, false);
@@ -198,6 +234,7 @@ void BLEScanner::beginConnect() {
     log_i("Verbinde mit %s", targetDevice.getName().c_str());
     _state = State::Connecting;
     _connectStartedMs = millis();
+    client->setConnectTimeout(BLE_CONNECT_TIMEOUT_MS);
 
     // asyncConnect = true: kehrt sofort zurueck, das Ergebnis kommt ueber
     // onConnect bzw. onConnectFail.
@@ -241,10 +278,31 @@ void BLEScanner::finishConnect() {
         }
     }
 
-    _deviceName = String(targetDevice.getName().c_str());
-    _address = String(targetDevice.getAddress().toString().c_str());
+    const NimBLEAddress peer = client->getPeerAddress();
+
+    // Genau eine Kopplung behalten. Sonst zeigt getBondedAddress(0) nach einem
+    // Scannerwechsel womoeglich auf den alten - und das gerichtete Warten
+    // liefe dauerhaft ins Leere, waehrend der neue Scanner danebensteht.
+    for (int i = NimBLEDevice::getNumBonds() - 1; i >= 0; i--) {
+        const NimBLEAddress bonded = NimBLEDevice::getBondedAddress(i);
+        if (bonded != peer) NimBLEDevice::deleteBond(bonded);
+    }
+
+    // Der Name stammt normalerweise aus dem Suchtreffer. Nach dem gerichteten
+    // Warten gab es keinen - dann direkt beim Geraet nachfragen (GAP-Dienst
+    // 0x1800, Merkmal "Device Name" 0x2A00), sonst stuende im System-Panel
+    // nach jedem Neustart nur eine leere Zeile.
+    String name = String(targetDevice.getName().c_str());
+    if (name.isEmpty() || targetDevice.getAddress() != peer) {
+        const NimBLEAttValue gapName =
+            client->getValue(NimBLEUUID((uint16_t)0x1800), NimBLEUUID((uint16_t)0x2A00));
+        if (gapName.length()) name = String(gapName.c_str());
+    }
+    _deviceName = name.isEmpty() ? String(peer.toString().c_str()) : name;
+    _address = String(peer.toString().c_str());
     _state = State::Connected;           // Erfolgspfad
     _failures = 0;
+    _lastActivityMs = millis();          // die vollen 10 Minuten ab jetzt
     _nextBattMs = millis() + BATTERY_POLL_MS;
     log_i("Scanner verbunden: %s (%d Reports)", _deviceName.c_str(), subscribed);
 }
@@ -264,6 +322,9 @@ void BLEScanner::loop() {
     // Sicherheitsnetz: haengt ein Suchlauf oder Verbindungsversuch, darf das
     // die Kopplung nicht dauerhaft lahmlegen. Anders als zuvor wird das hier
     // auch wirklich erreicht - loop() kehrt in jedem Zustand sofort zurueck.
+    // AutoConnect ist hier bewusst ausgenommen: das Warten auf den bekannten
+    // Scanner soll gerade unbegrenzt laufen. Dafuer gibt es weiter unten den
+    // eigenen, viel laengeren Ausweg.
     if ((_state == State::Scanning || _state == State::Connecting) &&
         now - _connectStartedMs > BLE_CONNECT_TIMEOUT_MS) {
         log_w("Kopplungsversuch abgebrochen (Zeitueberschreitung)");
@@ -275,15 +336,41 @@ void BLEScanner::loop() {
 
     switch (_state) {
         case State::Idle:
-            if (now >= _nextTryMs && now >= _pauseUntilMs) startScan();
+            if (now < _nextTryMs || now < _pauseUntilMs) break;
+            // Bekannten Scanner nicht suchen, sondern auf ihn warten - das ist
+            // sofort da, wenn er eingeschaltet wird.
+            if (!_forceScan && NimBLEDevice::getNumBonds() > 0) startAutoConnect();
+            else                                                startScan();
+            break;
+
+        case State::AutoConnect:
+            // Nichts zu tun - das laeuft im Controller. Nur der Ausweg, falls
+            // die gespeicherte Kopplung nicht mehr stimmt.
+            if (now - _connectStartedMs > BLE_AUTOCONNECT_RETRY_MS) {
+                log_i("Bekannter Scanner meldet sich nicht - einmal suchen");
+                client->cancelConnect();
+                _forceScan = true;
+                _state = State::Idle;
+            }
             break;
 
         case State::Scanning: {
             NimBLEScan *scan = NimBLEDevice::getScan();
             if (scan->isScanning()) break;      // laeuft noch, naechster Durchlauf
             scan->clearResults();
-            if (haveTarget) beginConnect();
-            else            backoff();
+            if (haveTarget) {
+                beginConnect();
+            } else if (NimBLEDevice::getNumBonds() > 0) {
+                // Kopplung vorhanden: gleich zurueck ins gerichtete Warten.
+                // Die wachsende Wartezeit waere hier schaedlich - sie wuerde
+                // genau das Fenster aufreissen, in dem der Scanner
+                // eingeschaltet wird und niemand zuhoert.
+                backoff(500);
+            } else {
+                // Noch nichts gekoppelt und nichts gefunden - dann ist auch
+                // nichts da. Hier darf die Wartezeit wachsen.
+                backoff();
+            }
             break;
         }
 
@@ -295,6 +382,16 @@ void BLEScanner::loop() {
             break;
 
         case State::Connected:
+            // Nach dem letzten Barcode noch eine Weile verbunden bleiben,
+            // dann auflegen, damit der Handscanner schlafen kann.
+            if (now - _lastActivityMs > BLE_IDLE_TIMEOUT_MS) {
+                log_i("Seit %lu Minuten kein Scan - Verbindung wird getrennt",
+                      (unsigned long)(BLE_IDLE_TIMEOUT_MS / 60000));
+                if (client->isConnected()) client->disconnect();
+                _state = State::Idle;
+                _pauseUntilMs = now + BLE_IDLE_COOLDOWN_MS;
+                break;
+            }
             if (now >= _nextBattMs) {
                 readBatteryNow();
                 _nextBattMs = now + BATTERY_POLL_MS;

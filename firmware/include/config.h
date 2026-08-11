@@ -108,7 +108,24 @@
 #define WDT_TIMEOUT_S        30
 #define TOUCH_POLL_MS        20
 #define BLE_CONNECT_TIMEOUT_MS 30000
-#define BLE_SCAN_DURATION_MS   4000   // Dauer eines Suchlaufs (blockiert nicht)
+#define BLE_SCAN_DURATION_MS   10000  // Dauer eines Suchlaufs (blockiert nicht)
+
+// Der Scanner bleibt nach dem letzten Barcode noch so lange verbunden; jeder
+// Scan setzt die Zeit zurueck. Danach wird getrennt, damit der Handscanner
+// schlafen und seinen Akku schonen kann.
+#define BLE_IDLE_TIMEOUT_MS 600000        // 10 Minuten
+
+// Nach dem Trennen wegen Untaetigkeit kurz nicht neu verbinden. Ein Scanner,
+// der sofort wieder wirbt, haenge sonst augenblicklich wieder dran und das
+// Trennen haette nichts gebracht. Kurz genug, dass es niemand merkt, der den
+// Scanner gerade wieder in die Hand nimmt.
+#define BLE_IDLE_COOLDOWN_MS 15000
+
+// So lange darf der Controller unbeaufsichtigt auf den bekannten Scanner
+// warten. Danach einmal regulaer suchen - fuer den Fall, dass die gespeicherte
+// Kopplung nicht mehr stimmt (anderer oder zurueckgesetzter Scanner). Ohne
+// diesen Ausweg waere ein veralteter Eintrag eine Sackgasse.
+#define BLE_AUTOCONNECT_RETRY_MS 180000   // 3 Minuten
 
 // Gestufte Wiederherstellung, wenn WLAN oder Server dauerhaft nicht
 // erreichbar sind (falsches Passwort nach einem Routertausch, Server-IP hat

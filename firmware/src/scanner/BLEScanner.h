@@ -51,12 +51,25 @@ public:
 
 private:
     // Kopplung als Zustandsmaschine, damit der Hauptloop nie blockiert.
-    // Vorher lief das in einem Rutsch durch (4 s Scan + bis zu 10 s
-    // Verbindungsaufbau) - das Geraet stand waehrenddessen still und nahm
-    // keine Beruehrung an, und der Zeitueberschreitungsschutz in loop() konnte
-    // gar nicht greifen, weil loop() nie erreicht wurde.
-    enum class State : uint8_t { Idle, Scanning, Connecting, Discovering, Connected };
+    //
+    //   Idle ──bekannt?──> AutoConnect ─┐
+    //     └──unbekannt──>  Scanning ────┴─> Connecting -> Discovering -> Connected
+    //
+    // AutoConnect ist der Normalfall: ein gerichteter Verbindungswunsch ohne
+    // Zeitgrenze. Den haelt der Controller selbst offen und stellt die
+    // Verbindung in dem Augenblick her, in dem der Scanner sich meldet - ohne
+    // dass die Firmware etwas tun muesste. Schneller geht es nicht, und es
+    // belegt deutlich weniger Funkzeit als staendiges Suchen, was neben WLAN
+    // im selben 2,4-GHz-Band spuerbar ist.
+    //
+    // Gesucht wird nur, wenn noch keine Kopplung besteht - oder wenn die
+    // gespeicherte offensichtlich nicht mehr stimmt (siehe
+    // BLE_AUTOCONNECT_RETRY_MS).
+    enum class State : uint8_t {
+        Idle, AutoConnect, Scanning, Connecting, Discovering, Connected
+    };
 
+    void startAutoConnect();
     void startScan();
     void beginConnect();
     void finishConnect();      // Dienstsuche, einmalig nach erfolgreicher Verbindung
@@ -82,8 +95,18 @@ private:
 
     // Von Hand getrennt: ohne diese Sperre wuerde sich der Scanner nach der
     // ueblichen Wartezeit sofort wieder verbinden und der Knopf
-    // "Verbinden / Trennen" bliebe wirkungslos.
+    // "Verbinden / Trennen" bliebe wirkungslos. Dient auch als Ruhepause nach
+    // dem Trennen wegen Untaetigkeit.
     uint32_t _pauseUntilMs = 0;
+
+    // Letzter Tastendruck des Scanners. Jeder Scan setzt ihn zurueck; bleibt
+    // er zu lange her, wird die Verbindung getrennt (BLE_IDLE_TIMEOUT_MS).
+    // Wird aus dem NimBLE-Rueckruf geschrieben, deshalb volatile.
+    volatile uint32_t _lastActivityMs = 0;
+
+    // Naechster Durchlauf soll suchen statt auf die bekannte Kopplung zu
+    // warten - gesetzt, wenn das gerichtete Warten zu lange erfolglos war.
+    bool _forceScan = false;
 
     SemaphoreHandle_t _mutex = nullptr;
 };
