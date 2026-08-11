@@ -246,13 +246,16 @@
     <div class="card" style="margin-top:14px">
       <h2>Bestand aus Version 1 übernehmen</h2>
       <p class="muted">
-        CSV wie sie <code>SELECT * FROM current_inventory</code> im ersten Projekt liefert
-        (Spalten label_barcode, name, expiry_date, quantity, …). Etiketten mit bereits
-        vorhandener Nummer werden übersprungen – ein wiederholter Import nach einem
-        Abbruch ist also gefahrlos.
+        Drei Dateiformen werden erkannt: eine <strong>.csv</strong> wie sie
+        <code>SELECT * FROM current_inventory</code> im ersten Projekt liefert, eine
+        einzelne <strong>.json</strong> von der SD-Karte
+        (<code>inventory.json</code> oder <code>removed_items.json</code> aus
+        <code>/scanner_backup/</code>) oder der ganze Ordner als <strong>.zip</strong>.
+        Etiketten mit bereits vorhandener Nummer werden übersprungen – ein
+        wiederholter Import nach einem Abbruch ist also gefahrlos.
       </p>
       <form class="row" id="import-form">
-        <input type="file" id="import-file" accept=".csv" required>
+        <input type="file" id="import-file" accept=".csv,.json,.zip" required>
         <label class="row tight"><input type="checkbox" id="import-dry-run" checked> nur prüfen</label>
         <button class="primary" type="submit">Hochladen</button>
       </form>

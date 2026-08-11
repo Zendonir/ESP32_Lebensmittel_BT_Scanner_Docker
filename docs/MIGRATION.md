@@ -75,10 +75,10 @@ Nicht alles war neu zu erfinden. Bewusst übernommen:
 ## Daten aus Version 1 übernehmen
 
 Es gibt eine eingebaute Importfunktion (`POST /api/import/v1`,
-`app/services/importer.py`), die genau die Spalten des alten
-`current_inventory`-Views nimmt.
+`app/services/importer.py`) mit drei erkannten Dateiformen - je nachdem,
+woher die alten Daten kommen.
 
-### Export aus der alten Datenbank
+### Quelle A: die MySQL-Datenbank (`.csv`)
 
 ```bash
 mysql -B -e "SELECT label_barcode,barcode,name,brand,category,expiry_date,
@@ -88,32 +88,61 @@ mysql -B -e "SELECT label_barcode,barcode,name,brand,category,expiry_date,
 ```
 
 (`-B` liefert Tab-getrennte Ausgabe mit Kopfzeile - der Importer erkennt
-Komma, Semikolon und Tabulator automatisch.)
+Komma, Semikolon und Tabulator automatisch.) Deckt nur den **aktiven**
+Bestand ab - der View kennt keinen Verlauf.
+
+### Quelle B: die SD-Karte (`.json` / `.zip`)
+
+Version 1 sicherte den internen Speicher täglich nach `/scanner_backup/` auf
+der SD-Karte (`BackupManager::doBackup()`). Darin von Interesse:
+
+| Datei | Inhalt |
+|---|---|
+| `inventory.json` | aktiver Bestand |
+| `removed_items.json` | **Auslager-Verlauf** - steckt nicht in der MySQL-CSV |
+
+Die SD-Karte aus dem Gerät nehmen, am Rechner einlesen und entweder
+`inventory.json`/`removed_items.json` einzeln hochladen, oder gleich den
+ganzen Ordner `scanner_backup` als ZIP:
+
+```bash
+cd /pfad/zur/sd-karte
+zip -r backup.zip scanner_backup/
+```
+
+`categories.json`, `locations.json`, `custom_products.json` und die
+Einstellungsdateien im selben Ordner werden beim ZIP-Import stillschweigend
+übergangen - siehe Begründung unten.
 
 ### Einspielen
 
 Im Web-Interface unter **System → Bestand aus Version 1 übernehmen** die Datei
-hochladen. „Nur prüfen" ist voreingestellt und zeigt, wie viele Zeilen erkannt
-würden, ohne etwas zu schreiben - danach den Haken entfernen und erneut
-hochladen.
+hochladen (`.csv`, `.json` oder `.zip` - automatisch erkannt). „Nur prüfen"
+ist voreingestellt und zeigt, wie viele Zeilen erkannt würden, ohne etwas zu
+schreiben - danach den Haken entfernen und erneut hochladen.
 
 Per Kommandozeile:
 
 ```bash
 curl -X POST "http://localhost:8080/api/import/v1?dry_run=true" \
-  -F "file=@export.csv"
+  -F "file=@export.csv"          # oder inventory.json / backup.zip
 ```
 
 ### Was dabei passiert
 
 * **Etikettennummern bleiben erhalten.** Anders als beim Anlegen über
   `/api/labels` vergibt der Import keine neuen Nummern, sondern übernimmt
-  `label_barcode` unverändert - die Aufkleber im Schrank passen danach
-  weiterhin. Der interne Zähler wird anschließend über den höchsten
-  importierten Wert gesetzt, damit neu angelegte Etiketten nicht kollidieren.
+  `label_barcode` (CSV) bzw. `labelBarcode` (SD-JSON) unverändert - die
+  Aufkleber im Schrank passen danach weiterhin. Der interne Zähler wird
+  anschließend über den höchsten importierten Wert gesetzt, damit neu
+  angelegte Etiketten nicht kollidieren.
+* **`removed_items.json` landet als ausgelagert.** Jeder Eintrag bekommt
+  `status="removed"` und, falls vorhanden, das ursprüngliche `removedAt`
+  (Unix-Zeitstempel) als Zeitpunkt - der Verlauf bleibt damit nachvollziehbar
+  statt nur als "irgendwann vor der Migration" zu erscheinen.
 * **Doppelter Import ist gefahrlos.** Eine Etikettennummer, die schon in der
   Datenbank steht, wird übersprungen statt dupliziert - bricht der Import ab,
-  einfach dieselbe Datei erneut hochladen.
+  einfach dieselbe Datei (oder dasselbe ZIP) erneut hochladen.
 * **MHD-Werte** waren in Version 1 gemischt als `YYYY-MM-DD` und
   `DD.MM.YYYY` gespeichert; beide Formen werden normalisiert
   (`app/services/dates.py`).

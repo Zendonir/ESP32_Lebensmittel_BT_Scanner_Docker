@@ -287,22 +287,30 @@ async def import_v1(
     ),
     session: AsyncSession = Depends(get_session),
 ):
-    """Bestand aus Version 1 uebernehmen.
+    """Bestand aus Version 1 uebernehmen - drei erkannte Dateiformen:
 
-    Erwartet eine CSV wie sie `SELECT * FROM current_inventory` liefert -
-    Spalten label_barcode, barcode, name, brand, category, expiry_date,
-    added_date, quantity, household. Etiketten mit bereits vorhandenem
-    label_barcode werden uebersprungen, ein wiederholter Import nach einem
-    Abbruch ist damit gefahrlos.
+    * `.csv`  - der MySQL-View `current_inventory`
+    * `.json` - eine einzelne Datei aus der SD-Sicherung
+                (`inventory.json` oder `removed_items.json`)
+    * `.zip`  - der komplette Ordner `/scanner_backup/` von der SD-Karte
+
+    Etiketten mit bereits vorhandenem `label_barcode` werden uebersprungen,
+    ein wiederholter Import nach einem Abbruch ist damit gefahrlos.
     """
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(400, "Bitte eine .csv-Datei hochladen")
-
+    name = (file.filename or "").lower()
     content = await file.read()
     if len(content) > 20 * 1024 * 1024:
         raise HTTPException(413, "Datei zu groß (Grenze 20 MB)")
 
-    result = await importer_service.import_csv(session, content, dry_run=dry_run)
+    if name.endswith(".csv"):
+        result = await importer_service.import_csv(session, content, dry_run=dry_run)
+    elif name.endswith(".json"):
+        result = await importer_service.import_sd_json(session, content, dry_run=dry_run)
+    elif name.endswith(".zip"):
+        result = await importer_service.import_sd_zip(session, content, dry_run=dry_run)
+    else:
+        raise HTTPException(400, "Bitte eine .csv-, .json- oder .zip-Datei hochladen")
+
     if not dry_run and result.imported:
         await hub.notify_ui("inventory")
 
