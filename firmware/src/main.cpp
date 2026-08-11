@@ -126,35 +126,12 @@ void setup() {
     delay(150);
     logResetReason();
 
-    // Zwingend als Erstes: auf diesem Board haengen die Reset-Leitungen von
-    // Display und Touchcontroller am TCA9554-Portexpander, nicht an einem GPIO.
-    // Ohne diesen Schritt zeigt der ST7796 Rauschen und der FT6336 meldet sich
-    // gar nicht erst auf dem I2C-Bus.
-    board.begin();
-
-    // Einmaliger Erkennungsversuch fuers System-Panel - unabhaengig davon, ob
-    // die Karte gleich fuer Settings::begin() gebraucht wird.
-    sdStore.probe();
-
-    screen.begin();
-    screen.showBoot("Lebensmittel-Terminal", FIRMWARE_VERSION);
-
-    touch.begin();
-    buzzer.begin();
-    printer.begin();
-
-    net.onMessage(onServerMessage);
-    net.begin();
-
-    if (net.portalActive()) {
-        screen.showBoot("Einrichtung", String("WLAN ") + AP_SSID + " - 192.168.4.1");
-    } else {
-        screen.showBoot("Verbinde…", settings.serverHost + ":" + String(settings.serverPort));
-        bleScanner.begin();
-    }
-
-    // Der Watchdog ist die letzte Instanz: haengt der Loop, gibt es einen
-    // Neustart mit Backtrace statt eines Geraets, das nur noch dasteht.
+    // Der Watchdog muss stehen, BEVOR irgendetwas laeuft, das haengen kann
+    // (SD-Karte, Display-Reset, WLAN) - vorher stand er erst ganz am Ende von
+    // setup(), also ungeschuetzt genau in den Schritten, die am ehesten
+    // haengen bleiben. Ohne Watchdog wird aus einem haengenden SD_MMC.begin()
+    // (z.B. bei einer angeschlagenen Karte) ein echtes Einfrieren statt eines
+    // Neustarts mit Backtrace.
     esp_task_wdt_config_t wdt = {
         .timeout_ms = WDT_TIMEOUT_S * 1000,
         .idle_core_mask = 0,
@@ -162,6 +139,38 @@ void setup() {
     };
     esp_task_wdt_reconfigure(&wdt);
     esp_task_wdt_add(nullptr);
+
+    // Zwingend als Naechstes: auf diesem Board haengen die Reset-Leitungen von
+    // Display und Touchcontroller am TCA9554-Portexpander, nicht an einem GPIO.
+    // Ohne diesen Schritt zeigt der ST7796 Rauschen und der FT6336 meldet sich
+    // gar nicht erst auf dem I2C-Bus.
+    board.begin();
+    esp_task_wdt_reset();
+
+    // Einmaliger Erkennungsversuch fuers System-Panel - unabhaengig davon, ob
+    // die Karte gleich fuer Settings::begin() gebraucht wird.
+    sdStore.probe();
+    esp_task_wdt_reset();
+
+    screen.begin();
+    screen.showBoot("Lebensmittel-Terminal", FIRMWARE_VERSION);
+    esp_task_wdt_reset();
+
+    touch.begin();
+    buzzer.begin();
+    printer.begin();
+    esp_task_wdt_reset();
+
+    net.onMessage(onServerMessage);
+    net.begin();
+    esp_task_wdt_reset();
+
+    if (net.portalActive()) {
+        screen.showBoot("Einrichtung", String("WLAN ") + AP_SSID + " - 192.168.4.1");
+    } else {
+        screen.showBoot("Verbinde…", settings.serverHost + ":" + String(settings.serverPort));
+        bleScanner.begin();
+    }
 
     log_i("Start abgeschlossen, Heap frei: %u", ESP.getFreeHeap());
 }
