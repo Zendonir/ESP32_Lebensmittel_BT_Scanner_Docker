@@ -344,6 +344,16 @@ void loop() {
         screen.setBanner("");
     }
 
+    // Einen Zustandswechsel des Scanners sofort melden statt auf das naechste
+    // Telemetriepaket zu warten - sonst stuende bis zu 30 s lang "Getrennt"
+    // auf dem Bildschirm, obwohl der Scanner laengst dranhaengt.
+    static bool lastScannerState = false;
+    if (bleScanner.isConnected() != lastScannerState) {
+        lastScannerState = bleScanner.isConnected();
+        lastTelemetry = millis();
+        sendTelemetry();
+    }
+
     if (millis() - lastTelemetry > TELEMETRY_INTERVAL_MS) {
         lastTelemetry = millis();
         sendTelemetry();

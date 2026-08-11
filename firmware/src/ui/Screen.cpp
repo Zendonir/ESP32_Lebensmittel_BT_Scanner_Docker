@@ -191,15 +191,13 @@ void Screen::drawStatusBar() {
 
 void Screen::drawTitle() {
     const int16_t y = STATUS_H + (_banner.isEmpty() ? 0 : 18);
-    _spr.setTextFont(4);
     _spr.setTextColor(C_TEXT, C_BG);
-    _spr.drawString(String(_screen["title"] | ""), 10, y + 2);
+    _spr.drawString(fitText(String(_screen["title"] | ""), W - 20, 4), 10, y + 2);
 
     const char *subtitle = _screen["subtitle"] | "";
     if (subtitle[0]) {
-        _spr.setTextFont(2);
         _spr.setTextColor(C_MUTED, C_BG);
-        _spr.drawString(subtitle, 10, y + 26);
+        _spr.drawString(fitText(subtitle, W - 20, 2), 10, y + 26);
     }
 }
 
@@ -215,6 +213,40 @@ static uint16_t textOn(uint16_t bg) {
     return luminance > 110 ? C_BG : C_TEXT;
 }
 
+// Beschriftung so einpassen, dass sie innerhalb der Flaeche bleibt: erst eine
+// Schriftstufe kleiner, dann notfalls kuerzen. Die Schrift setzt die Funktion
+// gleich mit - der Aufrufer zeichnet danach einfach.
+//
+// Vorher wurde nur eine Stufe kleiner gewaehlt und dann gezeichnet, egal ob es
+// passte. Bei einer proportionalen Schrift laesst sich die Breite nicht mehr
+// aus der Zeichenzahl abschaetzen, deshalb wird hier wirklich gemessen.
+String Screen::fitText(const String &text, int16_t maxWidth, uint8_t font) {
+    static const uint8_t STEPS[] = {6, 4, 2, 1};
+
+    uint8_t chosen = font;
+    for (uint8_t step : STEPS) {
+        if (step > font) continue;
+        chosen = step;
+        _spr.setTextFont(step);
+        if (_spr.textWidth(text) <= maxWidth) return text;
+    }
+
+    // Auch in der kleinsten Stufe zu breit - kuerzen. Als Kuerzungszeichen "~"
+    // wie im Vorgaengerprojekt: die Auslassungspunkte "…" liegen ausserhalb
+    // von Latin-1 und haetten in der Schrift kein Zeichen.
+    _spr.setTextFont(chosen);
+    String out = text;
+    while (out.length() > 1 && _spr.textWidth(out + "~") > maxWidth) {
+        out.remove(out.length() - 1);
+        // Eine Mehrbyte-Folge nicht mittendrin abschneiden, sonst steht dort
+        // ein kaputtes Zeichen.
+        while (out.length() && ((uint8_t)out[out.length() - 1] & 0xC0) == 0x80) {
+            out.remove(out.length() - 1);
+        }
+    }
+    return out + "~";
+}
+
 void Screen::tile(int16_t x, int16_t y, int16_t w, int16_t h, const String &label,
                   const String &sub, uint16_t color, const String &id) {
     _spr.fillRoundRect(x, y, w, h, 8, color);
@@ -222,16 +254,11 @@ void Screen::tile(int16_t x, int16_t y, int16_t w, int16_t h, const String &labe
     _spr.setTextDatum(MC_DATUM);
     _spr.setTextColor(textOn(color), color);
 
-    // Lange Beschriftungen ("Fleisch & Fisch") liefen mit fester Schriftgroesse
-    // ueber den Kachelrand in die naechste Kachel - deshalb bei Bedarf auf die
-    // kleinere Schrift ausweichen, statt blind font4 zu erzwingen.
     const int16_t maxTextW = w - 12;
-    _spr.setTextFont(4);
-    if (_spr.textWidth(label) > maxTextW) _spr.setTextFont(2);
-    _spr.drawString(label, x + w / 2, y + h / 2 - (sub.isEmpty() ? 0 : 10));
+    _spr.drawString(fitText(label, maxTextW, 4), x + w / 2,
+                    y + h / 2 - (sub.isEmpty() ? 0 : 10));
     if (!sub.isEmpty()) {
-        _spr.setTextFont(2);
-        _spr.drawString(sub, x + w / 2, y + h / 2 + 14);
+        _spr.drawString(fitText(sub, maxTextW, 2), x + w / 2, y + h / 2 + 14);
     }
     _spr.setTextDatum(TL_DATUM);
     addHit(x, y, w, h, id);
@@ -244,12 +271,7 @@ void Screen::button(int16_t x, int16_t y, int16_t w, int16_t h, const String &la
     _spr.setTextDatum(MC_DATUM);
     _spr.setTextColor(textOn(bg), bg);
 
-    // Gleiche Absicherung wie bei tile(): "Verbinden / Trennen" o.ae. darf
-    // nicht ueber den Knopfrand hinauslaufen.
-    const int16_t maxTextW = w - 8;
-    _spr.setTextFont(2);
-    if (_spr.textWidth(label) > maxTextW) _spr.setTextFont(1);
-    _spr.drawString(label, x + w / 2, y + h / 2);
+    _spr.drawString(fitText(label, w - 8, 2), x + w / 2, y + h / 2);
     _spr.setTextDatum(TL_DATUM);
     addHit(x, y, w, h, id);
 }
@@ -321,15 +343,16 @@ void Screen::drawList() {
         _spr.fillRoundRect(8, y + 2, W - 16 - (total > _pageSize ? 34 : 0), rowH - 6, 6, C_SURFACE);
         _spr.fillRoundRect(8, y + 2, 5, rowH - 6, 3, color);
 
-        _spr.setTextFont(4);
+        // Produktnamen sind haeufig laenger als die Zeile - abschneiden statt
+        // ueber den Rand und die Bildlaufleiste hinauszuschreiben.
+        const int16_t textW = W - 16 - (total > _pageSize ? 34 : 0) - 22;
         _spr.setTextColor(C_TEXT, C_SURFACE);
-        _spr.drawString(String(item["label"] | ""), 22, y + 5);
+        _spr.drawString(fitText(String(item["label"] | ""), textW, 4), 22, y + 5);
 
         const char *sub = item["sub"] | "";
         if (sub[0]) {
-            _spr.setTextFont(2);
             _spr.setTextColor(C_MUTED, C_SURFACE);
-            _spr.drawString(sub, 22, y + 24);
+            _spr.drawString(fitText(sub, textW, 2), 22, y + 24);
         }
         addHit(8, y, W - 16, rowH - 4, String(item["id"] | ""));
     }

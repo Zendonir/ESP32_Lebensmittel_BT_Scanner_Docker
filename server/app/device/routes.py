@@ -197,9 +197,11 @@ async def _store_telemetry(session, device_id: str, sess, msg: dict) -> None:
         }
     )
     scanner = msg.get("scanner") or {}
+    scanner_changed = False
     if scanner:
         telemetry["scanner"] = scanner
         previous = sess.scanner
+        scanner_changed = bool(scanner.get("connected")) != bool(previous.get("connected"))
         sess.scanner = scanner
         battery = scanner.get("battery", -1)
         # Warnung genau einmal beim Unterschreiten, nicht bei jedem Telemetriepaket.
@@ -216,6 +218,13 @@ async def _store_telemetry(session, device_id: str, sess, msg: dict) -> None:
     device.online = True
     device.last_seen = utcnow()
     await session.commit()
+
+    # Hat sich der Scannerzustand geaendert, den Bildschirm neu schicken.
+    # Telemetrie allein aendert die Anzeige nicht - ohne das stuende bis zum
+    # naechsten Tippen weiter "Getrennt" da, obwohl der Scanner verbunden ist.
+    if scanner_changed:
+        await workflow.push_screen(session, sess)
+        await hub.notify_ui("devices")
 
 
 @router.websocket("/ws/ui")

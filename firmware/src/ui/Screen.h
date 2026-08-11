@@ -77,6 +77,9 @@ private:
     // Zeichen, das eine Taste bei aktuellem Umschalt-/Zifferzustand einfuegt.
     char keyboardCharAt(uint8_t row, uint8_t col) const;
 
+    // Setzt die passende Schriftgroesse und liefert den ggf. gekuerzten Text.
+    String fitText(const String &text, int16_t maxWidth, uint8_t font);
+
     void addHit(int16_t x, int16_t y, int16_t w, int16_t h, const String &id, bool isInput = false);
     void tile(int16_t x, int16_t y, int16_t w, int16_t h, const String &label,
               const String &sub, uint16_t color, const String &id);
