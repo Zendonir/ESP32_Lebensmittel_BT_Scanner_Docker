@@ -208,20 +208,36 @@ def test_name_wird_nicht_abgeschnitten(layout):
     assert "Rueckenfilet - Schwein" in gedruckt
 
 
-def test_hochkant_nimmt_keinen_strichcode():
-    """Ein gedrehter Strichcode laege quer und waere nicht mehr lesbar.
+def test_quer_dreht_den_text_und_nimmt_den_qr_code():
+    """Querformat heisst gedrehter Text - und damit zwingend QR.
 
-    Ein QR-Code ist aus jeder Richtung lesbar, also faellt die Wahl dort
-    zwangslaeufig auf ihn.
+    Der Druckkopf schreibt seine Zeilen ueber die kurze Kante; wer das Etikett
+    quer lesen will, braucht die Drehung. ESC V dreht aber nur Zeichen: ein
+    Strichcode liefe weiter in Papierrichtung und stuende quer zur Schrift.
+    Ein QR-Code ist quadratisch und aus jeder Richtung lesbar.
     """
+    rendered = labels_service.render_label(
+        {"label": "LEB000042", "name": "Brot", "expiry_date": "2026-12-24"},
+        {"label_layout": "kompakt", "label_orientation": "quer",
+         "qr": True, "code128": True},
+    )
+    types = [b["t"] for b in rendered["blocks"]]
+    assert rendered["rotate"] is True
+    assert "qr" in types and "code128" not in types
+    # Quer gelesen: Zeilen laufen ueber die lange Kante, gestapelt wird ueber
+    # die kurze.
+    assert (rendered["line_mm"], rendered["stack_mm"]) == (50, 30)
+
+
+def test_hoch_druckt_ungedreht_und_darf_den_strichcode():
     rendered = labels_service.render_label(
         {"label": "LEB000042", "name": "Brot", "expiry_date": "2026-12-24"},
         {"label_layout": "kompakt", "label_orientation": "hoch",
          "qr": True, "code128": True},
     )
-    types = [b["t"] for b in rendered["blocks"]]
-    assert "qr" in types and "code128" not in types
-    assert rendered["rotate"] is True
+    assert rendered["rotate"] is False
+    assert "code128" in [b["t"] for b in rendered["blocks"]]
+    assert (rendered["line_mm"], rendered["stack_mm"]) == (30, 50)
 
 
 # ------------------------------------------------------------------- Filterung

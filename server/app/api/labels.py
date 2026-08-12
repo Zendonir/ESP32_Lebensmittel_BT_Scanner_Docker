@@ -48,8 +48,11 @@ async def list_layouts(session: AsyncSession = Depends(get_session)):
         used = label_service.total_dots(
             [b for b in payload["blocks"] if b.get("t") != "feed"]
         )
+        codes = [b["t"] for b in payload["blocks"] if b["t"] in ("qr", "code128")]
         out.append({
             "name": name,
+            "code": "QR-Code" if codes and codes[0] == "qr" else "Strichcode",
+            "rotate": payload["rotate"],
             "title": label_service.TITLES.get(name, name),
             "description": description,
             "dots": used,

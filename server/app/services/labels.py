@@ -139,11 +139,13 @@ def _fit(blocks: list[dict], budget: int) -> list[dict]:
 #
 # Vier Zuschnitte fuer dasselbe Etikett. Sie unterscheiden sich darin, was bei
 # 240 Punkten Platz Vorrang hat - alles zugleich geht nicht.
+# Den Code nennen die Beschreibungen bewusst nicht: welcher gedruckt wird,
+# haengt an der Ausrichtung (siehe _code_blocks) und stuende hier sonst falsch.
 LAYOUTS: dict[str, str] = {
-    "kompakt": "Name und MHD gross, Strichcode darunter. Aus zwei Metern lesbar.",
-    "standard": "Name gross, dazu MHD, Menge und Ort. QR-Code. Der Allrounder.",
-    "vollstaendig": "Alle Angaben in normaler Schrift, kleiner Strichcode.",
-    "sparsam": "Nur Name und MHD, dafuer ein grosser QR-Code.",
+    "kompakt": "Name und MHD gross. Aus zwei Metern lesbar.",
+    "standard": "Name gross, dazu MHD, Menge und Ort. Der Allrounder.",
+    "vollstaendig": "Alle Angaben in normaler Schrift, kleiner Code.",
+    "sparsam": "Nur Name und MHD, dafuer ein grosser Code.",
 }
 
 # Anzeigename fuer die Oberflaeche - der Schluessel bleibt umlautfrei, damit
@@ -155,6 +157,16 @@ TITLES: dict[str, str] = {
     "sparsam": "Sparsam",
 }
 DEFAULT_LAYOUT = "standard"
+
+
+def is_rotated(cfg: dict) -> bool:
+    """Muss der Text um 90 Grad gedreht werden?
+
+    Der Druckkopf schreibt seine Zeilen immer ueber die kurze Kante. Wer das
+    Etikett quer lesen will - Text der langen 50-mm-Kante entlang -, braucht
+    dafuer die Drehung. Hochkant ist der ungedrehte Fall.
+    """
+    return cfg.get("label_orientation", "quer") != "hoch"
 
 
 def _title(item: dict) -> str:
@@ -196,9 +208,12 @@ def _code_blocks(item: dict, cfg: dict, prefer_qr: bool, height: int, scale: int
     label = item.get("label", "")
     if not label:
         return []
-    # Hochkant wird der Text um 90 Grad gedreht, ein Strichcode aber nicht -
-    # der laege dann quer. Ein QR-Code ist aus jeder Richtung lesbar.
-    if cfg.get("label_orientation") == "hoch":
+    # ESC V dreht nur Zeichen. Strichcode (GS k) und Bitmap laufen weiter in
+    # Papierrichtung - bei gedrehtem Text stuenden sie also quer zur Schrift.
+    # Beim QR-Code ist das gleichgueltig, der ist aus jeder Richtung lesbar
+    # und quadratisch; ein Strichcode dagegen saehe verdreht aus und wuerde
+    # die Hoehenrechnung sprengen.
+    if is_rotated(cfg):
         prefer_qr = True
     if prefer_qr and cfg.get("qr", True):
         return [{"t": "qr", "v": label, "scale": scale}]
@@ -265,18 +280,20 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     layout = printer_cfg.get("label_layout", DEFAULT_LAYOUT)
     if layout not in LAYOUTS:
         layout = DEFAULT_LAYOUT
-    portrait = printer_cfg.get("label_orientation") == "hoch"
+    rotate = is_rotated(printer_cfg)
 
-    # Hochkant tauschen Breite und Hoehe die Rolle: gedruckt wird ueber die
-    # 30-mm-Kante, also passen deutlich weniger Zeichen in eine Zeile.
+    # Der Druckkopf schreibt immer ueber die kurze Kante des Etiketts. Soll der
+    # Text der langen Kante entlang laufen - also quer gelesen werden - muss er
+    # um 90 Grad gedreht werden. Hochkant kommt er dagegen ungedreht heraus.
     width_mm = float(printer_cfg.get("label_width_mm", 50))
     height_mm = float(printer_cfg.get("label_height_mm", 30))
-    line_mm = height_mm if portrait else width_mm
+    line_mm, stack_mm = (width_mm, height_mm) if rotate else (height_mm, width_mm)
+
     chars = max(8, int(line_mm * DOTS_PER_MM) // 12)
     declared = int(printer_cfg.get("paper_chars", settings.label_paper_chars))
     chars = min(chars, declared)
 
-    budget = int((width_mm if portrait else height_mm) * DOTS_PER_MM) - SAFETY_DOTS
+    budget = int(stack_mm * DOTS_PER_MM) - SAFETY_DOTS
     blocks = _fit(_build(layout, item, printer_cfg, chars), budget)
 
     # Rest bis zur Perforation vorschieben, damit das naechste Etikett oben
@@ -288,7 +305,11 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     return {
         "chars": chars,
         "layout": layout,
-        "rotate": portrait,
+        "rotate": rotate,
+        # Kantenlaengen so, wie das Etikett hinterher gelesen wird - die
+        # Vorschau zeichnet danach und muss die Drehung nicht nachrechnen.
+        "line_mm": line_mm,
+        "stack_mm": stack_mm,
         "height_dots": budget + SAFETY_DOTS,
         "blocks": blocks,
     }
@@ -303,12 +324,11 @@ def render_preview_svg(payload: dict, cfg: dict) -> str:
     Layout-Implementierung fuer die Anzeige waere die naechste Stelle, an der
     Bildschirm und Papier auseinanderlaufen.
     """
-    width_mm = float(cfg.get("label_width_mm", 50))
-    height_mm = float(cfg.get("label_height_mm", 30))
-    rotate = bool(payload.get("rotate"))
-    # Hochkant dreht der Drucker die Zeilen; die Vorschau zeigt das Etikett so,
-    # wie es hinterher im Schrank klebt.
-    view_w, view_h = (height_mm, width_mm) if rotate else (width_mm, height_mm)
+    # Die Kantenlaengen stehen im Payload, in Leserichtung. Die Vorschau zeigt
+    # das Etikett damit so, wie es hinterher im Schrank klebt, ohne die
+    # Drehung ein zweites Mal nachzurechnen.
+    view_w = float(payload.get("line_mm") or cfg.get("label_width_mm", 50))
+    view_h = float(payload.get("stack_mm") or cfg.get("label_height_mm", 30))
 
     dots_w = int(view_w * DOTS_PER_MM)
     parts = [

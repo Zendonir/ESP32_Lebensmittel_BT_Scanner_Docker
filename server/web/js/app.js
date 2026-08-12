@@ -635,7 +635,7 @@ async function loadLayouts() {
     <div class="paper">${l.svg}</div>
     <div class="who">${esc(l.title || l.name)}</div>
     <div class="why">${esc(l.description)}</div>
-    <div class="fill">${l.dots} von ${l.height_dots} Punkten</div>
+    <div class="fill">${esc(l.code)} · ${l.dots} von ${l.height_dots} Punkten</div>
   </div>`).join('');
 
   box.querySelectorAll('[data-layout]').forEach((el) => el.addEventListener('click', async () => {
