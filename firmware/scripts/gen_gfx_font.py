@@ -33,9 +33,26 @@ FIRST, LAST = 0x20, 0xFF
 BLANK = set(range(0x7F, 0xA0))
 
 
+def _render(font, char: str, advance: int, ascent: int, descent: int, size_px: int, mode: str):
+    """Ein Zeichen rastern und die Tintengrenzen zurueckgeben.
+
+    `mode` ist "1" fuer Schwarzweiss mit Hinting und "L" fuer Graustufen, die
+    anschliessend geschwellt werden.
+    """
+    pad = size_px + 4
+    canvas = Image.new("L", (advance + 2 * pad, ascent + descent + 2 * pad), 0)
+    drawer = ImageDraw.Draw(canvas)
+    drawer.fontmode = mode
+    drawer.text((pad, pad), char, font=font, fill=255)
+    if mode == "L":
+        canvas = canvas.point(lambda value: 255 if value >= 128 else 0)
+    return canvas, canvas.getbbox(), pad
+
+
 def gen_font(ttf_path: str, size_px: int, font_name: str, output_path: str) -> None:
     font = ImageFont.truetype(ttf_path, size_px)
     ascent, descent = font.getmetrics()
+    korrigiert = []
 
     bitmap_bytes = bytearray()
     glyphs: list[tuple[int, int, int, int, int, int]] = []
@@ -55,17 +72,12 @@ def gen_font(ttf_path: str, size_px: int, font_name: str, output_path: str) -> N
         # liefert die Masse der geglaetteten Darstellung, gezeichnet wird hier
         # aber schwarzweiss - das kann um ein Pixel abweichen und verschiebt
         # dann die ganze Glyphe.
-        pad = size_px + 4
-        canvas = Image.new("L", (advance + 2 * pad, ascent + descent + 2 * pad), 0)
-        drawer = ImageDraw.Draw(canvas)
+        #
         # Ohne Kantenglaettung: ein geglaettetes Bild auf 1 Bit abzuschwellen
         # ergibt ausgefranste Raender. FreeType rastert im Schwarzweissmodus
         # mit Hinting und trifft die Pixelkanten sauber - genau das ist der
         # Unterschied zwischen scharf und matschig.
-        drawer.fontmode = "1"
-        drawer.text((pad, pad), char, font=font, fill=255)
-
-        ink = canvas.getbbox()
+        canvas, ink, pad = _render(font, char, advance, ascent, descent, size_px, "1")
         if ink is None:                     # Leerzeichen: kein Pixel, nur Vorschub
             glyphs.append((offset, 0, 0, advance, 0, 0))
             continue
@@ -78,8 +90,29 @@ def gen_font(ttf_path: str, size_px: int, font_name: str, output_path: str) -> N
         # ansetzt.
         y_offset = ink[1] - (pad + ascent)
 
+        # Hinting rueckt die Umrisse aufs Pixelraster - dafuer ist es da, und
+        # deshalb sind die Stege scharf. Bei Zeichen mit Aufsatz staucht
+        # FreeType dabei aber die ganze Glyphe, damit der Aufsatz unter die
+        # Oberlaenge passt: "ä" und "ö" landeten dadurch eine Pixelzeile
+        # ueber der Grundlinie, waehrend "a" und "o" darauf sassen. Auf dem
+        # Geraet sieht das aus, als tanzten die Umlaute in der Zeile - und
+        # weil das ausgerechnet die deutschen Sonderzeichen trifft, faellt es
+        # in jedem zweiten Wort auf.
+        #
+        # Die ungehintete Rasterung folgt dem Umriss und trifft die Grundlinie
+        # richtig. Von ihr wird nur die *Unterkante* uebernommen; die Pixel
+        # bleiben die scharfen aus dem Hinting-Durchgang.
+        _, ink_ref, pad_ref = _render(font, char, advance, ascent, descent, size_px, "L")
+        if ink_ref is not None:
+            unterkante_soll = ink_ref[3] - (pad_ref + ascent)
+            if y_offset + height != unterkante_soll:
+                korrigiert.append(char)
+                y_offset = unterkante_soll - height
+
         # 1 Bit je Pixel, zeilenweise, links beginnend - so erwartet es GFX.
-        pixels = list(image.getdata())
+        # tobytes() statt getdata(): liefert bei einem L-Bild dieselben Pixel
+        # zeilenweise, ist aber nicht abgekuendigt.
+        pixels = image.tobytes()
         bits, current = [], 0
         for index, value in enumerate(pixels):
             current = (current << 1) | (1 if value >= 128 else 0)
@@ -93,7 +126,7 @@ def gen_font(ttf_path: str, size_px: int, font_name: str, output_path: str) -> N
         glyphs.append((offset, width, height, advance, x_offset, y_offset))
 
     lines = [
-        f"// Erzeugt von scripts/gen_gfx_font.py - nicht von Hand aendern.",
+        "// Erzeugt von scripts/gen_gfx_font.py - nicht von Hand aendern.",
         f"// Schrift: {ttf_path.split('/')[-1]}, {size_px} px, Bereich 0x20-0xFF.",
         "// Nach dem Displaytreiber einbinden, der GFXfont/GFXglyph definiert.",
         "#pragma once",
@@ -125,6 +158,8 @@ def gen_font(ttf_path: str, size_px: int, font_name: str, output_path: str) -> N
         handle.write("\n".join(lines))
 
     print(f"{output_path}: {len(bitmap_bytes)} Byte Bitmaps, {len(glyphs)} Zeichen")
+    if korrigiert:
+        print(f"  Grundlinie nachgezogen bei {len(korrigiert)}: {''.join(korrigiert)}")
 
 
 if __name__ == "__main__":
