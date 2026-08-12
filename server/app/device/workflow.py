@@ -235,7 +235,6 @@ async def _screen_locations(session, sess, sid, status) -> dict:
         kind="list",
         title="Lagerort waehlen",
         items=items,
-        buttons=[proto.BTN_BACK],
         status=status,
     )
 
@@ -248,7 +247,6 @@ def _screen_location_new(sess, sid, status) -> dict:
         subtitle="Name eingeben",
         value="",
         meta={"max_len": 40},
-        buttons=[proto.BTN_BACK],
         status=status,
     )
 
@@ -297,7 +295,6 @@ async def _screen_expiring(session, sess, sid, status) -> dict:
         title="Ablaufend",
         subtitle="Antippen = auslagern",
         items=items or [{"id": "none", "label": "Nichts laeuft ab", "color": "#2eb048"}],
-        buttons=[proto.BTN_BACK],
         status=status,
     )
 
@@ -315,7 +312,6 @@ def _screen_unknown(sess, sid, status) -> dict:
             {"id": "generic", "label": "Ohne Namen", "sub": "nur MHD", "color": "#1c222a"},
             {"id": "home", "label": "Verwerfen", "color": "#f04640"},
         ],
-        buttons=[proto.BTN_HOME],
         status=status,
     )
 
@@ -328,7 +324,6 @@ def _screen_unknown_name(sess, sid, status) -> dict:
         subtitle=sess.draft.barcode,
         value=sess.draft.name,
         meta={"max_len": 60},
-        buttons=[proto.BTN_BACK],
         status=status,
     )
 
@@ -370,7 +365,6 @@ def _screen_qty(sess, sid, status) -> dict:
         lines=[f"MHD {to_display(draft.expiry_date) or '-'}", f"Ort {sess.location or '-'}"],
         value=draft.count,
         meta={"min": 1, "max": 20, "step": 1, "unit": "Stk"},
-        buttons=[proto.BTN_BACK, {"id": "ok", "label": "Drucken", "style": "primary"}],
         status=status,
     )
 
@@ -383,7 +377,6 @@ def _screen_result(sess, sid, status) -> dict:
         subtitle=sess.draft.name,
         lines=sess.last_result,
         items=[{"id": "home", "label": "Weiter", "color": "#2eb048"}],
-        buttons=[proto.BTN_HOME],
         status=status,
     )
 
@@ -409,7 +402,6 @@ async def _screen_tmpl_category(session, sess, sid, status) -> dict:
         kind="tiles",
         title="Kategorie",
         items=items,
-        buttons=[proto.BTN_BACK, proto.BTN_HOME],
         status=status,
     )
 
@@ -436,7 +428,6 @@ async def _screen_tmpl_product(session, sess, sid, status) -> dict:
         kind="list",
         title=sess.draft.category or "Vorlagen",
         items=items or [{"id": "none", "label": "Keine Vorlagen", "color": "#1c222a"}],
-        buttons=[proto.BTN_BACK, proto.BTN_HOME],
         status=status,
     )
 
@@ -452,7 +443,6 @@ async def _screen_tmpl_brand(session, sess, sid, status) -> dict:
         title="Marke",
         subtitle=sess.draft.name,
         items=items,
-        buttons=[proto.BTN_BACK, proto.BTN_HOME],
         status=status,
     )
 
@@ -469,7 +459,6 @@ async def _screen_tmpl_sorte(session, sess, sid, status) -> dict:
         subtitle=sess.draft.name,
         lines=["Neue Sorten im Web-Interface anlegen"],
         items=items,
-        buttons=[proto.BTN_BACK, proto.BTN_HOME],
         status=status,
     )
 
@@ -484,7 +473,6 @@ def _screen_tmpl_amount(sess, sid, status) -> dict:
         value=draft.quantity,
         meta={"min": 0, "max": 5000, "step": 50 if draft.unit in ("g", "ml") else 1,
               "unit": draft.unit or "Stk"},
-        buttons=[proto.BTN_BACK, proto.BTN_OK],
         status=status,
     )
 
@@ -566,11 +554,13 @@ async def _screen_inventory(session, sess, sid, status) -> dict:
         subtitle=f"Sortiert: {sort_label}  ·  {len(values)} Artikel"
         + (f"  ·  Suche: {sess.inv_search}" if sess.inv_search else ""),
         items=items or [{"id": "none", "label": "Nichts im Bestand", "color": "#1c222a"}],
-        buttons=[
-            proto.BTN_BACK,
-            {"id": "sort", "label": "Sortierung", "style": "ghost"},
-            {"id": "search", "label": "Suche", "style": "ghost"},
-        ],
+        # Steuerzeile ueber der Liste - frueher Knoepfe in der Fussleiste.
+        meta={
+            "controls": [
+                {"id": "sort", "label": f"Sortierung: {sort_label}"},
+                {"id": "search", "label": "Suche" + (f": {sess.inv_search}" if sess.inv_search else "")},
+            ]
+        },
         status=status,
     )
 
@@ -583,7 +573,6 @@ def _screen_inv_search(sess, sid, status) -> dict:
         subtitle="Nach Namen filtern",
         value=sess.inv_search,
         meta={"max_len": 40},
-        buttons=[proto.BTN_BACK, proto.BTN_OK],
         status=status,
     )
 
@@ -650,7 +639,6 @@ async def _screen_system(session, sess, sid, status) -> dict:
         title="SYSTEM",
         subtitle=sess.location or "",
         meta={"cards": cards},
-        buttons=[proto.BTN_BACK],
         status=status,
     )
 
@@ -664,7 +652,6 @@ async def _screen_roll_new(session, sess, sid, status) -> dict:
         subtitle=f"Bisherige Rolle: {roll['size'] or '-'} Etiketten",
         value=float(roll["size"] or 200),
         meta={"min": 10, "max": 2000, "step": 10, "unit": "Etiketten"},
-        buttons=[proto.BTN_BACK, proto.BTN_OK],
         status=status,
     )
 

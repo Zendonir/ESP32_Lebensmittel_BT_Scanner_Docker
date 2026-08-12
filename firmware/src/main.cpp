@@ -18,6 +18,7 @@
 
 #include "config.h"
 #include "core/Board.h"
+#include "core/Buttons.h"
 #include "core/Net.h"
 #include "core/SdStore.h"
 #include "core/Settings.h"
@@ -206,6 +207,7 @@ void setup() {
     esp_task_wdt_reset();
 
     touch.begin();
+    buttons.begin();
     buzzer.begin();
     printer.begin();
     esp_task_wdt_reset();
@@ -260,6 +262,23 @@ void loop() {
         const String queued = pendingScan;
         pendingScan = "";
         sendScan(queued);
+    }
+
+    // --- Hardwaretaster ---------------------------------------------------
+    // Gleichwertig zur Bedienung am Bildschirm: Zurueck macht dasselbe wie das
+    // Wischen, die beiden anderen dasselbe wie das Ziehen in einer Liste.
+    switch (buttons.poll()) {
+        case ButtonEvent::Back: {
+            JsonDocument doc;
+            doc["t"] = "tap";
+            doc["screen"] = screen.screenId();
+            doc["item"] = "back";
+            net.send(doc);
+            break;
+        }
+        case ButtonEvent::ScrollUp:   screen.scrollByRows(-1); break;
+        case ButtonEvent::ScrollDown: screen.scrollByRows(1);  break;
+        default: break;
     }
 
     // --- Beruehrung -------------------------------------------------------

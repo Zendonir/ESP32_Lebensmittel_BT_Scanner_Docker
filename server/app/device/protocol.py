@@ -120,7 +120,8 @@ def ota(path: str, version: str, size: int, sha256: str) -> dict:
     return {"t": "ota", "path": path, "version": version, "size": size, "sha256": sha256}
 
 
-BTN_BACK = {"id": "back", "label": "Zurueck", "style": "ghost"}
-BTN_HOME = {"id": "home", "label": "Start", "style": "ghost"}
-BTN_OK = {"id": "ok", "label": "OK", "style": "primary"}
-BTN_CANCEL = {"id": "cancel", "label": "Abbruch", "style": "ghost"}
+# Fruehere Fussleisten-Knoepfe. Es gibt keine Fussleiste mehr: Zurueck laeuft
+# ueber das Wischen von links nach rechts und den Zurueck-Taster, Bestaetigen
+# steht im jeweiligen Bildschirm selbst. Die Aktionen "back", "home", "ok" und
+# "cancel" versteht on_tap() weiterhin - sie kommen jetzt nur aus der Geste
+# bzw. aus Knoepfen im Bildschirminhalt.

@@ -9,9 +9,12 @@ static constexpr int16_t W = UI_WIDTH;
 static constexpr int16_t H = UI_HEIGHT;
 static constexpr int16_t STATUS_H = 26;
 static constexpr int16_t TITLE_H = 40;
-static constexpr int16_t FOOTER_H = 46;
+// Keine Fussleiste mehr: Zurueck laeuft ueber das Wischen (und den
+// Zurueck-Taster), Bestaetigen steht dort, wo es hingehoert - im Bildschirm
+// selbst. Die gewonnenen 46 Pixel gehen an die Inhalte, dadurch werden vor
+// allem die Knoepfe in den Karten fingerfreundlich gross.
 static constexpr int16_t BODY_Y = STATUS_H + TITLE_H;
-static constexpr int16_t BODY_H = H - BODY_Y - FOOTER_H;
+static constexpr int16_t BODY_H = H - BODY_Y;
 
 // Exakt die Farbwerte aus dem Vorgaengerprojekt (display.cpp, RGB()-Makro auf
 // RGB565 abgebildet) - nicht neu erfunden, 1:1 uebernommen.
@@ -136,7 +139,6 @@ void Screen::redraw() {
     else if (_kind == "datepad") drawDatePad();
     else drawMessage();
 
-    drawFooter();
     if (_toastUntil) drawToast();
     commit();
 }
@@ -319,18 +321,43 @@ void Screen::scrollBy(int16_t deltaYPx) {
     if (_scroll != prevScroll) redraw();
 }
 
+void Screen::scrollByRows(int rows) {
+    // Die Taster springen ganze Zeilen - anders als das Ziehen, das dem Finger
+    // pixelweise folgt.
+    scrollBy((int16_t)(-rows * 44));
+}
+
 void Screen::drawList() {
     JsonArray items = _screen["items"].as<JsonArray>();
     const int total = items.size();
     const int16_t rowH = 44;
-    _pageSize = BODY_H / rowH;
+
+    // Steuerzeile ueber der Liste (Sortierung, Suche). Die sass frueher in der
+    // Fussleiste; im Vorgaengerprojekt stand sie ueber der Inventarliste, und
+    // dort gehoert sie auch hin - sie betrifft die Liste, nicht den Bildschirm.
+    int16_t listY = BODY_Y;
+    JsonArray controls = _screen["meta"]["controls"].as<JsonArray>();
+    if (!controls.isNull() && controls.size() > 0) {
+        const int count = controls.size();
+        const int16_t w = (W - 8 * (count + 1)) / count;
+        int index = 0;
+        for (JsonObject control : controls) {
+            button(8 + index * (w + 8), listY, w, 34, String(control["label"] | ""),
+                   C_SURFACE2, String(control["id"] | ""));
+            index++;
+        }
+        listY += 40;
+    }
+
+    const int16_t listH = H - listY;
+    _pageSize = listH / rowH;
     _listTotal = total;
 
     if (_scroll > max(0, total - _pageSize)) _scroll = max(0, total - _pageSize);
 
     for (int i = 0; i < _pageSize && (_scroll + i) < total; i++) {
         JsonObject item = items[_scroll + i];
-        const int16_t y = BODY_Y + i * rowH;
+        const int16_t y = listY + i * rowH;
 
         // Gruppenueberschrift: nicht antippbar, eigener Zeilenstil. Zaehlt als
         // gewoehnliche Zeile fuer die Seitenberechnung - das haelt das Blaettern
@@ -363,8 +390,8 @@ void Screen::drawList() {
 
     // Bildlaufleiste als zwei grosse Flaechen - fuer Finger, nicht fuer Maeuse.
     if (total > _pageSize) {
-        button(W - 32, BODY_Y, 26, BODY_H / 2 - 3, "^", C_SURFACE, "__up");
-        button(W - 32, BODY_Y + BODY_H / 2 + 3, 26, BODY_H / 2 - 3, "v", C_SURFACE, "__down");
+        button(W - 32, listY, 26, listH / 2 - 3, "^", C_SURFACE, "__up");
+        button(W - 32, listY + listH / 2 + 3, 26, listH / 2 - 3, "v", C_SURFACE, "__down");
     }
 }
 
@@ -439,10 +466,14 @@ void Screen::drawNumber() {
 
     const float step = _screen["meta"]["step"] | 1.0f;
     const int16_t y = BODY_Y + 94;
-    button(14, y, 78, 40, "-" + String(step * 10, step < 1 ? 1 : 0), C_SURFACE, "__n--");
-    button(100, y, 78, 40, "-" + String(step, step < 1 ? 1 : 0), C_SURFACE, "__n-");
-    button(W - 178, y, 78, 40, "+" + String(step, step < 1 ? 1 : 0), C_SURFACE, "__n+");
-    button(W - 92, y, 78, 40, "+" + String(step * 10, step < 1 ? 1 : 0), C_SURFACE, "__n++");
+    button(14, y, 100, 52, "-" + String(step * 10, step < 1 ? 1 : 0), C_SURFACE2, "__n--");
+    button(122, y, 100, 52, "-" + String(step, step < 1 ? 1 : 0), C_SURFACE2, "__n-");
+    button(W - 222, y, 100, 52, "+" + String(step, step < 1 ? 1 : 0), C_SURFACE2, "__n+");
+    button(W - 114, y, 100, 52, "+" + String(step * 10, step < 1 ? 1 : 0), C_SURFACE2, "__n++");
+
+    // Bestaetigen steht jetzt im Bildschirm statt in der Fussleiste - und
+    // darf entsprechend gross ausfallen.
+    button(14, H - 62, W - 28, 52, "Uebernehmen", C_OK, "ok");
 }
 
 // Bildschirmtastatur: drei Reihen Buchstaben (oder im Ziffernmodus Ziffern und
@@ -651,7 +682,7 @@ void Screen::drawCards() {
         }
 
         JsonObject btn = card["button"];
-        const int16_t bottomLimit = btn.isNull() ? (y + h - 6) : (y + h - 28);
+        const int16_t bottomLimit = btn.isNull() ? (y + h - 6) : (y + h - 40);
 
         _spr.setTextFont(2);
         _spr.setTextColor(C_MUTED, C_BG);
@@ -663,7 +694,7 @@ void Screen::drawCards() {
         }
 
         if (!btn.isNull()) {
-            button(x + 8, y + h - 26, w - 16, 20, String(btn["label"] | ""),
+            button(x + 8, y + h - 38, w - 16, 32, String(btn["label"] | ""),
                    parseColor(btn["color"] | "", C_SURFACE), String(btn["id"] | ""));
         }
         index++;
@@ -776,36 +807,17 @@ void Screen::drawDatePad() {
     key(npX + btnW * 2, lastY, btnW, "<-", true, "__dpback", C_DANGER);
 }
 
-void Screen::drawFooter() {
-    JsonArray buttons = _screen["buttons"].as<JsonArray>();
-    if (buttons.isNull() || buttons.size() == 0) return;
-
-    const int count = buttons.size();
-    const int16_t y = H - FOOTER_H + 5;
-    const int16_t w = (W - 10 * (count + 1)) / count;
-    int index = 0;
-    for (JsonObject item : buttons) {
-        const String style = String(item["style"] | "ghost");
-        const uint16_t bg = style == "primary" ? C_PRIMARY
-                          : style == "danger"  ? C_DANGER
-                                               : C_SURFACE;
-        button(10 + index * (w + 10), y, w, FOOTER_H - 12, String(item["label"] | ""),
-               bg, String(item["id"] | ""));
-        index++;
-    }
-}
-
 void Screen::drawToast() {
     const uint16_t bg = _toastLevel == "error"   ? C_DANGER
                       : _toastLevel == "warn"    ? C_WARN
                       : _toastLevel == "success" ? C_OK
                                                  : C_PRIMARY;
     const int16_t h = 40;
-    _spr.fillRoundRect(20, H - FOOTER_H - h - 6, W - 40, h, 8, bg);
+    _spr.fillRoundRect(20, H - h - 10, W - 40, h, 8, bg);
     _spr.setTextDatum(MC_DATUM);
     _spr.setTextFont(4);
     _spr.setTextColor(TFT_WHITE, bg);
-    _spr.drawString(_toastText, W / 2, H - FOOTER_H - h / 2 - 6);
+    _spr.drawString(_toastText, W / 2, H - h / 2 - 10);
     _spr.setTextDatum(TL_DATUM);
 }
 

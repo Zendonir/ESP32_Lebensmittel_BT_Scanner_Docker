@@ -55,6 +55,9 @@ public:
     // tatsaechlicher Verschiebung neu.
     void scrollBy(int16_t deltaYPx);
 
+    // Ganze Zeilen weiterspringen - fuer die Scrolltaster.
+    void scrollByRows(int rows);
+
     int screenId() const { return _screenId; }
     bool ready() const { return _ready; }
 
@@ -62,7 +65,6 @@ private:
     void redraw();
     void drawStatusBar();
     void drawTitle();
-    void drawFooter();
     void drawTiles();
     void drawList();
     void drawDate();

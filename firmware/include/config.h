@@ -124,6 +124,21 @@
 // ---- Bedienung -------------------------------------------------------------
 #define BOOT_BTN 0
 
+// Drei optionale Taster gegen Masse (interner Pull-up, gedrueckt = LOW).
+// Ist keiner angeloetet, liest der Eingang dauerhaft HIGH - die Firmware
+// merkt also nichts davon. Einzeln mit -1 abschaltbar.
+//
+// Pinwahl: alle drei liegen auf der Stiftleiste und haben dort keine weitere
+// Aufgabe. Bewusst NICHT genommen wurden 9/10/11 (SD-Karte, auch wenn sie auf
+// der Leiste stehen), 19/20 (USB), 43/44 (UART), 45/46 (Strapping beim Start)
+// und 0 (BOOT erzwingt das Einrichtungsportal).
+#define BTN_BACK_PIN 17
+#define BTN_UP_PIN   18
+#define BTN_DOWN_PIN 21
+
+#define BTN_DEBOUNCE_MS 35    // Prellzeit eines gewoehnlichen Tasters
+#define BTN_REPEAT_MS   180   // Wiederholrate beim Halten der Scrolltaster
+
 // ============================================================================
 // Netzwerk
 // ============================================================================
