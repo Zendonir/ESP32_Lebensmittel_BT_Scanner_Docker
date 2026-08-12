@@ -5,6 +5,13 @@ on:
     branches: ["**"]
   pull_request:
 
+# Bei mehreren Pushes kurz hintereinander zaehlt nur der letzte Stand. Ohne das
+# laufen drei Firmware-Builds gleichzeitig, die alle dasselbe pruefen - und
+# jeder davon zieht die Toolchain neu.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   server:
     name: Server (Tests, Linter, Image)
@@ -64,6 +71,23 @@ jobs:
             ~/.platformio/packages
             ~/.platformio/platforms
           key: pio-${{ hashFiles('firmware/platformio.ini') }}
+
+      # Die Toolchain vorab holen, mit Wiederholung. Sie richtet sich eine
+      # eigene Python-Umgebung ein und laedt sich dafuer Pakete nach; haengt
+      # PyPI oder der Spiegel gerade, bricht das mit "Failed to install Python
+      # dependencies into penv" ab. Das passiert mitten im Bauen und sieht dann
+      # aus wie ein Fehler am Code - ist aber keiner. Als eigener Schritt ist
+      # es beim naechsten Mal sofort als das erkennbar, was es ist.
+      - name: Toolchain bereitstellen
+        working-directory: firmware
+        run: |
+          for versuch in 1 2 3; do
+            if pio pkg install; then exit 0; fi
+            echo "Versuch $versuch fehlgeschlagen, neuer Anlauf in $((versuch * 15)) s"
+            sleep $((versuch * 15))
+          done
+          echo "Toolchain liess sich nach drei Anlaeufen nicht einrichten" >&2
+          exit 1
 
       - name: Bauen
         working-directory: firmware

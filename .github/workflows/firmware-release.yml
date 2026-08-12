@@ -65,6 +65,21 @@ jobs:
             echo "value=${{ inputs.version }}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
 
+      # Siehe ci.yml: die Toolchain richtet sich eine eigene Python-Umgebung
+      # ein und kann dabei an einem haengenden PyPI scheitern. Beim Release
+      # waere das besonders aergerlich - der Fehlschlag kaeme mitten im Bauen
+      # und liesse ein halbes Ergebnis zurueck.
+      - name: Toolchain bereitstellen
+        working-directory: firmware
+        run: |
+          for versuch in 1 2 3; do
+            if pio pkg install; then exit 0; fi
+            echo "Versuch $versuch fehlgeschlagen, neuer Anlauf in $((versuch * 15)) s"
+            sleep $((versuch * 15))
+          done
+          echo "Toolchain liess sich nach drei Anlaeufen nicht einrichten" >&2
+          exit 1
+
       - name: Firmware bauen
         working-directory: firmware
         run: pio run
