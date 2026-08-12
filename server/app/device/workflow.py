@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..models import Category, Device, InventoryItem, Location, PrintJob, Template
 from ..services import inventory as inv
+from ..services import categories as cat
 from ..services import firmware, labels, openfoodfacts, settings_store
 from ..services.dates import days_left, shift_iso, to_display, to_iso_date
 from . import protocol as proto
@@ -42,10 +43,23 @@ TMPL_AMOUNT = "tmpl_amount"
 CONFIRM_REMOVE = "confirm_remove"
 UNKNOWN_NAME = "unknown_name"
 LOCATION_NEW = "location_new"
+SUBCATEGORY = "subcategory"
 INVENTORY = "inventory"
 SYSTEM = "system"
 INV_SEARCH = "inv_search"
 ROLL_NEW = "roll_new"
+
+def _after_product(sess: "DeviceSession") -> str:
+    """Naechster Bildschirm, sobald das Produkt feststeht.
+
+    Hat die Kategorie Unterkategorien und ist noch keine gesetzt, wird sie
+    zuerst erfragt - sie gehoert auf das Etikett ("Filet - Schwein") und laesst
+    sich hinterher nur muehsam nachtragen.
+    """
+    if cat.subcategories_for(sess.draft.category) and not sess.draft.subcategory:
+        return SUBCATEGORY
+    return ENTER_DATE
+
 
 # Sortiermodi der Inventarliste, zyklisch per Tap auf den Spaltenkopf -
 # genau wie im Vorgaengerprojekt (App.cpp, INV_SORT).
@@ -180,6 +194,8 @@ async def render(session: AsyncSession, sess: DeviceSession) -> dict:
         return await _screen_system(session, sess, sid, status)
     if name == ROLL_NEW:
         return await _screen_roll_new(session, sess, sid, status)
+    if name == SUBCATEGORY:
+        return _screen_subcategory(sess, sid, status)
 
     sess.reset()
     return await _screen_home(session, sess, sid, status)
@@ -284,7 +300,7 @@ async def _screen_expiring(session, sess, sid, status) -> dict:
         items.append(
             {
                 "id": f"item:{row.label}",
-                "label": row.name[:28],
+                "label": cat.display_name(row.name, row.subcategory)[:32],
                 "sub": f"{sub} - {row.location}" if row.location else sub,
                 "color": color,
             }
@@ -477,6 +493,23 @@ def _screen_tmpl_amount(sess, sid, status) -> dict:
     )
 
 
+def _screen_subcategory(sess, sid, status) -> dict:
+    """Welche Sorte - bei Fleisch etwa Schwein, Rind oder Lamm."""
+    options = cat.subcategories_for(sess.draft.category)
+    items = [
+        {"id": f"sub:{name}", "label": name, "color": "#4c9eff"} for name in options
+    ]
+    items.append({"id": "sub:", "label": "Ohne Angabe", "color": "#1c222a"})
+    return proto.screen(
+        screen_id=sid,
+        kind="tiles",
+        title=sess.draft.category or "Sorte",
+        subtitle=sess.draft.name or "",
+        items=items,
+        status=status,
+    )
+
+
 async def _screen_inventory(session, sess, sid, status) -> dict:
     rows = (
         await session.execute(select(InventoryItem).where(InventoryItem.status == "active"))
@@ -540,7 +573,7 @@ async def _screen_inventory(session, sess, sid, status) -> dict:
         items.append(
             {
                 "id": f"item:{g['label']}",
-                "label": g["name"][:28],
+                "label": cat.display_name(g["name"], g["subcategory"])[:32],
                 "sub": "  ·  ".join(parts),
                 "color": color,
             }
@@ -699,6 +732,7 @@ async def on_tap(session: AsyncSession, sess: DeviceSession, item: str) -> None:
         TMPL_BRAND: _tap_tmpl_brand,
         TMPL_SORTE: _tap_tmpl_sorte,
         TMPL_AMOUNT: _tap_confirm_save,
+        SUBCATEGORY: _tap_subcategory,
         INVENTORY: _tap_inventory,
         INV_SEARCH: _tap_inv_search,
         SYSTEM: _tap_system,
@@ -727,6 +761,14 @@ async def _tap_home(session, sess, item) -> None:
         sess.push(SYSTEM)
     elif item == "new_roll":
         sess.push(ROLL_NEW)
+
+
+async def _tap_subcategory(session, sess, item) -> None:
+    if not item.startswith("sub:"):
+        return
+    sess.draft.subcategory = item[4:]
+    sess.pop()                       # Auswahl ist erledigt
+    sess.push(ENTER_DATE)
 
 
 async def _tap_inventory(session, sess, item) -> None:
@@ -860,7 +902,7 @@ async def _tap_unknown(session, sess, item) -> None:
         sess.push(UNKNOWN_NAME)
     elif item == "generic":
         sess.draft.name = sess.draft.name or f"Artikel {sess.draft.barcode[-4:]}"
-        sess.stack = [HOME, ENTER_DATE]
+        sess.stack = [HOME, _after_product(sess)]
 
 
 async def _tap_unknown_name(session, sess, item) -> None:
@@ -911,7 +953,7 @@ async def _tap_tmpl_product(session, sess, item) -> None:
     elif tpl.use_sorten:
         sess.push(TMPL_SORTE)
     else:
-        sess.push(TMPL_AMOUNT if tpl.unit else ENTER_DATE)
+        sess.push(TMPL_AMOUNT if tpl.unit else _after_product(sess))
 
 
 async def _tap_tmpl_brand(session, sess, item) -> None:
@@ -922,21 +964,21 @@ async def _tap_tmpl_brand(session, sess, item) -> None:
     if tpl is not None and tpl.use_sorten:
         sess.push(TMPL_SORTE)
     else:
-        sess.push(TMPL_AMOUNT if sess.draft.unit else ENTER_DATE)
+        sess.push(TMPL_AMOUNT if sess.draft.unit else _after_product(sess))
 
 
 async def _tap_tmpl_sorte(session, sess, item) -> None:
     if not item.startswith("sorte:"):
         return
     sess.draft.subcategory = item[6:]
-    sess.push(TMPL_AMOUNT if sess.draft.unit else ENTER_DATE)
+    sess.push(TMPL_AMOUNT if sess.draft.unit else _after_product(sess))
 
 
 async def _tap_confirm_save(session, sess, item) -> None:
     if item != "ok":
         return
     if sess.current == TMPL_AMOUNT:
-        sess.push(ENTER_DATE)
+        sess.push(_after_product(sess))
         return
     await _save_draft(session, sess)
 
@@ -1068,11 +1110,12 @@ async def _scan_barcode(session, sess, code) -> None:
         draft.name = product.name
         draft.brand = product.brand
         draft.category = product.category
+        draft.subcategory = product.subcategory
         draft.expiry_date = (
             shift_iso(product.default_shelf_days) if product.default_shelf_days else ""
         )
         sess.draft = draft
-        sess.stack = [HOME, ENTER_DATE]
+        sess.stack = [HOME, _after_product(sess)]
     else:
         await inv.log_event(
             session, "scan_unknown", barcode=code, device=sess.device_id

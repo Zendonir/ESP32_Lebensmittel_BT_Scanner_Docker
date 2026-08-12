@@ -76,6 +76,7 @@ class Product(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), default="")
     brand: Mapped[str] = mapped_column(String(255), default="")
     category: Mapped[str] = mapped_column(String(100), default="")
+    subcategory: Mapped[str] = mapped_column(String(100), default="")
     amount: Mapped[str] = mapped_column(String(64), default="")  # z.B. "500 g"
     unit: Mapped[str] = mapped_column(String(16), default="")
     nutriscore: Mapped[str] = mapped_column(String(4), default="")

@@ -31,6 +31,32 @@ engine = create_async_engine(settings.database_url, **_engine_kwargs)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
+# Spalten, die nach der ersten Auslieferung dazugekommen sind.
+# `create_all` legt nur fehlende *Tabellen* an - eine neue Spalte in einer
+# bereits bestehenden Tabelle traegt es nicht nach, und die Anwendung wuerde
+# beim ersten Zugriff mit "no such column" aussteigen. Ein Alembic-Setup waere
+# fuer diese Handvoll additiver Spalten unverhaeltnismaessig; ein gezieltes
+# ALTER beim Start reicht und laeuft auf SQLite wie auf Postgres.
+_ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("products", "subcategory", "VARCHAR(100) DEFAULT ''"),
+)
+
+
+def _add_missing_columns(sync_conn) -> None:
+    from sqlalchemy import inspect
+
+    inspector = inspect(sync_conn)
+    tables = set(inspector.get_table_names())
+    for table, column, ddl in _ADDED_COLUMNS:
+        if table not in tables:
+            continue                     # legt create_all gleich vollstaendig an
+        existing = {c["name"] for c in inspector.get_columns(table)}
+        if column in existing:
+            continue
+        log.info("Spalte %s.%s wird nachgetragen", table, column)
+        sync_conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
 async def init_db() -> None:
     """Schema anlegen und SQLite auf WAL stellen."""
     async with engine.begin() as conn:
@@ -38,6 +64,7 @@ async def init_db() -> None:
             await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
             await conn.exec_driver_sql("PRAGMA synchronous=NORMAL")
             await conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+        await conn.run_sync(_add_missing_columns)
         await conn.run_sync(Base.metadata.create_all)
     log.info("Datenbank bereit (%s)", settings.database_url.split("://", 1)[0])
 

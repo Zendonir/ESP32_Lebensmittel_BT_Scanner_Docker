@@ -133,6 +133,9 @@ class InventoryOut(ORMModel):
     label: str
     barcode: str
     name: str
+    # Name mit Unterkategorie ("Filet - Schwein"). Abgeleitet, damit
+    # Web-Interface, Geraetebildschirm und Etikett nicht auseinanderlaufen.
+    display_name: str = ""
     brand: str
     category: str
     subcategory: str

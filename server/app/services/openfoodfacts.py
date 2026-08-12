@@ -16,15 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..models import Product, utcnow
+from . import categories as cat
 
 log = logging.getLogger(__name__)
 
 _FIELDS = "code,product_name,product_name_de,brands,quantity,categories_tags,nutriscore_grade,image_front_small_url"
 _inflight: dict[str, asyncio.Task] = {}
-
-
-def _strip_lang(tag: str) -> str:
-    return tag.split(":", 1)[1].replace("-", " ").title() if ":" in tag else tag
 
 
 async def _fetch_remote(barcode: str) -> dict | None:
@@ -47,11 +44,16 @@ async def _fetch_remote(barcode: str) -> dict | None:
         return None
 
     tags = product.get("categories_tags") or []
+    # Nicht die Rohkategorie uebernehmen: OpenFoodFacts liefert Dinge wie
+    # "Beverages And Beverages Preparations". Unsortiert im Bestand macht das
+    # jede Auswertung nach Kategorie wertlos.
+    matched = cat.match_off(tags)
     return {
         "name": (product.get("product_name_de") or product.get("product_name") or "").strip(),
         "brand": (product.get("brands") or "").split(",")[0].strip(),
         "amount": (product.get("quantity") or "").strip(),
-        "category": _strip_lang(tags[0]) if tags else "",
+        "category": matched,
+        "subcategory": cat.match_subcategory(matched, tags),
         "nutriscore": (product.get("nutriscore_grade") or "").upper()[:1],
         "image_url": product.get("image_front_small_url") or "",
     }
@@ -97,6 +99,7 @@ async def lookup(session: AsyncSession, barcode: str, refresh: bool = False) -> 
         cached.brand = remote["brand"] or cached.brand
         cached.amount = remote["amount"] or cached.amount
         cached.category = remote["category"] or cached.category
+        cached.subcategory = remote["subcategory"] or cached.subcategory
         cached.nutriscore = remote["nutriscore"] or cached.nutriscore
         cached.image_url = remote["image_url"] or cached.image_url
         cached.source = "off"

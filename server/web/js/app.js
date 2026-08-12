@@ -127,8 +127,7 @@ async function loadInventory() {
   $('#inv-empty').hidden = rows.length > 0;
   $('#inv-body').innerHTML = rows.map((i) => `<tr>
     <td class="mono">${esc(i.label)}</td>
-    <td class="name"><b>${esc(i.name)}</b>${i.brand ? `<br><span class="muted">${esc(i.brand)}</span>` : ''}
-      ${i.subcategory ? `<br><span class="muted">${esc(i.subcategory)}</span>` : ''}</td>
+    <td class="name"><b>${esc(i.display_name || i.name)}</b>${i.brand ? `<br><span class="muted">${esc(i.brand)}</span>` : ''}</td>
     <td>${esc(i.category)}</td>
     <td>${fmtDate(i.expiry_date)}</td>
     <td>${daysPill(i.days_left)}</td>

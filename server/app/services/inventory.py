@@ -18,6 +18,7 @@ from ..config import settings
 from ..models import Event, InventoryItem, PrintJob, Product, utcnow
 from . import labels as label_service
 from . import settings_store
+from . import categories
 from .dates import days_left, today_iso
 
 log = logging.getLogger(__name__)
@@ -226,6 +227,9 @@ def with_days_left(item: InventoryItem) -> dict:
         column.name: getattr(item, column.name) for column in item.__table__.columns
     }
     data["days_left"] = days_left(item.expiry_date)
+    # Einmal hier ableiten statt in jeder Oberflaeche erneut - so zeigen
+    # Web-Interface, Geraet und Etikett denselben Namen.
+    data["display_name"] = categories.display_name(item.name, item.subcategory)
     return data
 
 

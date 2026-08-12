@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from . import settings_store
+from . import categories
 from .dates import to_display
 
 _lock = asyncio.Lock()
@@ -83,16 +84,16 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     if household:
         blocks.append({"t": "text", "v": household, "align": 1, "bold": False})
 
-    for line in _wrap(item.get("name", ""), chars // 2):
+    # Unterkategorie gehoert an den Namen, nicht in eine eigene Zeile: auf dem
+    # Etikett soll "Filet - Schwein" stehen, damit im Schrank erkennbar ist,
+    # was fuer ein Filet das ist.
+    title = categories.display_name(item.get("name", ""), item.get("subcategory", ""))
+    for line in _wrap(title, chars // 2):
         blocks.append({"t": "text", "v": line, "align": 1, "bold": True, "large": True})
 
     brand = item.get("brand", "")
     if brand:
         blocks.append({"t": "text", "v": brand, "align": 1})
-
-    sub = item.get("subcategory", "")
-    if sub:
-        blocks.append({"t": "text", "v": sub, "align": 1})
 
     blocks.append({"t": "sep"})
 
