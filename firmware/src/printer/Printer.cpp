@@ -75,6 +75,7 @@ int Printer::process(bool &ok, String &error) {
     const int id = job.jobId;
 
     _chars = job.doc["chars"] | 32;
+    _rotate = job.doc["rotate"] | false;
     reset();
     writeBlocks(job.doc["blocks"].as<JsonArray>());
     // Bewusst kein uart.flush(): das wartet, bis das letzte Bit auf der
@@ -104,9 +105,9 @@ void Printer::writeBlocks(JsonArray blocks) {
         } else if (type == "sep") {
             separator();
         } else if (type == "qr") {
-            qr(String(block["v"] | ""));
+            qr(String(block["v"] | ""), block["scale"] | 3);
         } else if (type == "code128") {
-            code128(String(block["v"] | ""));
+            code128(String(block["v"] | ""), block["height"] | 40);
         } else if (type == "feed") {
             feedDots(block["dots"] | 0);
         }
@@ -114,6 +115,10 @@ void Printer::writeBlocks(JsonArray blocks) {
 }
 
 void Printer::textLine(const String &text, uint8_t align, bool bold, bool large) {
+    // ESC V - 90 Grad gedreht. Hochkant laeuft die Schrift ueber die lange
+    // Kante des Etiketts; ohne diesen Befehl muesste die Firmware die Zeilen
+    // selbst als Bitmap rechnen.
+    uart.write(0x1B); uart.write('V'); uart.write(_rotate ? 1 : 0);
     uart.write(0x1B); uart.write('a'); uart.write(align);           // ESC a - Ausrichtung
     uart.write(0x1B); uart.write('E'); uart.write(bold ? 1 : 0);    // ESC E - fett
     uart.write(0x1D); uart.write('!'); uart.write(large ? 0x11 : 0x00);  // GS ! - Groesse
@@ -124,6 +129,7 @@ void Printer::textLine(const String &text, uint8_t align, bool bold, bool large)
 
     uart.write(0x1D); uart.write('!'); uart.write((uint8_t)0);
     uart.write(0x1B); uart.write('E'); uart.write((uint8_t)0);
+    uart.write(0x1B); uart.write('V'); uart.write((uint8_t)0);
 }
 
 void Printer::row(const String &key, const String &value, bool underline) {
@@ -149,10 +155,10 @@ void Printer::separator() {
     uart.write((const uint8_t *)"\r\n", 2);
 }
 
-void Printer::code128(const String &data) {
+void Printer::code128(const String &data, uint8_t height) {
     if (data.isEmpty()) return;
     uart.write(0x1B); uart.write('a'); uart.write(1);      // zentriert
-    uart.write(0x1D); uart.write('h'); uart.write(60);     // Hoehe in Dots
+    uart.write(0x1D); uart.write('h'); uart.write(height); // Hoehe in Dots
     uart.write(0x1D); uart.write('w'); uart.write(2);      // Modulbreite
     uart.write(0x1D); uart.write('H'); uart.write((uint8_t)0);  // keine Klartextzeile
 
@@ -165,20 +171,28 @@ void Printer::code128(const String &data) {
     uart.write((const uint8_t *)"\r\n", 2);
 }
 
-void Printer::qr(const String &data) {
+void Printer::qr(const String &data, uint8_t scale) {
     if (data.isEmpty()) return;
+    if (scale < 2) scale = 2;
 
     // Der eingebaute QR-Befehl (GS ( k) fehlt vielen guenstigen Druckern.
     // Deshalb wird der Code selbst gerechnet und als Bitmap gedruckt - das
     // funktioniert auf jedem ESC/POS-Geraet.
+    // Kleinste Version nehmen, die die Daten fasst. Version 3 war fest
+    // verdrahtet und damit immer 29 Module breit - eine Etikettennummer wie
+    // "LEB000123" passt in Version 1 mit 21 Modulen. Auf 30 mm Etikettenhoehe
+    // sind das gesparte 8 Module mal Skalierung, also gut ein Viertel.
     QRCode qrcode;
     uint8_t buffer[qrcode_getBufferSize(3)];
-    if (qrcode_initText(&qrcode, buffer, 3, ECC_MEDIUM, data.c_str()) != 0) return;
+    uint8_t version = 0;
+    for (uint8_t v = 1; v <= 3; v++) {
+        if (qrcode_initText(&qrcode, buffer, v, ECC_MEDIUM, data.c_str()) == 0) { version = v; break; }
+    }
+    if (version == 0) return;
 
     // Ein ESC-*-Durchgang druckt 8 Punktzeilen. Damit der Code nicht in die
-    // Laenge gezogen wird, stecken zwei Modulzeilen in einem Durchgang
-    // (4 Punkte je Modul) - senkrecht und waagerecht also derselbe Faktor 4.
-    const uint8_t scale = 4;
+    // Laenge gezogen wird, stecken zwei Modulzeilen in einem Durchgang -
+    // senkrecht und waagerecht also derselbe Faktor.
     const int size = qrcode.size;
     const int widthDots = size * scale;
 

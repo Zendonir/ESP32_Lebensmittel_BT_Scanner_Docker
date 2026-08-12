@@ -19,6 +19,7 @@ os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_tmpdir}/test.db"
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.main import app  # noqa: E402
+from app.services import labels as labels_service  # noqa: E402
 from app.services.dates import days_left, to_iso_date  # noqa: E402
 
 
@@ -147,9 +148,80 @@ def test_etikett_rendert_alle_bloecke():
         {"paper_chars": 32, "qr": True, "code128": True, "household": "Test"},
     )
     types = [b["t"] for b in rendered["blocks"]]
-    assert "qr" in types and "code128" in types and "feed" in types
+    # Genau ein Code, nicht beide: nebeneinander kann ein ESC/POS-Drucker
+    # nicht, und untereinander kosten sie die halbe Etikettenhoehe fuer
+    # dieselbe Information.
+    assert ("qr" in types) != ("code128" in types)
+    assert "feed" in types
     assert any(b.get("v") == "24.12.2026" for b in rendered["blocks"])
     assert all(len(b["v"]) <= 32 for b in rendered["blocks"] if b["t"] == "text")
+
+
+@pytest.mark.parametrize("layout", sorted(labels_service.LAYOUTS))
+@pytest.mark.parametrize("ausrichtung", ["quer", "hoch"])
+def test_etikett_bleibt_im_hoehenbudget(layout, ausrichtung):
+    """Der eigentliche Fehler: das Layout passte nicht auf 30 mm.
+
+    Ohne diese Rechnung lief ein Etikett ueber drei Etiketten der Rolle.
+    """
+    rendered = labels_service.render_label(
+        {
+            "label": "LEB000042",
+            "name": "Ein sehr langer Produktname der umbrochen wird",
+            "brand": "Eine ziemlich lange Markenbezeichnung",
+            "subcategory": "Schwein",
+            "expiry_date": "2026-12-24",
+            "added_date": "2026-01-01",
+            "quantity": 500,
+            "unit": "g",
+            "location": "Gefrierschrank",
+        },
+        {
+            "paper_chars": 32, "qr": True, "code128": True,
+            "label_width_mm": 50, "label_height_mm": 30,
+            "label_layout": layout, "label_orientation": ausrichtung,
+        },
+    )
+    inhalt = labels_service.total_dots(
+        [b for b in rendered["blocks"] if b["t"] != "feed"]
+    )
+    assert inhalt <= rendered["height_dots"] - labels_service.SAFETY_DOTS
+    # Der Vorschub fuellt exakt bis zur Perforation auf, damit das naechste
+    # Etikett wieder oben anfaengt.
+    assert labels_service.total_dots(rendered["blocks"]) == rendered["height_dots"]
+
+
+@pytest.mark.parametrize("layout", sorted(labels_service.LAYOUTS))
+def test_name_wird_nicht_abgeschnitten(layout):
+    """Doppelte Hoehe heisst doppelte Breite - nur halb so viele Zeichen.
+
+    "Schweinefilet - Schwein" wurde dadurch mitten im Wort gekappt. Passt der
+    Name nicht gross, gehoert er lieber normal gesetzt und vollstaendig aufs
+    Etikett.
+    """
+    rendered = labels_service.render_label(
+        {"label": "LEB000042", "name": "Rueckenfilet", "subcategory": "Schwein",
+         "expiry_date": "2026-12-24", "added_date": "2026-01-01"},
+        {"label_layout": layout, "paper_chars": 32, "qr": True, "code128": True},
+    )
+    gedruckt = " ".join(b["v"] for b in rendered["blocks"] if b["t"] == "text")
+    assert "Rueckenfilet - Schwein" in gedruckt
+
+
+def test_hochkant_nimmt_keinen_strichcode():
+    """Ein gedrehter Strichcode laege quer und waere nicht mehr lesbar.
+
+    Ein QR-Code ist aus jeder Richtung lesbar, also faellt die Wahl dort
+    zwangslaeufig auf ihn.
+    """
+    rendered = labels_service.render_label(
+        {"label": "LEB000042", "name": "Brot", "expiry_date": "2026-12-24"},
+        {"label_layout": "kompakt", "label_orientation": "hoch",
+         "qr": True, "code128": True},
+    )
+    types = [b["t"] for b in rendered["blocks"]]
+    assert "qr" in types and "code128" not in types
+    assert rendered["rotate"] is True
 
 
 # ------------------------------------------------------------------- Filterung

@@ -32,6 +32,13 @@ DEFAULTS: dict[str, Any] = {
         "qr": True,
         "code128": True,
         "household": "",
+        # Etikettenmasse in Millimetern. Der Drucker rechnet in Punkten
+        # (203 dpi = 8 je mm); daraus ergibt sich, wie viel ueberhaupt
+        # draufpasst - siehe services/labels.py.
+        "label_width_mm": 50,
+        "label_height_mm": 30,
+        "label_layout": "standard",
+        "label_orientation": "quer",
     },
 }
 

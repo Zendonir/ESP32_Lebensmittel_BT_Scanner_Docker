@@ -70,6 +70,191 @@ def _wrap(text: str, width: int) -> list[str]:
     return lines or [""]
 
 
+# --------------------------------------------------------------------- Masse
+#
+# Ein Thermodrucker rechnet in Punkten, nicht in Millimetern: 203 dpi sind
+# 8 Punkte je Millimeter. Ein 30 mm hohes Etikett hat damit 240 Punkte, und
+# mehr passt eben nicht drauf. Genau diese Rechnung fehlte bisher - das
+# Layout wurde einfach ausgegeben und lief ueber drei Etiketten.
+DOTS_PER_MM = 8
+
+LINE_DOTS = 24        # Schrift A, 12x24 Punkte
+LINE_DOTS_LARGE = 48  # doppelte Hoehe
+SEP_DOTS = 24
+CODE128_FEED = 10     # Vorschub, den der Drucker nach dem Strichcode einfuegt
+
+# Der Etikettenspender trifft die Perforation nicht auf den Punkt genau.
+# Ohne Reserve rutscht die letzte Zeile auf das naechste Etikett.
+SAFETY_DOTS = 16
+
+
+def label_dots(cfg: dict) -> int:
+    """Nutzbare Hoehe eines Etiketts in Punkten."""
+    height_mm = float(cfg.get("label_height_mm", 30))
+    return max(0, int(height_mm * DOTS_PER_MM) - SAFETY_DOTS)
+
+
+def block_dots(block: dict) -> int:
+    """Hoehe eines Blocks in Punkten - dieselbe Rechnung wie in der Firmware."""
+    kind = block.get("t")
+    if kind == "text":
+        return LINE_DOTS_LARGE if block.get("large") else LINE_DOTS
+    if kind == "row":
+        return LINE_DOTS
+    if kind == "sep":
+        return SEP_DOTS
+    if kind == "code128":
+        return int(block.get("height", 40)) + CODE128_FEED
+    if kind == "qr":
+        # Version 1 fasst 9 Zeichen alphanumerisch - fuer "LEB000123" reicht
+        # das. 21 Module plus zwei Module Rand je Seite.
+        return (21 + 4) * int(block.get("scale", 3))
+    if kind == "feed":
+        return int(block.get("dots", 0))
+    return 0
+
+
+def total_dots(blocks: list[dict]) -> int:
+    return sum(block_dots(b) for b in blocks)
+
+
+def _fit(blocks: list[dict], budget: int) -> list[dict]:
+    """Blocks von hinten kuerzen, bis das Etikett passt.
+
+    Die Reihenfolge ist die Rangfolge: was hinten steht, faellt zuerst weg.
+    Der Code zum Auslagern ist davon ausgenommen - ohne ihn ist das Etikett
+    wertlos, weil sich der Eintrag dann nicht mehr wegscannen laesst.
+    """
+    keep = [b for b in blocks if b.get("t") in ("qr", "code128")]
+    out = list(blocks)
+    while total_dots(out) > budget:
+        droppable = [i for i, b in enumerate(out) if b not in keep and b.get("t") != "feed"]
+        if not droppable:
+            break
+        out.pop(droppable[-1])
+    return out
+
+
+# ------------------------------------------------------------------ Layouts
+#
+# Vier Zuschnitte fuer dasselbe Etikett. Sie unterscheiden sich darin, was bei
+# 240 Punkten Platz Vorrang hat - alles zugleich geht nicht.
+LAYOUTS: dict[str, str] = {
+    "kompakt": "Name und MHD gross, Strichcode darunter. Aus zwei Metern lesbar.",
+    "standard": "Name gross, dazu MHD, Menge und Ort. QR-Code. Der Allrounder.",
+    "vollstaendig": "Alle Angaben in normaler Schrift, kleiner Strichcode.",
+    "sparsam": "Nur Name und MHD, dafuer ein grosser QR-Code.",
+}
+
+# Anzeigename fuer die Oberflaeche - der Schluessel bleibt umlautfrei, damit
+# er unveraendert in der Datenbank stehen kann.
+TITLES: dict[str, str] = {
+    "kompakt": "Kompakt",
+    "standard": "Standard",
+    "vollstaendig": "Vollständig",
+    "sparsam": "Sparsam",
+}
+DEFAULT_LAYOUT = "standard"
+
+
+def _title(item: dict) -> str:
+    # Unterkategorie gehoert an den Namen, nicht in eine eigene Zeile: auf dem
+    # Etikett soll "Filet - Schwein" stehen, damit im Schrank erkennbar ist,
+    # was fuer ein Filet das ist.
+    return categories.display_name(item.get("name", ""), item.get("subcategory", ""))
+
+
+def _title_blocks(title: str, chars: int, large: bool) -> list[dict]:
+    """Den Namen setzen - gross, wenn er gross passt.
+
+    Doppelte Hoehe bedeutet beim ESC/POS-Drucker auch doppelte Breite: in eine
+    grosse Zeile passt nur die Haelfte der Zeichen. "Schweinefilet - Schwein"
+    wurde deshalb hart auf "Schweinefilet - " abgeschnitten. Passt der Name
+    nicht in eine grosse Zeile, wird er lieber normal gross und dafuer
+    vollstaendig gesetzt - der Name ist die wichtigste Angabe auf dem Etikett.
+    """
+    if large and len(title) <= max(1, chars // 2):
+        return [{"t": "text", "v": title, "align": 1, "bold": True, "large": True}]
+    return [
+        {"t": "text", "v": line, "align": 1, "bold": True}
+        for line in _wrap(title, chars)[:2]
+    ]
+
+
+def _quantity(item: dict) -> str:
+    qty, unit = item.get("quantity", 1), item.get("unit", "")
+    return f"{qty:g} {unit}".strip()
+
+
+def _code_blocks(item: dict, cfg: dict, prefer_qr: bool, height: int, scale: int) -> list[dict]:
+    """Der Code zum Auslagern - QR oder Strichcode, nie beides.
+
+    Beides nebeneinander geht auf einem ESC/POS-Drucker nicht (er kennt nur
+    Zeilen), und beides untereinander frisst die halbe Etikettenhoehe fuer
+    dieselbe Information.
+    """
+    label = item.get("label", "")
+    if not label:
+        return []
+    # Hochkant wird der Text um 90 Grad gedreht, ein Strichcode aber nicht -
+    # der laege dann quer. Ein QR-Code ist aus jeder Richtung lesbar.
+    if cfg.get("label_orientation") == "hoch":
+        prefer_qr = True
+    if prefer_qr and cfg.get("qr", True):
+        return [{"t": "qr", "v": label, "scale": scale}]
+    if cfg.get("code128", True):
+        return [{"t": "code128", "v": label, "height": height}]
+    return [{"t": "qr", "v": label, "scale": scale}]
+
+
+def _build(layout: str, item: dict, cfg: dict, chars: int) -> list[dict]:
+    title = _title(item)
+    expiry = to_display(item.get("expiry_date", ""))
+    label = item.get("label", "")
+    location = item.get("location", "")
+    brand = item.get("brand", "")
+
+    if layout == "kompakt":
+        blocks: list[dict] = _title_blocks(title, chars, large=True)
+        if expiry:
+            blocks.append({"t": "text", "v": expiry, "align": 1, "bold": True, "large": True})
+        blocks += _code_blocks(item, cfg, prefer_qr=False, height=40, scale=3)
+        blocks.append({"t": "text", "v": label, "align": 1})
+        return blocks
+
+    if layout == "sparsam":
+        blocks = _title_blocks(title, chars, large=False)
+        if expiry:
+            blocks.append({"t": "row", "k": "MHD", "v": expiry, "underline": True})
+        blocks += _code_blocks(item, cfg, prefer_qr=True, height=40, scale=5)
+        return blocks
+
+    if layout == "vollstaendig":
+        blocks = _title_blocks(title, chars, large=False)
+        if brand:
+            blocks.append({"t": "text", "v": brand, "align": 1})
+        if expiry:
+            blocks.append({"t": "row", "k": "MHD", "v": expiry, "underline": True})
+        blocks.append({"t": "row", "k": "Menge", "v": _quantity(item)})
+        if location:
+            blocks.append({"t": "row", "k": "Ort", "v": location})
+        blocks.append({"t": "row", "k": "Eingang", "v": to_display(item.get("added_date", ""))})
+        blocks += _code_blocks(item, cfg, prefer_qr=False, height=32, scale=2)
+        blocks.append({"t": "text", "v": label, "align": 1})
+        return blocks
+
+    # standard
+    blocks = _title_blocks(title, chars, large=True)
+    if expiry:
+        blocks.append({"t": "row", "k": "MHD", "v": expiry, "underline": True})
+    info = " · ".join(x for x in (_quantity(item), location) if x)
+    if info:
+        blocks.append({"t": "text", "v": info, "align": 1})
+    blocks += _code_blocks(item, cfg, prefer_qr=True, height=40, scale=4)
+    blocks.append({"t": "text", "v": label, "align": 1})
+    return blocks
+
+
 def render_label(item: dict, printer_cfg: dict) -> dict:
     """Etikett als geraeteunabhaengige Feldliste rendern.
 
@@ -77,50 +262,121 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     von Zeichenbefehlen und schiebt sie auf die UART. Layout-Aenderungen sind
     damit ein Server-Deploy statt eines OTA-Flashs.
     """
-    chars = int(printer_cfg.get("paper_chars", settings.label_paper_chars))
-    household = printer_cfg.get("household") or settings.household
-    blocks: list[dict] = []
+    layout = printer_cfg.get("label_layout", DEFAULT_LAYOUT)
+    if layout not in LAYOUTS:
+        layout = DEFAULT_LAYOUT
+    portrait = printer_cfg.get("label_orientation") == "hoch"
 
-    if household:
-        blocks.append({"t": "text", "v": household, "align": 1, "bold": False})
+    # Hochkant tauschen Breite und Hoehe die Rolle: gedruckt wird ueber die
+    # 30-mm-Kante, also passen deutlich weniger Zeichen in eine Zeile.
+    width_mm = float(printer_cfg.get("label_width_mm", 50))
+    height_mm = float(printer_cfg.get("label_height_mm", 30))
+    line_mm = height_mm if portrait else width_mm
+    chars = max(8, int(line_mm * DOTS_PER_MM) // 12)
+    declared = int(printer_cfg.get("paper_chars", settings.label_paper_chars))
+    chars = min(chars, declared)
 
-    # Unterkategorie gehoert an den Namen, nicht in eine eigene Zeile: auf dem
-    # Etikett soll "Filet - Schwein" stehen, damit im Schrank erkennbar ist,
-    # was fuer ein Filet das ist.
-    title = categories.display_name(item.get("name", ""), item.get("subcategory", ""))
-    for line in _wrap(title, chars // 2):
-        blocks.append({"t": "text", "v": line, "align": 1, "bold": True, "large": True})
+    budget = int((width_mm if portrait else height_mm) * DOTS_PER_MM) - SAFETY_DOTS
+    blocks = _fit(_build(layout, item, printer_cfg, chars), budget)
 
-    brand = item.get("brand", "")
-    if brand:
-        blocks.append({"t": "text", "v": brand, "align": 1})
+    # Rest bis zur Perforation vorschieben, damit das naechste Etikett oben
+    # anfaengt - aber nur den Rest, nicht pauschal.
+    remaining = budget + SAFETY_DOTS - total_dots(blocks)
+    if remaining > 0:
+        blocks.append({"t": "feed", "dots": remaining})
 
-    blocks.append({"t": "sep"})
+    return {
+        "chars": chars,
+        "layout": layout,
+        "rotate": portrait,
+        "height_dots": budget + SAFETY_DOTS,
+        "blocks": blocks,
+    }
 
-    expiry = to_display(item.get("expiry_date", ""))
-    if expiry:
-        blocks.append({"t": "row", "k": "MHD", "v": expiry, "underline": True})
 
-    qty, unit = item.get("quantity", 1), item.get("unit", "")
-    if unit:
-        qty_text = f"{qty:g} {unit}"
-    else:
-        qty_text = f"{qty:g}"
-    blocks.append({"t": "row", "k": "Menge", "v": qty_text})
+# ------------------------------------------------------------------ Vorschau
+def render_preview_svg(payload: dict, cfg: dict) -> str:
+    """Dieselbe Blockliste als massstabsgetreue SVG-Vorschau.
 
-    location = item.get("location", "")
-    if location:
-        blocks.append({"t": "row", "k": "Ort", "v": location})
+    Bewusst aus dem fertigen Payload gezeichnet und nicht aus dem Item: was
+    die Vorschau zeigt, ist genau das, was der Drucker bekommt. Eine zweite
+    Layout-Implementierung fuer die Anzeige waere die naechste Stelle, an der
+    Bildschirm und Papier auseinanderlaufen.
+    """
+    width_mm = float(cfg.get("label_width_mm", 50))
+    height_mm = float(cfg.get("label_height_mm", 30))
+    rotate = bool(payload.get("rotate"))
+    # Hochkant dreht der Drucker die Zeilen; die Vorschau zeigt das Etikett so,
+    # wie es hinterher im Schrank klebt.
+    view_w, view_h = (height_mm, width_mm) if rotate else (width_mm, height_mm)
 
-    blocks.append({"t": "row", "k": "Eingang", "v": to_display(item.get("added_date", ""))})
-    blocks.append({"t": "sep"})
+    dots_w = int(view_w * DOTS_PER_MM)
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {dots_w} '
+        f'{int(view_h * DOTS_PER_MM)}" width="{view_w * 4}" height="{view_h * 4}" '
+        'role="img" aria-label="Etikettenvorschau">',
+        '<rect width="100%" height="100%" rx="12" fill="#fff" stroke="#c8d0d6"/>',
+    ]
 
-    label = item.get("label", "")
-    if printer_cfg.get("code128", True):
-        blocks.append({"t": "code128", "v": label})
-    if printer_cfg.get("qr", True):
-        blocks.append({"t": "qr", "v": label})
-    blocks.append({"t": "text", "v": label, "align": 1})
-    blocks.append({"t": "feed", "dots": int(printer_cfg.get("post_feed_dots", 86))})
+    y = 0
+    for block in payload.get("blocks", []):
+        kind = block.get("t")
+        dots = block_dots(block)
+        if kind == "text":
+            large = block.get("large")
+            size = 34 if large else 19
+            anchor = {0: "start", 1: "middle", 2: "end"}.get(block.get("align", 0), "start")
+            x = {"start": 8, "middle": dots_w // 2, "end": dots_w - 8}[anchor]
+            weight = "bold" if block.get("bold") else "normal"
+            parts.append(
+                f'<text x="{x}" y="{y + dots - 6}" text-anchor="{anchor}" '
+                f'font-family="DejaVu Sans, sans-serif" font-size="{size}" '
+                f'font-weight="{weight}">{_svg_escape(block.get("v", ""))}</text>'
+            )
+        elif kind == "row":
+            decoration = "underline" if block.get("underline") else "none"
+            parts.append(
+                f'<text x="8" y="{y + dots - 6}" font-family="DejaVu Sans, sans-serif" '
+                f'font-size="19">{_svg_escape(block.get("k", ""))}</text>'
+                f'<text x="{dots_w - 8}" y="{y + dots - 6}" text-anchor="end" '
+                f'font-family="DejaVu Sans, sans-serif" font-size="19" '
+                f'text-decoration="{decoration}"'
+                f'>{_svg_escape(block.get("v", ""))}</text>'
+            )
+        elif kind == "sep":
+            parts.append(
+                f'<line x1="8" y1="{y + dots // 2}" x2="{dots_w - 8}" y2="{y + dots // 2}" '
+                'stroke="#888" stroke-dasharray="6 4"/>'
+            )
+        elif kind == "code128":
+            height = int(block.get("height", 40))
+            bar_w = 3
+            total = min(dots_w - 16, 60 * bar_w)
+            x = (dots_w - total) // 2
+            # Nur eine Andeutung: die echten Striche rechnet der Drucker.
+            for i in range(0, total, bar_w * 2):
+                parts.append(f'<rect x="{x + i}" y="{y}" width="{bar_w}" height="{height}" fill="#111"/>')
+        elif kind == "qr":
+            side = dots
+            x = (dots_w - side) // 2
+            parts.append(
+                f'<rect x="{x}" y="{y}" width="{side}" height="{side}" fill="#fff" stroke="#111"/>'
+                f'<rect x="{x + 6}" y="{y + 6}" width="{side // 4}" height="{side // 4}" fill="#111"/>'
+                f'<rect x="{x + side - side // 4 - 6}" y="{y + 6}" width="{side // 4}" '
+                f'height="{side // 4}" fill="#111"/>'
+                f'<rect x="{x + 6}" y="{y + side - side // 4 - 6}" width="{side // 4}" '
+                f'height="{side // 4}" fill="#111"/>'
+                f'<text x="{x + side // 2}" y="{y + side // 2 + 8}" text-anchor="middle" '
+                'font-family="DejaVu Sans, sans-serif" font-size="16" fill="#666">QR</text>'
+            )
+        y += dots
 
-    return {"chars": chars, "blocks": blocks}
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _svg_escape(text: str) -> str:
+    return (
+        str(text).replace("&", "&amp;").replace("<", "&lt;")
+        .replace(">", "&gt;").replace('"', "&quot;")
+    )

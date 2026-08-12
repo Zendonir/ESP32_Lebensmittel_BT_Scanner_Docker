@@ -260,3 +260,22 @@ dialog h2 { margin-top: 0; }
   width: 32px; height: 32px; padding: 0;
   font-size: 18px; line-height: 1; flex: none;
 }
+
+/* ---------------------------------------------------------- Etikettenlayouts */
+.layouts { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+
+.layout {
+  border: 2px solid var(--border); border-radius: var(--radius);
+  padding: 10px; background: var(--surface-2);
+  display: flex; flex-direction: column; gap: 8px; align-items: center;
+  cursor: pointer; min-width: 180px;
+}
+.layout:hover { border-color: var(--muted); }
+.layout.active { border-color: var(--primary); }
+
+/* Die Vorschau ist ein weisses Etikett - im dunklen Erscheinungsbild braucht
+   sie einen eigenen Grund, sonst schwebt sie im Nichts. */
+.layout .paper { background: #fff; border-radius: 6px; padding: 4px; line-height: 0; }
+.layout .who { font-weight: 600; font-size: 13px; }
+.layout .why { font-size: 12px; color: var(--muted); text-align: center; }
+.layout .fill { font-size: 11px; color: var(--muted); }

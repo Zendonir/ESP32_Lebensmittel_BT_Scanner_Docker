@@ -257,6 +257,19 @@
           <label class="row tight"><input id="set-c128" type="checkbox"> Code128</label>
           <button class="sm" id="set-printer-save">Speichern</button>
         </div>
+
+        <h3>Etikett</h3>
+        <div class="row">
+          <label class="field">Breite (mm)<input id="set-lw" type="number" min="20" max="110" style="width:100px"></label>
+          <label class="field">Höhe (mm)<input id="set-lh" type="number" min="15" max="110" style="width:100px"></label>
+          <label class="field">Ausrichtung
+            <select id="set-orient" style="width:150px">
+              <option value="quer">Querformat</option>
+              <option value="hoch">Hochformat</option>
+            </select></label>
+          <span class="muted" id="label-budget" style="align-self:end"></span>
+        </div>
+        <div id="layout-picker" class="layouts"></div>
       </div>
     </div>
 

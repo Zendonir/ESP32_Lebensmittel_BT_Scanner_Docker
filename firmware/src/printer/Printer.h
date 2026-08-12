@@ -34,8 +34,8 @@ private:
     void textLine(const String &text, uint8_t align, bool bold, bool large);
     void row(const String &key, const String &value, bool underline);
     void separator();
-    void qr(const String &data);
-    void code128(const String &data);
+    void qr(const String &data, uint8_t scale);
+    void code128(const String &data, uint8_t height);
     void feedDots(uint16_t dots);
     void reset();
     String toCp1252(const String &utf8) const;
@@ -50,6 +50,7 @@ private:
     Job     _queue[MAX_QUEUE];
     size_t  _head = 0, _count = 0;
     uint8_t _chars = 32;
+    bool    _rotate = false;   // Hochkant: Text um 90 Grad gedreht
     bool    _ready = false;
 };
 

@@ -587,6 +587,10 @@ async function loadSystem() {
   $('#set-feed').value = settings.printer?.post_feed_dots ?? 86;
   $('#set-qr').checked = settings.printer?.qr ?? true;
   $('#set-c128').checked = settings.printer?.code128 ?? true;
+  $('#set-lw').value = settings.printer?.label_width_mm ?? 50;
+  $('#set-lh').value = settings.printer?.label_height_mm ?? 30;
+  $('#set-orient').value = settings.printer?.label_orientation ?? 'quer';
+  await loadLayouts();
 
   $('#sys-events').innerHTML = events.map((e) => `<tr>
     <td class="mono">${fmtTime(e.ts)}</td><td>${esc(e.type)}</td>
@@ -615,6 +619,49 @@ async function saveSetting(key, body) {
   try { await patch(`/api/settings/${key}`, body); toast('Gespeichert', 'success'); }
   catch (e) { toast(e.message, 'error'); }
 }
+
+// -------------------------------------------------------- Etikettenlayouts
+// Die Vorschauen kommen fertig vom Server und entstehen aus genau dem
+// Payload, den auch der Drucker bekommt. Ein zweites Layout im Browser waere
+// die naechste Stelle, an der Bildschirm und Papier auseinanderlaufen.
+async function loadLayouts() {
+  const box = $('#layout-picker');
+  if (!box) return;
+  const rows = await get('/api/labels/layouts');
+  const chosen = state.settings?.printer?.label_layout || 'standard';
+
+  box.innerHTML = rows.map((l) => `<div class="layout ${l.name === chosen ? 'active' : ''}"
+      data-layout="${esc(l.name)}" role="button" tabindex="0">
+    <div class="paper">${l.svg}</div>
+    <div class="who">${esc(l.title || l.name)}</div>
+    <div class="why">${esc(l.description)}</div>
+    <div class="fill">${l.dots} von ${l.height_dots} Punkten</div>
+  </div>`).join('');
+
+  box.querySelectorAll('[data-layout]').forEach((el) => el.addEventListener('click', async () => {
+    await saveSetting('printer', { label_layout: el.dataset.layout });
+    state.settings.printer = { ...state.settings.printer, label_layout: el.dataset.layout };
+    box.querySelectorAll('[data-layout]').forEach((o) => o.classList.toggle('active', o === el));
+  }));
+}
+
+// Masse und Ausrichtung aendern jede Vorschau - deshalb neu zeichnen, nicht
+// nur speichern.
+async function saveLabelGeometry() {
+  const body = {
+    label_width_mm: parseFloat($('#set-lw').value) || 50,
+    label_height_mm: parseFloat($('#set-lh').value) || 30,
+    label_orientation: $('#set-orient').value,
+  };
+  await saveSetting('printer', body);
+  state.settings.printer = { ...state.settings.printer, ...body };
+  await loadLayouts();
+}
+
+['#set-lw', '#set-lh', '#set-orient'].forEach((sel) => {
+  const el = $(sel);
+  if (el) el.addEventListener('change', () => saveLabelGeometry().catch((e) => toast(e.message, 'error')));
+});
 
 $('#notify-test').addEventListener('click', async () => {
   try { const r = await post('/api/notify/test'); toast(JSON.stringify(r), 'success'); }

@@ -17,6 +17,47 @@ from ..services import settings_store
 
 router = APIRouter(prefix="/api/labels", tags=["etiketten"])
 
+# Beispiel fuer die Vorschau. Bewusst mit langem Namen und Umlauten - ein
+# Layout, das nur mit "Brot" gut aussieht, taugt nichts.
+_SAMPLE = {
+    "label": "LEB000123",
+    "name": "Schweinefilet",
+    "subcategory": "Schwein",
+    "brand": "Landmetzgerei Grüner",
+    "expiry_date": "2026-09-30",
+    "added_date": "2026-08-12",
+    "quantity": 500,
+    "unit": "g",
+    "location": "Kühlschrank",
+}
+
+
+@router.get("/layouts")
+async def list_layouts(session: AsyncSession = Depends(get_session)):
+    """Die waehlbaren Layouts, jeweils mit massstabsgetreuer Vorschau.
+
+    Die Vorschau entsteht aus demselben Payload, den auch der Drucker
+    bekommt - sonst waere sie ein zweites Layout, das irgendwann abweicht.
+    """
+    cfg = dict(await settings_store.get(session, "printer", {}))
+    out = []
+    for name, description in label_service.LAYOUTS.items():
+        payload = label_service.render_label(_SAMPLE, {**cfg, "label_layout": name})
+        # Ohne den Auffuellvorschub: der reicht per Definition bis zur
+        # Perforation und wuerde jedes Layout als randvoll ausweisen.
+        used = label_service.total_dots(
+            [b for b in payload["blocks"] if b.get("t") != "feed"]
+        )
+        out.append({
+            "name": name,
+            "title": label_service.TITLES.get(name, name),
+            "description": description,
+            "dots": used,
+            "height_dots": payload["height_dots"],
+            "svg": label_service.render_preview_svg(payload, cfg),
+        })
+    return out
+
 
 @router.post("", response_model=LabelCreateResult, status_code=201)
 async def create_labels(body: LabelCreate, session: AsyncSession = Depends(get_session)):
