@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 from .services.dates import to_iso_date
 
@@ -27,6 +27,15 @@ class CategoryOut(ORMModel):
     color: str
     icon: str
     sort_order: int
+
+    # Fest hinterlegt, nicht gespeichert: die Oberflaeche soll die Sorten
+    # anbieten koennen, ohne die Liste ein zweites Mal zu fuehren.
+    @computed_field
+    @property
+    def subcategories(self) -> list[str]:
+        from .services.categories import subcategories_for
+
+        return list(subcategories_for(self.name))
 
 
 class LocationIn(BaseModel):

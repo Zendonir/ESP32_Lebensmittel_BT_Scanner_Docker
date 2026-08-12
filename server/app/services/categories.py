@@ -16,16 +16,18 @@ import re
 
 # Die feste Auswahl. Aenderungen hier wirken nur auf neue Installationen -
 # bestehende Kategorien in der Datenbank bleiben, wie sie sind.
+# Muss zu services/seed.CATEGORIES passen: match_off darf nur Namen liefern,
+# die es als Kategorie auch wirklich gibt.
 FIXED = (
+    "Getraenke",
     "Milchprodukte",
     "Fleisch & Fisch",
     "Obst & Gemüse",
     "Backwaren",
-    "Tiefkühl",
+    "Tiefkuehl",
     "Konserven",
     "Trockenware",
     "Süßes & Snacks",
-    "Restmahlzeit",
     "Sonstiges",
 )
 
@@ -48,9 +50,16 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
          "veal", "kalb", "hackfleisch", "steak", "filet", "speck", "bacon"),
     ),
     (
-        "Tiefkühl",
+        "Tiefkuehl",
         ("frozen", "tiefkuhl", "tiefkuehl", "gefroren", "ice-cream",
          "ice cream", "eiscreme", "speiseeis"),
+    ),
+    (
+        "Getraenke",
+        ("beverage", "getrank", "getraenk", "drink", "water", "wasser",
+         "juice", "saft", "soda", "limonade", "tea", "tee", "iced-tea",
+         "coffee", "kaffee", "beer", "bier", "wine", "wein", "spirits",
+         "schnaps", "milk-drink", "smoothie"),
     ),
     (
         "Milchprodukte",
@@ -87,11 +96,6 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
          "candy", "bonbon", "confectionery", "biscuit", "keks", "cookie",
          "chips", "crisps", "dessert", "nuss", "nuts"),
     ),
-    (
-        "Restmahlzeit",
-        ("meal", "fertiggericht", "prepared", "ready-made", "pizza",
-         "sandwich", "suppe", "soup"),
-    ),
 )
 
 
@@ -101,6 +105,41 @@ def _normalise(text: str) -> str:
     for umlaut, plain in (("ä", "a"), ("ö", "o"), ("ü", "u"), ("ß", "ss")):
         lowered = lowered.replace(umlaut, plain)
     return lowered
+
+
+def _key(name: str) -> str:
+    """Vergleichsform fuer Kategorienamen.
+
+    Zusaetzlich zu _normalise werden die ausgeschriebenen Umlaute eingezogen
+    und alles Nichtalphanumerische verworfen: "Tiefkühl", "Tiefkuehl" und
+    "tiefkuhl" sind dieselbe Kategorie, und "Fleisch & Fisch" bleibt es auch
+    ohne das Kaufmanns-Und. Nur fuer Namensvergleiche gedacht, nicht fuer die
+    Schluesselwortsuche - dort wuerde das Einziehen falsche Treffer erzeugen.
+    """
+    reduced = _normalise(name)
+    for digraph, plain in (("ae", "a"), ("oe", "o"), ("ue", "u")):
+        reduced = reduced.replace(digraph, plain)
+    return re.sub(r"[^a-z0-9]+", "", reduced)
+
+
+def resolve(name: str, available: list[str] | None) -> str:
+    """Einen Kategorienamen auf die tatsaechlich vorhandenen abbilden.
+
+    Die Regeln unten liefern die Schreibweise aus FIXED. In der Datenbank kann
+    dieselbe Kategorie anders geschrieben stehen - eingedeutscht, umbenannt
+    oder aus einem Import. Ohne diesen Schritt traegt der Bestand Kategorien,
+    die es in der Auswahl gar nicht gibt, und die Filter finden nichts.
+    """
+    if not available:
+        return name
+    wanted = _key(name)
+    for candidate in available:
+        if _key(candidate) == wanted:
+            return candidate
+    for candidate in available:
+        if _key(candidate) == _key(FALLBACK):
+            return candidate
+    return name
 
 
 def _matches(tag: str, keyword: str) -> bool:
@@ -118,19 +157,23 @@ def _matches(tag: str, keyword: str) -> bool:
     return any(word.startswith(keyword) for word in re.split(r"[^a-z0-9]+", normalised))
 
 
-def match_off(tags: list[str]) -> str:
+def match_off(tags: list[str], available: list[str] | None = None) -> str:
     """Kategoriemarken von OpenFoodFacts einer festen Kategorie zuordnen.
 
     Von hinten nach vorn, weil die spezifischste Marke am Ende steht: bei
     ("en:meats", "en:pork") soll Schwein den Ausschlag geben, nicht Fleisch
     allgemein. Passt nichts, bleibt es bei "Sonstiges" - lieber ehrlich
     unsortiert als falsch einsortiert.
+
+    `available` sind die tatsaechlich angelegten Kategorien; das Ergebnis wird
+    darauf abgebildet, damit im Bestand keine Kategorie landet, die es in der
+    Auswahl nicht gibt.
     """
     for tag in reversed(tags):
         for category, keywords in _RULES:
             if any(_matches(tag, word) for word in keywords):
-                return category
-    return FALLBACK
+                return resolve(category, available)
+    return resolve(FALLBACK, available)
 
 
 def match_subcategory(category: str, tags: list[str]) -> str:
@@ -161,9 +204,9 @@ def subcategories_for(category: str) -> tuple[str, ...]:
     Bestehende Datenbanken tragen die Kategorie teils noch umschrieben
     ("Suesses & Snacks"), deshalb wird normalisiert verglichen.
     """
-    wanted = _normalise(category)
+    wanted = _key(category)
     for name, options in SUBCATEGORIES.items():
-        if _normalise(name) == wanted:
+        if _key(name) == wanted:
             return options
     return ()
 

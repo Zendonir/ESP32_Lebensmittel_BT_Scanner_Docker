@@ -280,7 +280,20 @@ async function templateDialog(tpl) {
     { name: 'unit', label: 'Einheit', value: tpl?.unit || '', options: ['', 'St.', 'g', 'kg', 'ml', 'l'] },
     { name: 'brands', label: 'Marken', type: 'tags', value: tpl?.brands || [], placeholder: 'Marke hinzufügen …' },
     { name: 'sorten', label: 'Sorten', type: 'tags', value: tpl?.sorten || [], placeholder: 'Sorte hinzufügen …' },
-  ]);
+  ], (body, editors) => {
+    // Hat die Kategorie feste Sorten (Fleisch & Fisch: Schwein, Geflügel, …),
+    // werden sie angeboten, solange die Vorlage noch keine eigenen hat. Wer
+    // andere will, entfernt die Blasen einfach wieder.
+    const select = body.querySelector('[name="category"]');
+    const offer = () => {
+      const found = state.categories.find((c) => c.name === select.value);
+      if (editors.sorten.isEmpty() && found?.subcategories?.length) {
+        editors.sorten.set(found.subcategories);
+      }
+    };
+    select.addEventListener('change', offer);
+    offer();
+  });
   if (!values) return;
 
   const body = {
@@ -303,7 +316,9 @@ async function templateDialog(tpl) {
 async function loadCatalogPage() {
   await loadCatalogData();
   $('#cat-body').innerHTML = state.categories.map((c) => `<tr>
-    <td><span class="swatch" style="background:${esc(c.color)}"></span>${esc(c.name)}</td>
+    <td><span class="swatch" style="background:${esc(c.color)}"></span>${esc(c.name)}
+      ${(c.subcategories || []).length ? `<div class="tag-list" style="margin-top:6px">${
+        c.subcategories.map((s) => `<span class="tag">${esc(s)}</span>`).join('')}</div>` : ''}</td>
     <td class="right">
       <button class="sm" data-cat-edit="${c.id}">Ändern</button>
       <button class="sm danger" data-cat-del="${c.id}">Löschen</button></td></tr>`).join('');
@@ -644,7 +659,7 @@ $('#import-form').addEventListener('submit', async (ev) => {
 });
 
 // ------------------------------------------------------------------- Dialoge
-function modal(title, fields) {
+function modal(title, fields, onReady) {
   const dlg = $('#modal');
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = fields.map((f) => {
@@ -670,6 +685,8 @@ function modal(title, fields) {
   fields.filter((f) => f.type === 'tags').forEach((f) => {
     editors[f.name] = tagEditor($(`#modal-body [data-tags="${f.name}"]`), f.value || [], f.placeholder);
   });
+
+  if (onReady) onReady($('#modal-body'), editors);
 
   dlg.showModal();
   return new Promise((resolve) => {

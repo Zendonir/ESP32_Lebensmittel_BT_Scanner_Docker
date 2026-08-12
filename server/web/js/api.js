@@ -126,7 +126,11 @@ export function tagEditor(host, initial = [], placeholder = 'Hinzufügen …') {
   });
 
   draw();
-  return { values: () => [...items] };
+  return {
+    values: () => [...items],
+    isEmpty: () => items.length === 0,
+    set: (next) => { items.length = 0; items.push(...next); draw(); },
+  };
 }
 
 // Live-Signale vom Server. Der Server schickt nur "was" sich geaendert hat;

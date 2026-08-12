@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..models import Product, utcnow
+from ..models import Category, Product, utcnow
 from . import categories as cat
 
 log = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ _FIELDS = "code,product_name,product_name_de,brands,quantity,categories_tags,nut
 _inflight: dict[str, asyncio.Task] = {}
 
 
-async def _fetch_remote(barcode: str) -> dict | None:
+async def _fetch_remote(barcode: str, available: list[str]) -> dict | None:
     url = f"{settings.openfoodfacts_url}/{barcode}.json?fields={_FIELDS}"
     headers = {"User-Agent": "Lebensmittel-Scanner/2.0 (self-hosted)"}
     try:
@@ -47,7 +47,7 @@ async def _fetch_remote(barcode: str) -> dict | None:
     # Nicht die Rohkategorie uebernehmen: OpenFoodFacts liefert Dinge wie
     # "Beverages And Beverages Preparations". Unsortiert im Bestand macht das
     # jede Auswertung nach Kategorie wertlos.
-    matched = cat.match_off(tags)
+    matched = cat.match_off(tags, available)
     return {
         "name": (product.get("product_name_de") or product.get("product_name") or "").strip(),
         "brand": (product.get("brands") or "").split(",")[0].strip(),
@@ -83,7 +83,12 @@ async def lookup(session: AsyncSession, barcode: str, refresh: bool = False) -> 
     # Mehrfache gleichzeitige Scans desselben Codes teilen sich eine Abfrage.
     task = _inflight.get(barcode)
     if task is None:
-        task = asyncio.create_task(_fetch_remote(barcode))
+        # Die vorhandenen Kategorien vor dem Abruf holen: waehrend der Abfrage
+        # laeuft, darf die Sitzung nicht mitten in einer Abfrage stecken.
+        available = list(
+            (await session.execute(select(Category.name))).scalars().all()
+        )
+        task = asyncio.create_task(_fetch_remote(barcode, available))
         _inflight[barcode] = task
     try:
         remote = await task
