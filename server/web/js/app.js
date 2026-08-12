@@ -1,7 +1,7 @@
 // Admin-Oberflaeche. Bewusst ohne Framework und ohne Build-Schritt: das Image
 // bleibt klein und die Dateien sind das, was ausgeliefert wird.
 
-import { get, post, patch, put, del, toast, fmtDate, fmtTime, daysPill, esc, liveConnect } from './api.js';
+import { get, post, patch, put, del, toast, fmtDate, fmtTime, daysPill, esc, liveConnect, tagEditor } from './api.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -278,20 +278,19 @@ async function templateDialog(tpl) {
     { name: 'category', label: 'Kategorie', value: tpl?.category || '', options: state.categories.map((c) => c.name) },
     { name: 'shelf_days', label: 'MHD-Tage', value: tpl?.shelf_days ?? 7, type: 'number' },
     { name: 'unit', label: 'Einheit', value: tpl?.unit || '', options: ['', 'St.', 'g', 'kg', 'ml', 'l'] },
-    { name: 'brands', label: 'Marken (Komma)', value: (tpl?.brands || []).join(', ') },
-    { name: 'sorten', label: 'Sorten (Komma)', value: (tpl?.sorten || []).join(', ') },
+    { name: 'brands', label: 'Marken', type: 'tags', value: tpl?.brands || [], placeholder: 'Marke hinzufügen …' },
+    { name: 'sorten', label: 'Sorten', type: 'tags', value: tpl?.sorten || [], placeholder: 'Sorte hinzufügen …' },
   ]);
   if (!values) return;
 
-  const split = (s) => s.split(',').map((v) => v.trim()).filter(Boolean);
   const body = {
     name: values.name,
     category: values.category,
     shelf_days: parseInt(values.shelf_days, 10) || 0,
     unit: values.unit,
-    brands: split(values.brands),
-    sorten: split(values.sorten),
-    use_sorten: split(values.sorten).length > 0,
+    brands: values.brands,
+    sorten: values.sorten,
+    use_sorten: values.sorten.length > 0,
     sort_order: tpl?.sort_order ?? 0,
   };
   if (tpl) await put(`/api/templates/${tpl.id}`, body);
@@ -658,9 +657,19 @@ function modal(title, fields) {
     if (f.type === 'checkbox') {
       return `<label class="row tight"><input type="checkbox" name="${f.name}" ${f.value ? 'checked' : ''}> ${esc(f.label)}</label>`;
     }
+    if (f.type === 'tags') {
+      // Kein <label>: der Blaseneditor enthaelt mehrere Bedienelemente, ein
+      // umschliessendes Label wuerde jeden Klick auf das erste umlenken.
+      return `<div class="field"><span>${esc(f.label)}</span><div data-tags="${f.name}"></div></div>`;
+    }
     return `<label class="field">${esc(f.label)}
       <input name="${f.name}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}"></label>`;
   }).join('');
+
+  const editors = {};
+  fields.filter((f) => f.type === 'tags').forEach((f) => {
+    editors[f.name] = tagEditor($(`#modal-body [data-tags="${f.name}"]`), f.value || [], f.placeholder);
+  });
 
   dlg.showModal();
   return new Promise((resolve) => {
@@ -668,6 +677,7 @@ function modal(title, fields) {
       if (dlg.returnValue !== 'ok') return resolve(null);
       const out = {};
       fields.forEach((f) => {
+        if (f.type === 'tags') { out[f.name] = editors[f.name].values(); return; }
         const el = $(`#modal-body [name="${f.name}"]`);
         out[f.name] = f.type === 'checkbox' ? el.checked : el.value;
       });

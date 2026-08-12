@@ -233,3 +233,30 @@ dialog h2 { margin-top: 0; }
   header.top { flex-wrap: wrap; gap: 8px; }
   th, td { padding: 7px 6px; }
 }
+
+/* ------------------------------------------------------- Blasen-Eingabefelder */
+.tags { display: flex; flex-direction: column; gap: 6px; }
+.tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-list:empty { display: none; }
+
+.tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 6px 4px 10px; border-radius: 999px;
+  background: var(--surface-2); color: var(--text);
+  font-size: 13px; line-height: 1.2;
+}
+
+.tag-x {
+  border: 0; background: none; color: var(--muted);
+  padding: 0; width: 18px; height: 18px; border-radius: 999px;
+  font-size: 15px; line-height: 1; cursor: pointer;
+}
+.tag-x:hover { background: var(--danger); color: #fff; }
+
+.tag-add { display: flex; gap: 6px; align-items: center; }
+.tag-add .tag-input { flex: 1; }
+
+.tag-plus {
+  width: 32px; height: 32px; padding: 0;
+  font-size: 18px; line-height: 1; flex: none;
+}

@@ -19,6 +19,15 @@
     }
     header.m h1 { font-size: 16px; margin: 0; flex: 1; }
 
+    /* Die Regeln in app.css haengen an <button>, greifen an einem <a> also
+       nicht - der Weg zurueck in die volle Verwaltung soll aber wie ein Knopf
+       aussehen und nicht wie ein Link im Fliesstext. */
+    .linkbtn {
+      padding: 5px 10px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface-2); color: var(--text);
+      font-size: 13px; text-decoration: none; white-space: nowrap;
+    }
+
     .list { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 
     /* Wischen zum Auslagern: die sichtbare Karte liegt ueber dem Aktionsfeld
@@ -39,7 +48,7 @@
 
     nav.bottom {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
-      display: grid; grid-template-columns: repeat(4, 1fr);
+      display: grid; grid-template-columns: repeat(5, 1fr);
       background: var(--surface); border-top: 1px solid var(--border);
       padding-bottom: env(safe-area-inset-bottom);
     }
@@ -53,6 +62,12 @@
 
     #scanview { padding: 12px; }
     #cam { width: 100%; border-radius: var(--radius); background: #000; aspect-ratio: 4/3; object-fit: cover; }
+
+    /* Formulare am Telefon: volle Breite, Finger-taugliche Hoehe. */
+    .mform { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+    .mform label.field > span { font-size: 12px; color: var(--muted); }
+    .mform input, .mform select { padding: 11px 12px; font-size: 16px; }
+    .mform .tag-plus { width: 38px; height: 38px; }
   </style>
 </head>
 <body>
@@ -60,6 +75,7 @@
 <header class="m">
   <h1 id="m-title">Inventar</h1>
   <span class="pill" id="m-count">–</span>
+  <a class="linkbtn" href="/" title="Zur vollen Verwaltung">🖥️ Verwaltung</a>
 </header>
 
 <div id="m-view"></div>
@@ -69,18 +85,19 @@
   <button data-view="exp"><span class="ico">⏰</span>Ablaufend</button>
   <button data-view="scan"><span class="ico">📷</span>Scan</button>
   <button data-view="shop"><span class="ico">🛒</span>Einkauf</button>
+  <button data-view="tpl"><span class="ico">📋</span>Vorlagen</button>
 </nav>
 
 <div id="toasts"></div>
 <script type="module">
-import { get, post, del, put, toast, fmtDate, daysPill, esc, liveConnect } from '/static/js/api.js';
+import { get, post, del, put, toast, fmtDate, daysPill, esc, liveConnect, tagEditor } from '/static/js/api.js';
 
 const view = document.getElementById('m-view');
 const title = document.getElementById('m-title');
 const count = document.getElementById('m-count');
 let current = 'inv';
 
-const TITLES = { inv: 'Inventar', exp: 'Ablaufend', scan: 'Scannen', shop: 'Einkauf' };
+const TITLES = { inv: 'Inventar', exp: 'Ablaufend', scan: 'Scannen', shop: 'Einkauf', tpl: 'Vorlagen' };
 
 document.getElementById('m-nav').addEventListener('click', (ev) => {
   const btn = ev.target.closest('button[data-view]');
@@ -97,6 +114,7 @@ async function render() {
     if (current === 'inv') await renderList('/api/inventory?limit=300&sort=expiry');
     else if (current === 'exp') await renderList('/api/inventory?expiring=true&limit=200');
     else if (current === 'scan') renderScan();
+    else if (current === 'tpl') await renderTemplates();
     else await renderShopping();
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -261,6 +279,93 @@ async function renderShopping() {
     await del(`/api/shopping/${b.dataset.del}`);
     renderShopping();
   }));
+}
+
+// ------------------------------------------------------------------ Vorlagen
+// Dieselben Vorlagen wie in der Verwaltung und am Terminal - hier nur mit
+// grossen Flaechen, weil das am Telefon mit dem Daumen bedient wird.
+async function renderTemplates() {
+  const rows = await get('/api/templates');
+  count.textContent = rows.length;
+  view.innerHTML = `<div class="list">
+    <button class="primary" id="tpl-new">+ Neue Vorlage</button>
+    ${rows.map((t) => `<div class="swipe-inner">
+      <div class="t">${esc(t.name)}</div>
+      <div class="s">${esc(t.category)} · ${t.shelf_days} Tage${t.unit ? ` · ${esc(t.unit)}` : ''}</div>
+      ${(t.brands || []).length ? `<div class="tag-list" style="margin-top:6px">${
+        t.brands.map((b) => `<span class="tag">${esc(b)}</span>`).join('')}</div>` : ''}
+      ${(t.sorten || []).length ? `<div class="tag-list" style="margin-top:4px">${
+        t.sorten.map((s) => `<span class="tag">${esc(s)}</span>`).join('')}</div>` : ''}
+      <div class="row" style="margin-top:10px">
+        <button class="sm" data-edit="${t.id}">Ändern</button>
+        <button class="sm danger" data-del="${t.id}">Löschen</button>
+      </div></div>`).join('') || '<div class="empty">Noch keine Vorlage.</div>'}
+  </div>`;
+
+  document.getElementById('tpl-new').addEventListener('click', () => templateForm(null));
+  view.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click',
+    () => templateForm(rows.find((t) => t.id === +b.dataset.edit))));
+  view.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Vorlage wirklich löschen?')) return;
+    try { await del(`/api/templates/${b.dataset.del}`); toast('Gelöscht'); renderTemplates(); }
+    catch (e) { toast(e.message, 'error'); }
+  }));
+}
+
+async function templateForm(tpl) {
+  const categories = await get('/api/categories');
+  const units = ['', 'St.', 'g', 'kg', 'ml', 'l'];
+  title.textContent = tpl ? tpl.name : 'Neue Vorlage';
+  count.textContent = '';
+
+  const option = (value, selected) => `<option ${value === selected ? 'selected' : ''}>${esc(value)}</option>`;
+  view.innerHTML = `<form class="mform" id="tplform">
+    <label class="field"><span>Name</span>
+      <input name="name" value="${esc(tpl?.name || '')}" required autocomplete="off"></label>
+    <label class="field"><span>Kategorie</span>
+      <select name="category">${categories.map((c) => option(c.name, tpl?.category)).join('')}
+        ${tpl && !categories.some((c) => c.name === tpl.category) ? option(tpl.category, tpl.category) : ''}
+      </select></label>
+    <label class="field"><span>MHD-Tage</span>
+      <input name="shelf_days" type="number" inputmode="numeric" min="0" value="${tpl?.shelf_days ?? 7}"></label>
+    <label class="field"><span>Einheit</span>
+      <select name="unit">${units.map((u) => option(u, tpl?.unit || '')).join('')}</select></label>
+    <div class="field"><span>Marken</span><div id="f-brands"></div></div>
+    <div class="field"><span>Sorten</span><div id="f-sorten"></div></div>
+    <div class="row">
+      <button type="button" class="ghost" id="tpl-cancel" style="flex:1">Abbrechen</button>
+      <button class="primary" style="flex:1">Speichern</button>
+    </div></form>`;
+
+  const brands = tagEditor(document.getElementById('f-brands'), tpl?.brands || [], 'Marke hinzufügen …');
+  const sorten = tagEditor(document.getElementById('f-sorten'), tpl?.sorten || [], 'Sorte hinzufügen …');
+
+  document.getElementById('tpl-cancel').addEventListener('click', () => {
+    title.textContent = TITLES.tpl;
+    renderTemplates();
+  });
+
+  document.getElementById('tplform').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const form = new FormData(ev.target);
+    const body = {
+      name: form.get('name').trim(),
+      category: form.get('category'),
+      shelf_days: parseInt(form.get('shelf_days'), 10) || 0,
+      unit: form.get('unit'),
+      brands: brands.values(),
+      sorten: sorten.values(),
+      use_sorten: sorten.values().length > 0,
+      sort_order: tpl?.sort_order ?? 0,
+    };
+    try {
+      if (tpl) await put(`/api/templates/${tpl.id}`, body);
+      else await post('/api/templates', body);
+      toast('Gespeichert', 'success');
+      title.textContent = TITLES.tpl;
+      renderTemplates();
+    } catch (e) { toast(e.message, 'error'); }
+  });
 }
 
 liveConnect((msg) => {

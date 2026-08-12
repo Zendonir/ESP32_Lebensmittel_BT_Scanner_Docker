@@ -63,6 +63,72 @@ export function esc(value) {
   ));
 }
 
+// Eingabefeld fuer Listen (Marken, Sorten): jeder Eintrag ist eine Blase, die
+// sich einzeln wieder entfernen laesst. Vorher stand hier ein Textfeld mit
+// Kommatrennung - Kommas im Markennamen zerlegten den Eintrag stillschweigend
+// in zwei, und zum Loeschen eines Eintrags musste man den Text lesen koennen.
+//
+// Gibt ein Objekt mit `values()` zurueck; der Aufrufer holt sich damit den
+// Stand beim Speichern. Bewusst kein verstecktes Eingabefeld: das Formular
+// soll nichts von der Darstellung wissen.
+export function tagEditor(host, initial = [], placeholder = 'Hinzufügen …') {
+  const items = [...initial];
+  host.classList.add('tags');
+  host.innerHTML = `<div class="tag-list"></div>
+    <div class="tag-add">
+      <button type="button" class="sm tag-plus" title="${esc(placeholder)}">+</button>
+      <input type="text" class="tag-input" placeholder="${esc(placeholder)}" hidden>
+    </div>`;
+
+  const list = host.querySelector('.tag-list');
+  const plus = host.querySelector('.tag-plus');
+  const input = host.querySelector('.tag-input');
+
+  const draw = () => {
+    list.innerHTML = items.map((v, i) => `<span class="tag">${esc(v)}
+      <button type="button" class="tag-x" data-i="${i}" aria-label="${esc(v)} entfernen">×</button></span>`).join('');
+  };
+
+  const add = () => {
+    const value = input.value.trim();
+    // Doppelte stillschweigend schlucken statt zu meckern: der Nutzer wollte
+    // den Eintrag, und er ist ja schon da.
+    if (value && !items.some((v) => v.toLowerCase() === value.toLowerCase())) {
+      items.push(value);
+      draw();
+    }
+    input.value = '';
+  };
+
+  plus.addEventListener('click', () => {
+    if (input.hidden) { input.hidden = false; input.focus(); return; }
+    add();
+    input.focus();
+  });
+
+  input.addEventListener('keydown', (ev) => {
+    // Enter im Dialog wuerde sonst das Formular abschicken und den Dialog
+    // schliessen, bevor die Blase ueberhaupt entsteht.
+    if (ev.key === 'Enter' || ev.key === ',') { ev.preventDefault(); add(); }
+    else if (ev.key === 'Escape' && !input.value) { ev.preventDefault(); input.hidden = true; }
+    else if (ev.key === 'Backspace' && !input.value && items.length) { items.pop(); draw(); }
+  });
+
+  // Wer wegklickt, hat den Eintrag trotzdem gemeint - sonst geht getippter
+  // Text beim Griff zum Speichern-Knopf verloren.
+  input.addEventListener('blur', () => { if (input.value.trim()) add(); });
+
+  list.addEventListener('click', (ev) => {
+    const x = ev.target.closest('.tag-x');
+    if (!x) return;
+    items.splice(+x.dataset.i, 1);
+    draw();
+  });
+
+  draw();
+  return { values: () => [...items] };
+}
+
 // Live-Signale vom Server. Der Server schickt nur "was" sich geaendert hat;
 // die Seite laedt daraufhin die betroffene Ansicht neu.
 export function liveConnect(onEvent, onStatus) {
