@@ -54,7 +54,13 @@ def test_leerer_name_bleibt_auf_der_tastatur():
     asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())
 
 
-def test_neuer_lagerort_wird_angelegt_und_aktiviert():
+def test_lagerort_laesst_sich_am_geraet_nur_waehlen():
+    """Am Geraet wird kein Lagerort mehr angelegt, nur ausgewaehlt.
+
+    Auf einer Bildschirmtastatur tippt man sich schnell "Kuelschrank" ein und
+    hat den Bestand ab da auf zwei Orte verteilt, ohne es zu merken. Angelegt
+    wird deshalb nur noch in der Verwaltung.
+    """
     async def scenario():
         from sqlalchemy import select
 
@@ -62,45 +68,55 @@ def test_neuer_lagerort_wird_angelegt_und_aktiviert():
 
         sess = workflow.session_for("kbtest3")
         async with session_scope() as session:
-            sess.stack = [workflow.HOME, workflow.LOCATIONS, workflow.LOCATION_NEW]
-            await workflow.on_input(session, sess, "Kellerregal")
-            assert sess.location_draft == "Kellerregal"
+            vorher = len((await session.execute(select(Location))).scalars().all())
 
-            await workflow.on_tap(session, sess, "ok")
+            sess.stack = [workflow.HOME, workflow.LOCATIONS]
+            sess.touch()
+            screen = await workflow.render(session, sess)
+            # Keine Kachel, die einen neuen Ort anlegen wuerde.
+            assert all(item["id"].startswith("loc:") for item in screen["items"])
+
+            # Und auch der alte Weg dorthin fuehrt nirgendwo hin.
+            await workflow.on_tap(session, sess, "new")
             assert sess.current == workflow.LOCATIONS
-            assert sess.location == "Kellerregal"
 
         async with session_scope() as session:
-            row = (
-                await session.execute(
-                    select(Location).where(Location.name == "Kellerregal")
-                )
-            ).scalar_one_or_none()
-            assert row is not None
+            nachher = len((await session.execute(select(Location))).scalars().all())
+            assert nachher == vorher
 
     asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())
 
 
-def test_doppelter_lagerort_erzeugt_keine_zweite_zeile():
-    async def scenario():
-        from sqlalchemy import func, select
+def test_lagerort_verfaellt_nach_ruhe_und_wird_neu_erfragt():
+    """Nach einer halben Stunde Ruhe steht zuerst wieder der Lagerort an.
 
-        from app.models import Location
+    Sonst laeuft der naechste Einkauf stillschweigend in den Schrank von
+    vorhin - ein Fehler, den man erst bemerkt, wenn man das Etikett am
+    falschen Regal sucht.
+    """
+    async def scenario():
+        from datetime import datetime, timedelta
 
         sess = workflow.session_for("kbtest4")
-        async with session_scope() as session:
-            sess.stack = [workflow.HOME, workflow.LOCATIONS, workflow.LOCATION_NEW]
-            await workflow.on_input(session, sess, "Kellerregal")
-            await workflow.on_tap(session, sess, "ok")
+        sess.location = "Kühlschrank"
+        sess.stack = [workflow.HOME]
 
         async with session_scope() as session:
-            count = (
-                await session.execute(
-                    select(func.count())
-                    .select_from(Location)
-                    .where(Location.name == "Kellerregal")
-                )
-            ).scalar_one()
-            assert count == 1
+            # Frisch bedient: nichts verfaellt.
+            sess.touch()
+            assert await workflow.expire_location(session, sess) is False
+            assert sess.location == "Kühlschrank"
+
+            # Eine Minute ueber der Ruhezeit.
+            sess.last_action = datetime.utcnow() - timedelta(
+                seconds=workflow.LOCATION_IDLE_SECONDS + 60
+            )
+            assert await workflow.expire_location(session, sess) is True
+            assert sess.location == ""
+            assert sess.current == workflow.LOCATIONS
+
+            # Danach faengt die Ruhezeit von vorn an, statt bei jedem weiteren
+            # Tipp erneut auszuloesen.
+            assert await workflow.expire_location(session, sess) is False
 
     asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())

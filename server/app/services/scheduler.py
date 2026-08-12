@@ -138,6 +138,14 @@ async def _loop() -> None:
             if now.hour == settings.expiry_check_hour:
                 await check_expiring()
             await publish_state()
+            # Der Lagerort verfaellt nach einer halben Stunde Ruhe. Ohne
+            # diesen Takt faende das erst beim naechsten Antippen statt, und
+            # die Statusleiste zeigte bis dahin einen Ort, der nicht mehr gilt.
+            # Erst hier importiert: workflow haengt an den Diensten, ein
+            # Import oben schloesse den Kreis.
+            from ..device import workflow
+
+            await workflow.check_idle_locations()
             if now.date() != last_cleanup and now.hour == 3:
                 await cleanup()
                 last_cleanup = now.date()

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,7 +42,6 @@ TMPL_SORTE = "tmpl_sorte"
 TMPL_AMOUNT = "tmpl_amount"
 CONFIRM_REMOVE = "confirm_remove"
 UNKNOWN_NAME = "unknown_name"
-LOCATION_NEW = "location_new"
 SUBCATEGORY = "subcategory"
 INVENTORY = "inventory"
 SYSTEM = "system"
@@ -97,7 +96,8 @@ class DeviceSession:
     location: str = ""
     screen_id: int = 0
     last_result: list[str] = field(default_factory=list)
-    location_draft: str = ""
+    # Letzte Bedienung - daran haengt das Verfallen des Lagerorts.
+    last_action: datetime = field(default_factory=datetime.utcnow)
     scanner: dict = field(default_factory=dict)
     online_since: datetime = field(default_factory=datetime.utcnow)
     inv_sort: str = "mhd"
@@ -120,6 +120,35 @@ class DeviceSession:
     def reset(self) -> None:
         self.stack = [HOME]
         self.draft = Draft()
+
+    def touch(self) -> None:
+        self.last_action = datetime.utcnow()
+
+    def idle_seconds(self) -> float:
+        return (datetime.utcnow() - self.last_action).total_seconds()
+
+
+# Nach dieser Ruhezeit gilt der Lagerort als nicht mehr gueltig. Wer nach
+# einer halben Stunde wiederkommt, steht in aller Regel vor einem anderen
+# Schrank als vorher - und ein stillschweigend uebernommener Ort ist der
+# Fehler, den man erst merkt, wenn man das Etikett am falschen Regal sucht.
+LOCATION_IDLE_SECONDS = 30 * 60
+
+
+def _seconds_since(stamp: datetime | None) -> float:
+    """Alter eines Zeitstempels in Sekunden, robust gegen fehlende Zeitzone.
+
+    SQLite gibt trotz `DateTime(timezone=True)` naive Zeitstempel zurueck.
+    Ein naiver von einem bewussten abgezogen ist ein TypeError - und der faellt
+    ausgerechnet dann an, wenn ein Geraet nach langer Pause zurueckkommt.
+    Ohne Zeitstempel gilt das Geraet als lange weg.
+    """
+    if stamp is None:
+        return float("inf")
+    now = datetime.now(timezone.utc)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return (now - stamp).total_seconds()
 
 
 _sessions: dict[str, DeviceSession] = {}
@@ -168,8 +197,6 @@ async def render(session: AsyncSession, sess: DeviceSession) -> dict:
         return _screen_unknown(sess, sid, status)
     if name == UNKNOWN_NAME:
         return _screen_unknown_name(sess, sid, status)
-    if name == LOCATION_NEW:
-        return _screen_location_new(sess, sid, status)
     if name == ENTER_DATE:
         return _screen_date(sess, sid, status)
     if name == ENTER_QTY:
@@ -245,24 +272,14 @@ async def _screen_locations(session, sess, sid, status) -> dict:
         }
         for row in rows
     ]
-    items.append({"id": "new", "label": "+ Neuer Ort", "color": "#4c9eff"})
     return proto.screen(
         screen_id=sid,
         kind="list",
+        # Lagerorte werden bewusst nur in der Verwaltung angelegt: am Geraet
+        # tippt man sich auf einer Bildschirmtastatur schnell "Kuelschrank"
+        # ein und hat den Bestand ab da auf zwei Orte verteilt.
         title="Lagerort wählen",
         items=items,
-        status=status,
-    )
-
-
-def _screen_location_new(sess, sid, status) -> dict:
-    return proto.screen(
-        screen_id=sid,
-        kind="keyboard",
-        title="Neuer Lagerort",
-        subtitle="Name eingeben",
-        value="",
-        meta={"max_len": 40},
         status=status,
     )
 
@@ -696,9 +713,70 @@ async def push_screen(session: AsyncSession, sess: DeviceSession) -> None:
     await hub.send_to(sess.device_id, await render(session, sess))
 
 
+async def expire_location(session: AsyncSession, sess: DeviceSession) -> bool:
+    """Lagerort nach langer Ruhe verwerfen und neu erfragen.
+
+    Gibt True zurueck, wenn der Ort gerade verfallen ist - der Aufrufer bricht
+    dann ab, statt die eigentliche Eingabe noch zu verarbeiten. Einen Artikel
+    ohne Lagerort einzubuchen waere schlimmer als ein verworfener Scan: der
+    Eintrag liegt dann nirgends, und niemand sucht ihn dort.
+    """
+    if sess.idle_seconds() < LOCATION_IDLE_SECONDS:
+        return False
+
+    sess.location = ""
+    sess.reset()
+    sess.push(LOCATIONS)
+    sess.touch()
+
+    device = (
+        await session.execute(select(Device).where(Device.device_id == sess.device_id))
+    ).scalar_one_or_none()
+    if device is not None:
+        device.active_location = ""
+        await session.commit()
+
+    await hub.send_to(
+        sess.device_id, proto.toast("Lagerort abgelaufen - bitte neu wählen", "warn")
+    )
+    await push_screen(session, sess)
+    return True
+
+
+async def check_idle_locations() -> None:
+    """Vom Scheduler im Minutentakt aufgerufen.
+
+    Ohne das faende der Verfall erst beim naechsten Antippen statt - das Geraet
+    stuende noch eine Stunde spaeter mit dem alten Ort in der Statusleiste und
+    behauptete etwas, das nicht mehr gilt.
+    """
+    faellig = [
+        sess
+        for sess in list(_sessions.values())
+        if sess.location and sess.idle_seconds() >= LOCATION_IDLE_SECONDS
+    ]
+    if not faellig:
+        return
+
+    from ..db import session_scope
+
+    async with session_scope() as session:
+        for sess in faellig:
+            if sess.device_id in hub.online_ids():
+                await expire_location(session, sess)
+
+
 async def on_connect(session: AsyncSession, sess: DeviceSession, device: Device) -> None:
     sess.location = device.active_location or await inv.default_location(session)
     sess.reset()
+    sess.touch()
+
+    # Ein Geraet, das laenger als die Ruhezeit weg war, faengt beim Lagerort
+    # an. Der gespeicherte Ort stammt sonst womoeglich von gestern.
+    if _seconds_since(device.last_seen) >= LOCATION_IDLE_SECONDS:
+        sess.location = ""
+        sess.push(LOCATIONS)
+
     device_cfg = await settings_store.get(session, "device_ui", {})
     await hub.send_to(sess.device_id, proto.config(device_cfg))
     await push_screen(session, sess)
@@ -707,6 +785,10 @@ async def on_connect(session: AsyncSession, sess: DeviceSession, device: Device)
 
 async def on_tap(session: AsyncSession, sess: DeviceSession, item: str) -> None:
     """Ein Tipp auf eine Kachel, eine Listenzeile oder einen Fussleisten-Knopf."""
+    if await expire_location(session, sess):
+        return
+    sess.touch()
+
     if item == "home":
         sess.reset()
         return await push_screen(session, sess)
@@ -723,7 +805,6 @@ async def on_tap(session: AsyncSession, sess: DeviceSession, item: str) -> None:
         EXPIRING: _tap_expiring,
         UNKNOWN: _tap_unknown,
         UNKNOWN_NAME: _tap_unknown_name,
-        LOCATION_NEW: _tap_location_new,
         ENTER_DATE: _tap_date,
         ENTER_QTY: _tap_confirm_save,
         RESULT: _tap_result,
@@ -840,10 +921,6 @@ async def _tap_roll_new(session, sess, item) -> None:
 
 
 async def _tap_locations(session, sess, item) -> None:
-    if item == "new":
-        sess.location_draft = ""
-        sess.push(LOCATION_NEW)
-        return
     if not item.startswith("loc:"):
         return
     sess.location = item[4:]
@@ -855,39 +932,6 @@ async def _tap_locations(session, sess, item) -> None:
         await session.commit()
     sess.pop()
     await hub.send_to(sess.device_id, proto.toast(f"Ort: {sess.location}"))
-
-
-async def _tap_location_new(session, sess, item) -> None:
-    if item != "ok":
-        return
-    name = sess.location_draft.strip()
-    if not name:
-        await hub.send_to(sess.device_id, proto.toast("Name fehlt", "warn"))
-        return
-
-    existing = (
-        await session.execute(select(Location).where(Location.name == name))
-    ).scalar_one_or_none()
-    if existing is None:
-        max_order = (
-            await session.execute(
-                select(Location.sort_order).order_by(Location.sort_order.desc()).limit(1)
-            )
-        ).scalar_one_or_none()
-        session.add(Location(name=name, sort_order=(max_order or 0) + 1))
-        await session.flush()
-
-    sess.location = name
-    device = (
-        await session.execute(select(Device).where(Device.device_id == sess.device_id))
-    ).scalar_one_or_none()
-    if device is not None:
-        device.active_location = name
-    await session.commit()
-    await hub.notify_ui("catalog")
-
-    sess.pop()
-    await hub.send_to(sess.device_id, proto.toast(f"Ort: {name}", "success"))
 
 
 async def _tap_expiring(session, sess, item) -> None:
@@ -985,6 +1029,10 @@ async def _tap_confirm_save(session, sess, item) -> None:
 
 async def on_input(session: AsyncSession, sess: DeviceSession, value) -> None:
     """Wert aus einem date/number/text-Bildschirm uebernehmen."""
+    if await expire_location(session, sess):
+        return
+    sess.touch()
+
     current = sess.current
     if current == ENTER_DATE:
         sess.draft.expiry_date = to_iso_date(value)
@@ -1000,8 +1048,6 @@ async def on_input(session: AsyncSession, sess: DeviceSession, value) -> None:
             sess.draft.quantity = 1.0
     elif current == UNKNOWN_NAME:
         sess.draft.name = str(value or "").strip()
-    elif current == LOCATION_NEW:
-        sess.location_draft = str(value or "").strip()
     elif current == INV_SEARCH:
         sess.inv_search = str(value or "").strip()
     elif current == ROLL_NEW:
@@ -1058,10 +1104,19 @@ async def on_scan(session: AsyncSession, sess: DeviceSession, code: str) -> None
         return
     log.info("[%s] Scan: %s (Modus %s)", sess.device_id, code, sess.current)
 
+    # Auslagern geht immer: der Artikel liegt schon irgendwo, dafuer braucht es
+    # keinen aktiven Lagerort. Einlagern dagegen schon - sonst entstuende ein
+    # Eintrag ohne Ort, und danach sucht ihn niemand.
     if _is_label(code):
+        sess.touch()
         await _scan_label(session, sess, code)
-    else:
-        await _scan_barcode(session, sess, code)
+        await push_screen(session, sess)
+        return
+
+    if await expire_location(session, sess):
+        return
+    sess.touch()
+    await _scan_barcode(session, sess, code)
     await push_screen(session, sess)
 
 
