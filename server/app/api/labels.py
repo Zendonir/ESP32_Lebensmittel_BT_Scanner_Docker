@@ -43,10 +43,11 @@ async def list_layouts(session: AsyncSession = Depends(get_session)):
     out = []
     for name, description in label_service.LAYOUTS.items():
         payload = label_service.render_label(_SAMPLE, {**cfg, "label_layout": name})
-        # Ohne den Auffuellvorschub: der reicht per Definition bis zur
-        # Perforation und wuerde jedes Layout als randvoll ausweisen.
+        # Ohne Vorschub und Rueckzug: der Vorschub reicht per Definition bis
+        # zur Perforation und wuerde jedes Layout als randvoll ausweisen, der
+        # Rueckzug zaehlt negativ und wuerde es kuenstlich leer rechnen.
         used = label_service.total_dots(
-            [b for b in payload["blocks"] if b.get("t") != "feed"]
+            [b for b in payload["blocks"] if b.get("t") not in ("feed", "back")]
         )
         codes = [b["t"] for b in payload["blocks"] if b["t"] in ("qr", "code128")]
         out.append({

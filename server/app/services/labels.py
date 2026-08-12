@@ -87,6 +87,16 @@ CODE128_FEED = 10     # Vorschub, den der Drucker nach dem Strichcode einfuegt
 # Ohne Reserve rutscht die letzte Zeile auf das naechste Etikett.
 SAFETY_DOTS = 16
 
+# Zwischen Druckkopf und Abrisskante liegt ein Stueck Papier, das nie bedruckt
+# werden kann - beim Abreissen geht es verloren. Faehrt der Drucker vor dem
+# Druck ein Stueck zurueck, laesst sich der Bereich zurueckholen.
+#
+# Rueckwaerts kann aber nicht jeder ESC/POS-Drucker: viele ignorieren ESC j,
+# manche verhaken das Papier dabei. Deshalb aus und nur auf Ansage. Mehr als
+# 100 Punkte (12,5 mm) ist bei keinem Totbereich noetig und erhoeht nur das
+# Risiko, dass das Etikett aus der Fuehrung rutscht.
+MAX_BACKFEED_DOTS = 100
+
 
 def label_dots(cfg: dict) -> int:
     """Nutzbare Hoehe eines Etiketts in Punkten."""
@@ -111,6 +121,11 @@ def block_dots(block: dict) -> int:
         return (21 + 4) * int(block.get("scale", 3))
     if kind == "feed":
         return int(block.get("dots", 0))
+    if kind == "back":
+        # Rueckzug zaehlt negativ. Dadurch stimmt total_dots() weiterhin mit
+        # dem Papiervorschub ueberein, den ein Etikett insgesamt verursacht -
+        # und genau daran haengt, ob das naechste Etikett wieder oben anfaengt.
+        return -int(block.get("dots", 0))
     return 0
 
 
@@ -293,12 +308,19 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     declared = int(printer_cfg.get("paper_chars", settings.label_paper_chars))
     chars = min(chars, declared)
 
-    budget = int(stack_mm * DOTS_PER_MM) - SAFETY_DOTS
+    # Der zurueckgeholte Totbereich ist zusaetzlich bedruckbare Flaeche.
+    backfeed = max(0, min(MAX_BACKFEED_DOTS, int(printer_cfg.get("backfeed_dots", 0))))
+    pitch = int(stack_mm * DOTS_PER_MM)
+
+    budget = pitch + backfeed - SAFETY_DOTS
     blocks = _fit(_build(layout, item, printer_cfg, chars), budget)
+    if backfeed:
+        blocks.insert(0, {"t": "back", "dots": backfeed})
 
     # Rest bis zur Perforation vorschieben, damit das naechste Etikett oben
-    # anfaengt - aber nur den Rest, nicht pauschal.
-    remaining = budget + SAFETY_DOTS - total_dots(blocks)
+    # anfaengt - aber nur den Rest, nicht pauschal. total_dots() enthaelt den
+    # Rueckzug negativ, der Vorschub gleicht ihn damit von selbst wieder aus.
+    remaining = pitch - total_dots(blocks)
     if remaining > 0:
         blocks.append({"t": "feed", "dots": remaining})
 
@@ -306,11 +328,14 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
         "chars": chars,
         "layout": layout,
         "rotate": rotate,
+        "backfeed": backfeed,
         # Kantenlaengen so, wie das Etikett hinterher gelesen wird - die
         # Vorschau zeichnet danach und muss die Drehung nicht nachrechnen.
         "line_mm": line_mm,
         "stack_mm": stack_mm,
-        "height_dots": budget + SAFETY_DOTS,
+        # Bedruckbare Hoehe: die Etikettenteilung plus dem, was der Rueckzug
+        # aus dem Totbereich zurueckholt.
+        "height_dots": pitch + backfeed,
         "blocks": blocks,
     }
 
@@ -328,20 +353,35 @@ def render_preview_svg(payload: dict, cfg: dict) -> str:
     # das Etikett damit so, wie es hinterher im Schrank klebt, ohne die
     # Drehung ein zweites Mal nachzurechnen.
     view_w = float(payload.get("line_mm") or cfg.get("label_width_mm", 50))
-    view_h = float(payload.get("stack_mm") or cfg.get("label_height_mm", 30))
+    backfeed = int(payload.get("backfeed", 0))
 
     dots_w = int(view_w * DOTS_PER_MM)
+    # Mit Rueckzug ist das bedruckbare Feld hoeher als ohne - genau das ist ja
+    # der Zweck. Die Vorschau waechst deshalb mit.
+    dots_h = int(payload.get("height_dots") or 0) or int(
+        float(payload.get("stack_mm") or cfg.get("label_height_mm", 30)) * DOTS_PER_MM
+    )
+    view_h = dots_h / DOTS_PER_MM
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {dots_w} '
-        f'{int(view_h * DOTS_PER_MM)}" width="{view_w * 4}" height="{view_h * 4}" '
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {dots_w} {dots_h}" '
+        f'width="{view_w * 4}" height="{view_h * 4}" '
         'role="img" aria-label="Etikettenvorschau">',
         '<rect width="100%" height="100%" rx="12" fill="#fff" stroke="#c8d0d6"/>',
     ]
+    if backfeed:
+        # Die Linie zeigt, wo der Druck ohne Rueckzug angefangen haette -
+        # alles darueber ist zurueckgeholter Totbereich.
+        parts.append(
+            f'<line x1="0" y1="{backfeed}" x2="{dots_w}" y2="{backfeed}" '
+            'stroke="#43a047" stroke-width="2" stroke-dasharray="8 5"/>'
+        )
 
     y = 0
     for block in payload.get("blocks", []):
         kind = block.get("t")
         dots = block_dots(block)
+        if kind == "back":
+            continue
         if kind == "text":
             large = block.get("large")
             size = 34 if large else 19

@@ -208,6 +208,43 @@ def test_name_wird_nicht_abgeschnitten(layout):
     assert "Rueckenfilet - Schwein" in gedruckt
 
 
+@pytest.mark.parametrize("rueckzug", [0, 24, 40, 999])
+def test_rueckzug_verschiebt_die_folgeetiketten_nicht(rueckzug):
+    """Ein Etikett muss genau eine Etikettenteilung Papier verbrauchen.
+
+    Der Rueckzug holt den Totbereich zurueck, darf den Vorschub aber nicht aus
+    dem Tritt bringen - sonst wandert jedes weitere Etikett ein Stueck weiter
+    nach unten, und nach ein paar Stueck druckt er ueber die Perforation.
+    """
+    rendered = labels_service.render_label(
+        {"label": "LEB000042", "name": "Brot", "expiry_date": "2026-12-24",
+         "added_date": "2026-01-01", "location": "Keller"},
+        {"label_layout": "standard", "label_orientation": "quer",
+         "label_width_mm": 50, "label_height_mm": 30,
+         "backfeed_dots": rueckzug, "qr": True, "code128": True},
+    )
+    # 30 mm Teilung bei 8 Punkten je Millimeter, unabhaengig vom Rueckzug.
+    assert labels_service.total_dots(rendered["blocks"]) == 30 * labels_service.DOTS_PER_MM
+
+    erwartet = min(rueckzug, labels_service.MAX_BACKFEED_DOTS)
+    assert rendered["backfeed"] == erwartet
+    zurueck = [b for b in rendered["blocks"] if b["t"] == "back"]
+    assert (zurueck[0]["dots"] if zurueck else 0) == erwartet
+    # Der Rueckzug steht ganz vorn - danach zu fahren wuerde Gedrucktes
+    # ueberschreiben.
+    assert not zurueck or rendered["blocks"][0]["t"] == "back"
+
+
+def test_rueckzug_schafft_platz_fuers_layout():
+    """Der zurueckgeholte Streifen ist zusaetzlich bedruckbare Flaeche."""
+    basis = {"label": "LEB000042", "name": "Brot", "expiry_date": "2026-12-24"}
+    cfg = {"label_layout": "vollstaendig", "label_width_mm": 50,
+           "label_height_mm": 30, "qr": True, "code128": True}
+    ohne = labels_service.render_label(basis, cfg)
+    mit = labels_service.render_label(basis, {**cfg, "backfeed_dots": 40})
+    assert mit["height_dots"] == ohne["height_dots"] + 40
+
+
 def test_quer_dreht_den_text_und_nimmt_den_qr_code():
     """Querformat heisst gedrehter Text - und damit zwingend QR.
 

@@ -39,6 +39,10 @@ DEFAULTS: dict[str, Any] = {
         "label_height_mm": 30,
         "label_layout": "standard",
         "label_orientation": "quer",
+        # Rueckzug vor dem Druck, in Punkten. Holt den Totbereich zwischen
+        # Druckkopf und Abrisskante zurueck. 0 = aus, weil nicht jeder
+        # ESC/POS-Drucker rueckwaerts fahren kann.
+        "backfeed_dots": 0,
     },
 }
 

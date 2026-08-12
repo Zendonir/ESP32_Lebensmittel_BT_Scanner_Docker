@@ -590,6 +590,7 @@ async function loadSystem() {
   $('#set-lw').value = settings.printer?.label_width_mm ?? 50;
   $('#set-lh').value = settings.printer?.label_height_mm ?? 30;
   $('#set-orient').value = settings.printer?.label_orientation ?? 'quer';
+  $('#set-backfeed').value = settings.printer?.backfeed_dots ?? 0;
   await loadLayouts();
 
   $('#sys-events').innerHTML = events.map((e) => `<tr>
@@ -652,13 +653,14 @@ async function saveLabelGeometry() {
     label_width_mm: parseFloat($('#set-lw').value) || 50,
     label_height_mm: parseFloat($('#set-lh').value) || 30,
     label_orientation: $('#set-orient').value,
+    backfeed_dots: parseInt($('#set-backfeed').value, 10) || 0,
   };
   await saveSetting('printer', body);
   state.settings.printer = { ...state.settings.printer, ...body };
   await loadLayouts();
 }
 
-['#set-lw', '#set-lh', '#set-orient'].forEach((sel) => {
+['#set-lw', '#set-lh', '#set-orient', '#set-backfeed'].forEach((sel) => {
   const el = $(sel);
   if (el) el.addEventListener('change', () => saveLabelGeometry().catch((e) => toast(e.message, 'error')));
 });

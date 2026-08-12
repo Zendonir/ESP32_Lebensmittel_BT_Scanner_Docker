@@ -110,6 +110,8 @@ void Printer::writeBlocks(JsonArray blocks) {
             code128(String(block["v"] | ""), block["height"] | 40);
         } else if (type == "feed") {
             feedDots(block["dots"] | 0);
+        } else if (type == "back") {
+            backfeedDots(block["dots"] | 0);
         }
     }
 }
@@ -213,6 +215,20 @@ void Printer::qr(const String &data, uint8_t scale) {
         uart.write((const uint8_t *)"\r\n", 2);
     }
     uart.write(0x1B); uart.write('2');                     // Zeilenabstand zurueck
+}
+
+void Printer::backfeedDots(uint8_t dots) {
+    // ESC j n - drucken und n Punkte zurueckfahren. Holt den Totbereich
+    // zwischen Druckkopf und Abrisskante zurueck, der sonst ungenutzt am
+    // Etikettenanfang stehen bleibt.
+    //
+    // Nicht jeder ESC/POS-Drucker kann rueckwaerts; wer es nicht kann,
+    // ignoriert den Befehl in aller Regel stillschweigend und druckt wie
+    // bisher. Deshalb ist er in den Einstellungen aus, bis jemand ihn
+    // einschaltet - und deshalb nur ein Befehl, kein Stueckeln ueber 255:
+    // weiter zurueck als 255 Punkte gehoert das Etikett nicht gezogen.
+    if (dots == 0) return;
+    uart.write(0x1B); uart.write('j'); uart.write(dots);
 }
 
 void Printer::feedDots(uint16_t dots) {
