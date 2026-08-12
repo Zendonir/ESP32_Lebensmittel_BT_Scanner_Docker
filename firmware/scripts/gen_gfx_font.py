@@ -49,32 +49,48 @@ def gen_font(ttf_path: str, size_px: int, font_name: str, output_path: str) -> N
             continue
 
         advance = int(font.getlength(char) + 0.5)
-        box = font.getbbox(char)
-        if box is None or box[2] <= box[0] or box[3] <= box[1]:
-            # Leerzeichen und Aehnliches: keine Pixel, aber Vorschub.
+
+        # Grosszuegig zeichnen und danach messen, was tatsaechlich an Pixeln
+        # entstanden ist. Sich auf getbbox() zu verlassen waere ungenau: das
+        # liefert die Masse der geglaetteten Darstellung, gezeichnet wird hier
+        # aber schwarzweiss - das kann um ein Pixel abweichen und verschiebt
+        # dann die ganze Glyphe.
+        pad = size_px + 4
+        canvas = Image.new("L", (advance + 2 * pad, ascent + descent + 2 * pad), 0)
+        drawer = ImageDraw.Draw(canvas)
+        # Ohne Kantenglaettung: ein geglaettetes Bild auf 1 Bit abzuschwellen
+        # ergibt ausgefranste Raender. FreeType rastert im Schwarzweissmodus
+        # mit Hinting und trifft die Pixelkanten sauber - genau das ist der
+        # Unterschied zwischen scharf und matschig.
+        drawer.fontmode = "1"
+        drawer.text((pad, pad), char, font=font, fill=255)
+
+        ink = canvas.getbbox()
+        if ink is None:                     # Leerzeichen: kein Pixel, nur Vorschub
             glyphs.append((offset, 0, 0, advance, 0, 0))
             continue
 
-        x0, y0, x1, y1 = box
-        width, height = x1 - x0, y1 - y0
-
-        image = Image.new("L", (width, height), 0)
-        ImageDraw.Draw(image).text((-x0, -y0), char, font=font, fill=255)
+        image = canvas.crop(ink)
+        width, height = image.size
+        x_offset = ink[0] - pad
+        # Abstand von der Grundlinie zur Oberkante, negativ nach oben. Die
+        # Grundlinie liegt bei pad + ascent, weil text() an der Oberkante
+        # ansetzt.
+        y_offset = ink[1] - (pad + ascent)
 
         # 1 Bit je Pixel, zeilenweise, links beginnend - so erwartet es GFX.
+        pixels = list(image.getdata())
         bits, current = [], 0
-        for index, value in enumerate(image.getdata()):
+        for index, value in enumerate(pixels):
             current = (current << 1) | (1 if value >= 128 else 0)
             if index % 8 == 7:
                 bits.append(current)
                 current = 0
-        if len(image.getdata()) % 8:
-            bits.append(current << (8 - len(image.getdata()) % 8))
+        if len(pixels) % 8:
+            bits.append(current << (8 - len(pixels) % 8))
         bitmap_bytes.extend(bits)
 
-        # yOffset ist der Abstand von der Grundlinie zur Oberkante, negativ
-        # nach oben - genau so, wie GFX beim Zeichnen rechnet.
-        glyphs.append((offset, width, height, advance, x0, y0 - ascent))
+        glyphs.append((offset, width, height, advance, x_offset, y_offset))
 
     lines = [
         f"// Erzeugt von scripts/gen_gfx_font.py - nicht von Hand aendern.",

@@ -233,7 +233,7 @@ async def _screen_locations(session, sess, sid, status) -> dict:
     return proto.screen(
         screen_id=sid,
         kind="list",
-        title="Lagerort waehlen",
+        title="Lagerort wählen",
         items=items,
         status=status,
     )
@@ -294,7 +294,7 @@ async def _screen_expiring(session, sess, sid, status) -> dict:
         kind="list",
         title="Ablaufend",
         subtitle="Antippen = auslagern",
-        items=items or [{"id": "none", "label": "Nichts laeuft ab", "color": "#2eb048"}],
+        items=items or [{"id": "none", "label": "Nichts läuft ab", "color": "#2eb048"}],
         status=status,
     )
 
@@ -305,7 +305,7 @@ def _screen_unknown(sess, sid, status) -> dict:
         kind="tiles",
         title="Unbekannter Barcode",
         subtitle=sess.draft.barcode,
-        lines=["Kein Produkt gefunden.", "Ueber eine Vorlage anlegen oder verwerfen."],
+        lines=["Kein Produkt gefunden.", "Über eine Vorlage anlegen oder verwerfen."],
         items=[
             {"id": "templates", "label": "Vorlage", "color": "#4c9eff"},
             {"id": "name", "label": "Namen eingeben", "color": "#4c9eff"},
@@ -606,11 +606,11 @@ async def _screen_system(session, sess, sid, status) -> dict:
             "title_color": "#cc9218",
             "status": "Verbunden" if ble_connected else "Getrennt",
             "status_color": "#2eb048" if ble_connected else "#cc9218",
-            "lines": [scanner.get("name") or "kein Geraet gekoppelt"],
+            "lines": [scanner.get("name") or "kein Gerät gekoppelt"],
             "button": {"id": "__local_ble_toggle", "label": "Verbinden / Trennen", "color": "#4c9eff"},
         },
         {
-            "title": "GERAET",
+            "title": "GERÄT",
             "title_color": "#4c9eff",
             "status": (device.name if device else "") or "Terminal",
             "status_color": "#e6edf3",
@@ -790,7 +790,7 @@ async def _tap_roll_new(session, sess, item) -> None:
     except (TypeError, ValueError):
         size = 0
     if size <= 0:
-        await hub.send_to(sess.device_id, proto.toast("Ungueltige Groesse", "warn"))
+        await hub.send_to(sess.device_id, proto.toast("Ungültige Größe", "warn"))
         return
     await labels.new_roll(session, size)
     sess.pop()
@@ -1047,7 +1047,7 @@ async def _scan_label(session, sess, code) -> None:
         await session.commit()
         await hub.send_to(sess.device_id, proto.beep("ok"))
         await hub.send_to(
-            sess.device_id, proto.toast(f"{restored.name} zurueckgebucht", "success")
+            sess.device_id, proto.toast(f"{restored.name} zurückgebucht", "success")
         )
         await hub.notify_ui("inventory")
         sess.reset()

@@ -22,7 +22,7 @@
 // Boardvarianten.
 #include "fonts/UiSans12.h"
 #include "fonts/UiSans16.h"
-#include "fonts/UiSansBold21.h"
+#include "fonts/UiSans21.h"
 #include "fonts/UiSansBold38.h"
 
 // Kleine Kompatibilitaetsschicht fuer die beiden elektrisch unterschiedlichen

@@ -473,7 +473,7 @@ void Screen::drawNumber() {
 
     // Bestaetigen steht jetzt im Bildschirm statt in der Fussleiste - und
     // darf entsprechend gross ausfallen.
-    button(14, H - 62, W - 28, 52, "Uebernehmen", C_OK, "ok");
+    button(14, H - 62, W - 28, 52, "Übernehmen", C_OK, "ok");
 }
 
 // Bildschirmtastatur: drei Reihen Buchstaben (oder im Ziffernmodus Ziffern und

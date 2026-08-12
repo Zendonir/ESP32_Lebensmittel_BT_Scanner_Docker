@@ -35,7 +35,7 @@ bool DisplayCanvas::begin() {
 // Zeilenhoehen moeglichst genau treffen, damit kein Layout verrutscht.
 const GFXfont *DisplayCanvas::fontFor(uint8_t font) {
     if (font >= 6) return &UiSansBold38;   // grosse Datums-/Zahlenanzeige
-    if (font >= 4) return &UiSansBold21;   // Titel, Kachelbeschriftung
+    if (font >= 4) return &UiSans21;   // Titel, Kachelbeschriftung
     if (font >= 2) return &UiSans16;       // Fliesstext
     return &UiSans12;                      // Kleingedrucktes
 }

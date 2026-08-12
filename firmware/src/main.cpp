@@ -135,7 +135,7 @@ static void onServerMessage(JsonDocument &doc) {
         net.sendEvent("pong");
 
     } else if (type == "reboot") {
-        screen.showBoot("Neustart", "vom Server ausgeloest");
+        screen.showBoot("Neustart", "vom Server ausgelöst");
         delay(400);
         ESP.restart();
 

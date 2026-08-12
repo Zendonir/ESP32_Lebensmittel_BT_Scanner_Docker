@@ -19,17 +19,17 @@ CATEGORIES = [
     ("Getraenke", "#1e88e5"),
     ("Milchprodukte", "#00acc1"),
     ("Fleisch & Fisch", "#e53935"),
-    ("Obst & Gemuese", "#43a047"),
+    ("Obst & Gemüse", "#43a047"),
     ("Backwaren", "#8d6e63"),
     ("Tiefkuehl", "#5e35b1"),
     ("Konserven", "#fb8c00"),
     ("Trockenware", "#fdd835"),
-    ("Suesses & Snacks", "#d81b60"),
+    ("Süßes & Snacks", "#d81b60"),
     ("Sonstiges", "#546e7a"),
 ]
 
 LOCATIONS = [
-    ("Kuehlschrank", True),
+    ("Kühlschrank", True),
     ("Gefrierschrank", False),
     ("Vorratskammer", False),
     ("Keller", False),
