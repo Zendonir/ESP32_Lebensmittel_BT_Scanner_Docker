@@ -95,7 +95,9 @@ def test_lagerort_verfaellt_nach_ruhe_und_wird_neu_erfragt():
     falschen Regal sucht.
     """
     async def scenario():
-        from datetime import datetime, timedelta
+        from datetime import timedelta
+
+        from app.models import utcnow
 
         sess = workflow.session_for("kbtest4")
         sess.location = "Kühlschrank"
@@ -108,7 +110,7 @@ def test_lagerort_verfaellt_nach_ruhe_und_wird_neu_erfragt():
             assert sess.location == "Kühlschrank"
 
             # Eine Minute ueber der Ruhezeit.
-            sess.last_action = datetime.utcnow() - timedelta(
+            sess.last_action = utcnow() - timedelta(
                 seconds=workflow.LOCATION_IDLE_SECONDS + 60
             )
             assert await workflow.expire_location(session, sess) is True

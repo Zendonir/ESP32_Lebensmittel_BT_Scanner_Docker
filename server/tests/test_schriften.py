@@ -12,25 +12,38 @@ jedes zweite Wort.
 from __future__ import annotations
 
 import pathlib
-import sys
+import re
 
 import pytest
 
 FONTS_DIR = pathlib.Path(__file__).resolve().parents[2] / "firmware" / "include" / "fonts"
-SCRIPTS_DIR = FONTS_DIR.parents[1] / "scripts"
 
 # Buchstaben, deren Unterkante auf der Grundlinie sitzt - ohne Unterlaengen
 # (g, j, p, q, y) und ohne Zeichen, die bewusst darunter reichen.
 AUF_DER_GRUNDLINIE = "abcdehiklmnorstuvwxzäöüßABCDEHIKLMNORSTUVWXZÄÖÜ0123456789"
 
 
-def _lade_schrift(name: str):
-    sys.path.insert(0, str(SCRIPTS_DIR))
-    try:
-        from preview_screens import GfxFont
-    finally:
-        sys.path.pop(0)
-    return GfxFont(FONTS_DIR / f"{name}.h")
+_GLYPH = re.compile(
+    r"\{\s*(-?\d+),\s*(-?\d+),\s*(-?\d+),\s*(-?\d+),\s*(-?\d+),\s*(-?\d+)\s*\}"
+)
+
+
+def _lade_schrift(name: str) -> dict[str, tuple[int, int]]:
+    """Hoehe und senkrechten Versatz je Zeichen aus dem Header lesen.
+
+    Bewusst ein eigener kleiner Parser statt scripts/preview_screens: das
+    Vorschauwerkzeug zieht Pillow herein, und das steht in den
+    Server-Abhaengigkeiten zu Recht nicht drin. Der Test braucht nur zwei
+    Zahlen je Zeichen.
+    """
+    text = (FONTS_DIR / f"{name}.h").read_text()
+    tabelle = text.split("Glyphs[]")[1].split("};")[0]
+    zeilen = [tuple(int(v) for v in treffer) for treffer in _GLYPH.findall(tabelle)]
+
+    erstes = int(text.split("Glyphs,")[1].split(",")[0].strip(), 16)
+    return {
+        chr(erstes + i): (hoehe, dy) for i, (_, _, hoehe, _, _, dy) in enumerate(zeilen)
+    }
 
 
 @pytest.mark.parametrize(
@@ -41,7 +54,7 @@ def test_grundlinie_ist_einheitlich(name):
 
     unterkanten: dict[int, list[str]] = {}
     for zeichen in AUF_DER_GRUNDLINIE:
-        _, _, hoehe, _, _, dy = schrift.glyph(zeichen)
+        hoehe, dy = schrift[zeichen]
         if hoehe == 0:
             continue
         unterkanten.setdefault(dy + hoehe, []).append(zeichen)
@@ -59,8 +72,8 @@ def test_umlaute_stehen_wie_ihre_grundbuchstaben(name):
     schrift = _lade_schrift(name)
     for umlaut, grund in (("ä", "a"), ("ö", "o"), ("ü", "u"),
                           ("Ä", "A"), ("Ö", "O"), ("Ü", "U")):
-        _, _, h_um, _, _, dy_um = schrift.glyph(umlaut)
-        _, _, h_gr, _, _, dy_gr = schrift.glyph(grund)
+        h_um, dy_um = schrift[umlaut]
+        h_gr, dy_gr = schrift[grund]
         assert dy_um + h_um == dy_gr + h_gr, (
             f"{name}: {umlaut!r} sitzt {abs((dy_um + h_um) - (dy_gr + h_gr))} Pixel "
             f"neben {grund!r}"

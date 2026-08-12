@@ -17,7 +17,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..models import Category, Device, InventoryItem, Location, PrintJob, Template
+from ..models import (
+    Category,
+    Device,
+    InventoryItem,
+    Location,
+    PrintJob,
+    Template,
+    utcnow,
+)
 from ..services import inventory as inv
 from ..services import categories as cat
 from ..services import firmware, labels, openfoodfacts, settings_store
@@ -97,9 +105,9 @@ class DeviceSession:
     screen_id: int = 0
     last_result: list[str] = field(default_factory=list)
     # Letzte Bedienung - daran haengt das Verfallen des Lagerorts.
-    last_action: datetime = field(default_factory=datetime.utcnow)
+    last_action: datetime = field(default_factory=utcnow)
     scanner: dict = field(default_factory=dict)
-    online_since: datetime = field(default_factory=datetime.utcnow)
+    online_since: datetime = field(default_factory=utcnow)
     inv_sort: str = "mhd"
     inv_search: str = ""
     roll_size_draft: str = ""
@@ -122,10 +130,12 @@ class DeviceSession:
         self.draft = Draft()
 
     def touch(self) -> None:
-        self.last_action = datetime.utcnow()
+        self.last_action = utcnow()
 
     def idle_seconds(self) -> float:
-        return (datetime.utcnow() - self.last_action).total_seconds()
+        # Ueber _seconds_since, damit ein von aussen gesetzter Zeitstempel
+        # ohne Zeitzone hier nicht mit einem TypeError endet.
+        return _seconds_since(self.last_action)
 
 
 # Nach dieser Ruhezeit gilt der Lagerort als nicht mehr gueltig. Wer nach
@@ -145,7 +155,7 @@ def _seconds_since(stamp: datetime | None) -> float:
     """
     if stamp is None:
         return float("inf")
-    now = datetime.now(timezone.utc)
+    now = utcnow()
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=timezone.utc)
     return (now - stamp).total_seconds()
