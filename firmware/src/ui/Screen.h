@@ -65,6 +65,7 @@ private:
     void redraw();
     void drawStatusBar();
     void drawTitle();
+    int16_t bodyTop() const;
     void drawTiles();
     void drawList();
     void drawDate();
@@ -89,7 +90,8 @@ private:
 
     void addHit(int16_t x, int16_t y, int16_t w, int16_t h, const String &id, bool isInput = false);
     void tile(int16_t x, int16_t y, int16_t w, int16_t h, const String &label,
-              const String &sub, uint16_t color, const String &id);
+              const String &sub, uint16_t color, const String &id, uint8_t font = 4);
+    uint8_t gridFont(JsonArray items, int16_t maxTextW);
     void button(int16_t x, int16_t y, int16_t w, int16_t h, const String &label,
                 uint16_t bg, const String &id);
 
@@ -123,6 +125,7 @@ private:
     String   _toastLevel;
     uint32_t _toastUntil = 0;
     String   _banner;
+    int16_t  _bodyY = 66;   // Oberkante des Inhalts, siehe bodyTop()
     uint8_t  _brightness = 80;
 };
 

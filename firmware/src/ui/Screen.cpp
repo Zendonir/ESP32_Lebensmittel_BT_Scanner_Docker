@@ -13,8 +13,12 @@ static constexpr int16_t TITLE_H = 40;
 // Zurueck-Taster), Bestaetigen steht dort, wo es hingehoert - im Bildschirm
 // selbst. Die gewonnenen 46 Pixel gehen an die Inhalte, dadurch werden vor
 // allem die Knoepfe in den Karten fingerfreundlich gross.
-static constexpr int16_t BODY_Y = STATUS_H + TITLE_H;
-static constexpr int16_t BODY_H = H - BODY_Y;
+// Der Kopfbereich ist nicht fest hoch: mit Untertitel braucht er mehr. Vorher
+// stand hier eine Konstante von 40 Pixeln - Titel (26) und Untertitel (18)
+// zusammen sind aber 46, und die Differenz lief unter den Inhalt. Auf dem
+// Startbildschirm schrieb der Untertitel quer durch die Kennzahlenkarten.
+#define BODY_Y (_bodyY)
+#define BODY_H (H - _bodyY)
 
 // Exakt die Farbwerte aus dem Vorgaengerprojekt (display.cpp, RGB()-Makro auf
 // RGB565 abgebildet) - nicht neu erfunden, 1:1 uebernommen.
@@ -126,6 +130,7 @@ void Screen::redraw() {
     _hits.clear();
     _spr.fillSprite(C_BG);
 
+    _bodyY = bodyTop();
     drawStatusBar();
     drawTitle();
 
@@ -164,8 +169,25 @@ void Screen::drawStatusBar() {
     // eine Bestandsaenderung soll am Geraet nicht aus Versehen per Finger
     // ausloesbar sein.
 
+    // Links die Bestandszahlen. Die standen bisher nur auf dem Startbildschirm,
+    // waehrend die halbe Leiste leer blieb - dabei ist "wie viel laeuft ab"
+    // genau die Zahl, die man beim Einraeumen im Auge behalten will.
+    const int total = status["total"] | 0;
+    const int expiring = status["expiring"] | 0;
+    char counts[40];
+    snprintf(counts, sizeof(counts), "%d im Bestand", total);
+    _spr.setTextColor(C_MUTED, C_SURFACE);
+    _spr.drawString(counts, 10, 5);
+    if (expiring > 0) {
+        char warn[24];
+        snprintf(warn, sizeof(warn), "%d laufen ab", expiring);
+        _spr.setTextColor(C_WARN, C_SURFACE);
+        _spr.drawString(warn, 10 + _spr.textWidth(counts) + 12, 5);
+    }
+
     // Lagerort als antippbare Pille rechts - oeffnet die Ortsauswahl, wie im
-    // Vorgaengerprojekt das Badge oben rechts.
+    // Vorgaengerprojekt das Badge oben rechts. Der Name wird eingepasst:
+    // "Vorratskammer Keller" schrieb sonst ueber den Pillenrand hinaus.
     const int16_t pillH = STATUS_H - 6;
     const int16_t pillW = 150;
     const int16_t pillX = W - 84 - pillW;
@@ -173,7 +195,9 @@ void Screen::drawStatusBar() {
     _spr.fillRoundRect(pillX, pillY, pillW, pillH, pillH / 2, C_PRIMARY);
     _spr.setTextDatum(MC_DATUM);
     _spr.setTextColor(TFT_WHITE, C_PRIMARY);
-    _spr.drawString(location[0] ? location : "kein Ort", pillX + pillW / 2, pillY + pillH / 2 + 1);
+    _spr.drawString(fitText(location[0] ? location : "kein Ort", pillW - 16, 2),
+                    pillX + pillW / 2, pillY + pillH / 2 + 1);
+    _spr.setTextFont(2);
     _spr.setTextDatum(TL_DATUM);
     addHit(pillX, pillY, pillW, pillH, "locations");
 
@@ -198,13 +222,20 @@ void Screen::drawStatusBar() {
 void Screen::drawTitle() {
     const int16_t y = STATUS_H + (_banner.isEmpty() ? 0 : 18);
     _spr.setTextColor(C_TEXT, C_BG);
-    _spr.drawString(fitText(String(_screen["title"] | ""), W - 20, 4), 10, y + 2);
+    _spr.drawString(fitText(String(_screen["title"] | ""), W - 20, 4), 10, y + 3);
 
     const char *subtitle = _screen["subtitle"] | "";
     if (subtitle[0]) {
         _spr.setTextColor(C_MUTED, C_BG);
-        _spr.drawString(fitText(subtitle, W - 20, 2), 10, y + 26);
+        _spr.drawString(fitText(subtitle, W - 20, 2), 10, y + 29);
     }
+}
+
+// Oberkante des Inhalts. Haengt am Banner und daran, ob es einen Untertitel
+// gibt - beides bekommt eigenen Platz, statt in den Inhalt zu laufen.
+int16_t Screen::bodyTop() const {
+    const char *subtitle = _screen["subtitle"] | "";
+    return STATUS_H + (_banner.isEmpty() ? 0 : 18) + (subtitle[0] ? 50 : 34);
 }
 
 // Schriftfarbe passend zur Flaeche: auf den bunten Knoepfen dunkel, auf den
@@ -253,15 +284,33 @@ String Screen::fitText(const String &text, int16_t maxWidth, uint8_t font) {
     return out + "~";
 }
 
+// Groesste Schriftstufe, in der *alle* Beschriftungen des Rasters passen.
+//
+// fitText entscheidet je Kachel. Bei "Backwaren" neben "Fleisch & Fisch" steht
+// die eine dann in Stufe 4 und die andere in Stufe 2 - dasselbe Raster in zwei
+// Schriftgroessen sieht nach Versehen aus. Deshalb einmal fuer alle bestimmen.
+uint8_t Screen::gridFont(JsonArray items, int16_t maxTextW) {
+    static const uint8_t STEPS[] = {4, 2, 1};
+    for (uint8_t step : STEPS) {
+        _spr.setTextFont(step);
+        bool passt = true;
+        for (JsonObject item : items) {
+            if (_spr.textWidth(String(item["label"] | "")) > maxTextW) { passt = false; break; }
+        }
+        if (passt) return step;
+    }
+    return 1;
+}
+
 void Screen::tile(int16_t x, int16_t y, int16_t w, int16_t h, const String &label,
-                  const String &sub, uint16_t color, const String &id) {
+                  const String &sub, uint16_t color, const String &id, uint8_t font) {
     _spr.fillRoundRect(x, y, w, h, 8, color);
     _spr.drawRoundRect(x, y, w, h, 8, C_BORDER);
     _spr.setTextDatum(MC_DATUM);
     _spr.setTextColor(textOn(color), color);
 
     const int16_t maxTextW = w - 12;
-    _spr.drawString(fitText(label, maxTextW, 4), x + w / 2,
+    _spr.drawString(fitText(label, maxTextW, font), x + w / 2,
                     y + h / 2 - (sub.isEmpty() ? 0 : 10));
     if (!sub.isEmpty()) {
         _spr.drawString(fitText(sub, maxTextW, 2), x + w / 2, y + h / 2 + 14);
@@ -293,12 +342,13 @@ void Screen::drawTiles() {
     const int16_t w = (W - gap * (cols + 1)) / cols;
     const int16_t h = min<int16_t>((BODY_H - gap * (rows + 1)) / rows, 92);
 
+    const uint8_t font = gridFont(items, w - 12);
     int index = 0;
     for (JsonObject item : items) {
         const int row = index / cols, col = index % cols;
         tile(gap + col * (w + gap), BODY_Y + gap + row * (h + gap), w, h,
              String(item["label"] | ""), String(item["sub"] | ""),
-             parseColor(item["color"] | "", C_PRIMARY), String(item["id"] | ""));
+             parseColor(item["color"] | "", C_PRIMARY), String(item["id"] | ""), font);
         index++;
     }
 }
@@ -377,13 +427,17 @@ void Screen::drawList() {
         // Produktnamen sind haeufig laenger als die Zeile - abschneiden statt
         // ueber den Rand und die Bildlaufleiste hinauszuschreiben.
         const int16_t textW = W - 16 - (total > _pageSize ? 34 : 0) - 22;
-        _spr.setTextColor(C_TEXT, C_SURFACE);
-        _spr.drawString(fitText(String(item["label"] | ""), textW, 4), 22, y + 5);
-
+        // Zwei Zeilen in 38 Pixel Zeilenhoehe: der Name in Stufe 4 ist 21
+        // Pixel hoch, die Unterzeile in Stufe 2 noch einmal 16 - zusammen mehr
+        // als die Zeile hergibt, und die Unterzeile lief in den Namen.
+        // Die Unterzeile steht deshalb in der kleinen Stufe.
         const char *sub = item["sub"] | "";
+        _spr.setTextColor(C_TEXT, C_SURFACE);
+        _spr.drawString(fitText(String(item["label"] | ""), textW, 4),
+                        22, y + (sub[0] ? 3 : 9));
         if (sub[0]) {
             _spr.setTextColor(C_MUTED, C_SURFACE);
-            _spr.drawString(fitText(sub, textW, 2), 22, y + 24);
+            _spr.drawString(fitText(sub, textW, 1), 22, y + 26);
         }
         addHit(8, y, W - 16, rowH - 4, String(item["id"] | ""));
     }
@@ -634,12 +688,13 @@ void Screen::drawHome() {
     const int16_t gap = 4;
     const int16_t tw = (W - gap * (cols + 1)) / cols;
     const int16_t th = max<int16_t>(40, (BODY_Y + BODY_H - y - gap * (rows + 1)) / rows);
+    const uint8_t font = gridFont(items, tw - 12);
     int index = 0;
     for (JsonObject item : items) {
         const int row = index / cols, col = index % cols;
         tile(gap + col * (tw + gap), y + gap + row * (th + gap), tw, th,
              String(item["label"] | ""), String(item["sub"] | ""),
-             parseColor(item["color"] | "", C_PRIMARY), String(item["id"] | ""));
+             parseColor(item["color"] | "", C_PRIMARY), String(item["id"] | ""), font);
         index++;
     }
 }
@@ -668,11 +723,12 @@ void Screen::drawCards() {
 
         _spr.setTextFont(2);
         _spr.setTextColor(titleColor, C_BG);
-        _spr.drawString(String(card["title"] | ""), x + 10, y + 6);
+        _spr.drawString(fitText(String(card["title"] | ""), w - 20, 2), x + 10, y + 6);
 
         // Die grosse Statuszeile ist optional - Karten ohne Schlagzeile (z.B.
-        // "System") gewinnen den Platz fuer eine Zeile mehr.
-        int16_t ly = y + 20;
+        // "System") gewinnen den Platz fuer eine Zeile mehr. Der Titel selbst
+        // ist 16 Pixel hoch; bei y+20 schrieb die erste Zeile hinein.
+        int16_t ly = y + 26;
         const char *statusText = card["status"] | "";
         if (statusText[0]) {
             _spr.setTextFont(4);
@@ -689,7 +745,11 @@ void Screen::drawCards() {
         JsonArray lines = card["lines"].as<JsonArray>();
         for (JsonVariant line : lines) {
             if (ly + 13 > bottomLimit) break;
-            _spr.drawString(String(line.as<const char *>()), x + 10, ly);
+            // Einpassen statt einfach schreiben: eine Zeile wie "noch keine
+            // Angaben vom Geraet" ist breiter als die Karte und lief bisher
+            // ueber den Rand in die Nachbarkarte.
+            _spr.drawString(fitText(String(line.as<const char *>()), w - 20, 2), x + 10, ly);
+            _spr.setTextFont(2);
             ly += 14;
         }
 

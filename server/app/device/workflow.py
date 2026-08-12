@@ -241,13 +241,19 @@ async def _screen_home(session, sess, sid, status) -> dict:
         {"label": "Produkte", "value": counts["total"], "color": "#4c9eff"},
         {"label": "Ablaufend", "value": counts["expiring"], "color": "#cc9218"},
         {"label": "Kritisch", "value": counts["expired"], "color": "#f04640"},
-        {"label": "Label-Rest", "value": max(0, roll["remaining"]), "color": "#2eb048"},
+        # Ohne eingerichtete Rolle meldet roll_state -1. Als 0 angezeigt sieht
+        # das aus wie "Etiketten alle", dabei ist nur nichts hinterlegt.
+        {
+            "label": "Label-Rest" if roll["remaining"] >= 0 else "Rolle",
+            "value": roll["remaining"] if roll["remaining"] >= 0 else "-",
+            "color": "#2eb048" if roll["remaining"] != 0 else "#f04640",
+        },
     ]
     subtitle = "Produkt scannen = einlagern  ·  Etikett scannen = auslagern"
     return proto.screen(
         screen_id=sid,
         kind="home",
-        title="HOME",
+        title="Übersicht",
         subtitle=subtitle,
         items=items,
         meta={
@@ -326,7 +332,10 @@ async def _screen_expiring(session, sess, sid, status) -> dict:
         screen_id=sid,
         kind="list",
         title="Ablaufend",
-        subtitle="Antippen = auslagern",
+        # Nicht "Antippen = auslagern": das stimmt seit der Umstellung nicht
+        # mehr, ausgelagert wird ausschliesslich per Scanner. Eine Anleitung,
+        # die ins Leere fuehrt, ist schlimmer als gar keine.
+        subtitle="Etikett scannen zum Auslagern",
         items=items or [{"id": "none", "label": "Nichts läuft ab", "color": "#2eb048"}],
         status=status,
     )
@@ -664,15 +673,28 @@ async def _screen_system(session, sess, sid, status) -> dict:
             "title_color": "#4c9eff",
             "status": (device.name if device else "") or "Terminal",
             "status_color": "#e6edf3",
+            # Nur nennen, was auch bekannt ist. "FW: -  ·  ?  ·  ? MB Flash"
+            # fuellt die Zeile mit Fragezeichen und sagt nichts.
             "lines": [
-                f"FW: {(device.firmware if device else '') or '-'}  ·  "
-                f"{tel.get('res', '?')}  ·  {tel.get('flash_mb', '?')} MB Flash",
+                "  ·  ".join(
+                    teil
+                    for teil in (
+                        f"FW {device.firmware}" if device and device.firmware else "",
+                        str(tel.get("res") or ""),
+                        f"{tel['flash_mb']} MB Flash" if tel.get("flash_mb") else "",
+                    )
+                    if teil
+                )
+                or "keine Angaben",
             ],
             "button": {"id": "firmware_update", "label": "Firmware Update", "color": "#2eb048"},
         },
         {
             "title": "SYSTEM",
-            "title_color": "#1c222a",
+            # Nicht #1c222a: das ist die Flaechenfarbe der Oberflaeche und auf
+            # dem dunklen Grund praktisch unsichtbar. Die Karte hatte dadurch
+            # als einzige keine erkennbare Ueberschrift.
+            "title_color": "#7a8490",
             "status": "",
             "status_color": "#e6edf3",
             "lines": [
@@ -686,7 +708,7 @@ async def _screen_system(session, sess, sid, status) -> dict:
     return proto.screen(
         screen_id=sid,
         kind="cards",
-        title="SYSTEM",
+        title="System",
         subtitle=sess.location or "",
         meta={"cards": cards},
         status=status,
