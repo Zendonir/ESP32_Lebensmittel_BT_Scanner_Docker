@@ -157,15 +157,17 @@ def _fit(blocks: list[dict], budget: int) -> list[dict]:
 # Den Code nennen die Beschreibungen bewusst nicht: welcher gedruckt wird,
 # haengt an der Ausrichtung (siehe _code_blocks) und stuende hier sonst falsch.
 LAYOUTS: dict[str, str] = {
+    "zeile": "Name und MHD in einer Zeile. Der kuerzeste Zuschnitt.",
+    "sparsam": "Name und MHD untereinander, sonst nichts.",
     "kompakt": "Name und MHD gross. Aus zwei Metern lesbar.",
     "standard": "Name gross, dazu MHD, Menge und Ort. Der Allrounder.",
-    "vollstaendig": "Alle Angaben in normaler Schrift, kleiner Code.",
-    "sparsam": "Nur Name und MHD, dafuer ein grosser Code.",
+    "vollstaendig": "Alle Angaben in normaler Schrift.",
 }
 
 # Anzeigename fuer die Oberflaeche - der Schluessel bleibt umlautfrei, damit
 # er unveraendert in der Datenbank stehen kann.
 TITLES: dict[str, str] = {
+    "zeile": "Einzeiler",
     "kompakt": "Kompakt",
     "standard": "Standard",
     "vollstaendig": "Vollständig",
@@ -175,13 +177,41 @@ DEFAULT_LAYOUT = "standard"
 
 
 def is_rotated(cfg: dict) -> bool:
-    """Muss der Text um 90 Grad gedreht werden?
+    """Soll der Text um 90 Grad gedreht werden?
 
-    Der Druckkopf schreibt seine Zeilen immer ueber die kurze Kante. Wer das
-    Etikett quer lesen will - Text der langen 50-mm-Kante entlang -, braucht
-    dafuer die Drehung. Hochkant ist der ungedrehte Fall.
+    Frueher hing das an einer Einstellung "Quer/Hoch". Das war irrefuehrend,
+    weil dieses eine Wort zwei voellig verschiedene Dinge zusammenwarf: ob der
+    Text gedreht wird, und welche Etikettenkante durch den Drucker laeuft. Die
+    beiden haben nichts miteinander zu tun - das eine ist Geschmack, das andere
+    haengt daran, wie die Rolle gewickelt ist. Jetzt sind es zwei Schalter.
     """
+    if "label_rotate" in cfg:
+        return bool(cfg["label_rotate"])
     return cfg.get("label_orientation", "quer") != "hoch"
+
+
+def feed_and_line_mm(cfg: dict) -> tuple[float, float]:
+    """(Vorschub, Zeilenlaenge) in Millimetern.
+
+    Die Vorschubkante ist die Kante, die in Papierrichtung laeuft - sie
+    begrenzt, wie viel Inhalt auf ein Etikett passt. Die andere Kante laeuft
+    ueber den Druckkopf und begrenzt die Zeilenlaenge. Welche das ist, gibt die
+    Rolle vor und nicht die Textrichtung; deshalb steht es als eigene
+    Einstellung da, statt aus der Ausrichtung geraten zu werden.
+    """
+    breite = float(cfg.get("label_width_mm", 50))
+    hoehe = float(cfg.get("label_height_mm", 30))
+
+    kante = cfg.get("label_feed_edge")
+    if kante == "breite":
+        return breite, hoehe
+    if kante == "hoehe":
+        return hoehe, breite
+
+    # Altbestand ohne die neue Einstellung: aus der alten Ausrichtung ableiten.
+    if is_rotated(cfg):
+        return hoehe, breite
+    return breite, hoehe
 
 
 def _title(item: dict) -> str:
@@ -213,7 +243,39 @@ def _quantity(item: dict) -> str:
     return f"{qty:g} {unit}".strip()
 
 
-def _code_blocks(item: dict, cfg: dict, prefer_qr: bool, height: int, scale: int) -> list[dict]:
+# Wie gross der Code ausfaellt. Der Unterschied ist auf einem 30-mm-Etikett
+# erheblich: ein QR ist quadratisch und kostet so viel Hoehe wie Breite, ein
+# Strichcode ist flach und kostet nur seine Hoehe.
+#
+#   Groesse   QR            Strichcode
+#   klein     50 Pt (6,2mm) 34 Pt (4,2mm)
+#   mittel    75 Pt (9,4mm) 40 Pt (5,0mm)
+#   gross    100 Pt (12,5mm) 50 Pt (6,2mm)
+CODE_SIZES: dict[str, tuple[int, int]] = {
+    # Name: (QR-Skalierung, Strichcodehoehe)
+    "klein": (2, 24),
+    "mittel": (3, 30),
+    "gross": (4, 40),
+}
+DEFAULT_CODE_SIZE = "mittel"
+
+
+def code_choice(cfg: dict) -> str:
+    """Welcher Code gedruckt wird: "qr" oder "code128".
+
+    "automatisch" heisst: gedreht ein QR, sonst ein Strichcode. Denn ESC V
+    dreht nur Zeichen - Strichcode und Bitmap laufen weiter in Papierrichtung
+    und stehen bei gedrehtem Text quer zur Schrift. Wem die Etikettenhoehe
+    wichtiger ist als das Aussehen, der waehlt den Strichcode fest: er kostet
+    ein Drittel der Hoehe eines QR-Codes.
+    """
+    wahl = cfg.get("label_code", "auto")
+    if wahl in ("qr", "code128"):
+        return wahl
+    return "qr" if is_rotated(cfg) else "code128"
+
+
+def _code_blocks(item: dict, cfg: dict) -> list[dict]:
     """Der Code zum Auslagern - QR oder Strichcode, nie beides.
 
     Beides nebeneinander geht auf einem ESC/POS-Drucker nicht (er kennt nur
@@ -224,22 +286,12 @@ def _code_blocks(item: dict, cfg: dict, prefer_qr: bool, height: int, scale: int
     if not label:
         return []
 
-    # ESC V dreht nur Zeichen. Strichcode (GS k) und Bitmap laufen weiter in
-    # Papierrichtung - bei gedrehtem Text steht der Strichcode also quer zur
-    # Schrift. Genau das ist auf dem ersten Querformat-Ausdruck passiert.
-    #
-    # Im gedrehten Fall ist der QR-Code deshalb keine Vorliebe, sondern
-    # Bedingung: er ist quadratisch und aus jeder Richtung lesbar. Der Schalter
-    # "QR" in den Einstellungen wird hier bewusst uebergangen - sonst waehlt
-    # man Querformat und bekommt stillschweigend ein unbrauchbares Etikett.
-    if is_rotated(cfg):
+    scale, height = CODE_SIZES.get(
+        cfg.get("label_code_size", DEFAULT_CODE_SIZE), CODE_SIZES[DEFAULT_CODE_SIZE]
+    )
+    if code_choice(cfg) == "qr":
         return [{"t": "qr", "v": label, "scale": scale}]
-
-    if prefer_qr and cfg.get("qr", True):
-        return [{"t": "qr", "v": label, "scale": scale}]
-    if cfg.get("code128", True):
-        return [{"t": "code128", "v": label, "height": height}]
-    return [{"t": "qr", "v": label, "scale": scale}]
+    return [{"t": "code128", "v": label, "height": height}]
 
 
 def _build(layout: str, item: dict, cfg: dict, chars: int) -> list[dict]:
@@ -249,20 +301,34 @@ def _build(layout: str, item: dict, cfg: dict, chars: int) -> list[dict]:
     location = item.get("location", "")
     brand = item.get("brand", "")
 
+    if layout == "zeile":
+        # Sparsamster Zuschnitt: Name und MHD teilen sich eine Zeile. Der Code
+        # steht direkt darunter, die Etikettennummer entfaellt - sie steckt im
+        # Code, und als Klartext kostet sie 3 mm.
+        #
+        # Passt der Name nicht daneben, bekommt er eine eigene Zeile. Drei
+        # Millimeter mehr sind das kleinere Uebel: ein abgeschnittener Name
+        # macht das Etikett im Schrank wertlos, und genau dafuer klebt es dort.
+        platz = chars - len(expiry or "kein MHD") - 2
+        if len(title) <= platz:
+            blocks: list[dict] = [{"t": "row", "k": title, "v": expiry or "kein MHD"}]
+        else:
+            blocks = _title_blocks(title, chars, large=False)
+            blocks.append({"t": "row", "k": "MHD", "v": expiry or "-", "underline": True})
+        return blocks + _code_blocks(item, cfg)
+
     if layout == "kompakt":
-        blocks: list[dict] = _title_blocks(title, chars, large=True)
+        blocks = _title_blocks(title, chars, large=True)
         if expiry:
             blocks.append({"t": "text", "v": expiry, "align": 1, "bold": True, "large": True})
-        blocks += _code_blocks(item, cfg, prefer_qr=False, height=40, scale=3)
-        blocks.append({"t": "text", "v": label, "align": 1})
+        blocks += _code_blocks(item, cfg)
         return blocks
 
     if layout == "sparsam":
         blocks = _title_blocks(title, chars, large=False)
         if expiry:
             blocks.append({"t": "row", "k": "MHD", "v": expiry, "underline": True})
-        blocks += _code_blocks(item, cfg, prefer_qr=True, height=40, scale=5)
-        return blocks
+        return blocks + _code_blocks(item, cfg)
 
     if layout == "vollstaendig":
         blocks = _title_blocks(title, chars, large=False)
@@ -274,7 +340,7 @@ def _build(layout: str, item: dict, cfg: dict, chars: int) -> list[dict]:
         if location:
             blocks.append({"t": "row", "k": "Ort", "v": location})
         blocks.append({"t": "row", "k": "Eingang", "v": to_display(item.get("added_date", ""))})
-        blocks += _code_blocks(item, cfg, prefer_qr=False, height=32, scale=2)
+        blocks += _code_blocks(item, cfg)
         blocks.append({"t": "text", "v": label, "align": 1})
         return blocks
 
@@ -285,9 +351,10 @@ def _build(layout: str, item: dict, cfg: dict, chars: int) -> list[dict]:
     info = " · ".join(x for x in (_quantity(item), location) if x)
     if info:
         blocks.append({"t": "text", "v": info, "align": 1})
-    blocks += _code_blocks(item, cfg, prefer_qr=True, height=40, scale=4)
+    blocks += _code_blocks(item, cfg)
     blocks.append({"t": "text", "v": label, "align": 1})
     return blocks
+
 
 
 def render_label(item: dict, printer_cfg: dict) -> dict:
@@ -301,13 +368,7 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     if layout not in LAYOUTS:
         layout = DEFAULT_LAYOUT
     rotate = is_rotated(printer_cfg)
-
-    # Der Druckkopf schreibt immer ueber die kurze Kante des Etiketts. Soll der
-    # Text der langen Kante entlang laufen - also quer gelesen werden - muss er
-    # um 90 Grad gedreht werden. Hochkant kommt er dagegen ungedreht heraus.
-    width_mm = float(printer_cfg.get("label_width_mm", 50))
-    height_mm = float(printer_cfg.get("label_height_mm", 30))
-    line_mm, stack_mm = (width_mm, height_mm) if rotate else (height_mm, width_mm)
+    stack_mm, line_mm = feed_and_line_mm(printer_cfg)
 
     chars = max(8, int(line_mm * DOTS_PER_MM) // 12)
     declared = int(printer_cfg.get("paper_chars", settings.label_paper_chars))

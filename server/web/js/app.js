@@ -589,7 +589,10 @@ async function loadSystem() {
   $('#set-c128').checked = settings.printer?.code128 ?? true;
   $('#set-lw').value = settings.printer?.label_width_mm ?? 50;
   $('#set-lh').value = settings.printer?.label_height_mm ?? 30;
-  $('#set-orient').value = settings.printer?.label_orientation ?? 'quer';
+  $('#set-feededge').value = settings.printer?.label_feed_edge ?? 'hoehe';
+  $('#set-rotate').checked = settings.printer?.label_rotate ?? true;
+  $('#set-code').value = settings.printer?.label_code ?? 'auto';
+  $('#set-codesize').value = settings.printer?.label_code_size ?? 'mittel';
   $('#set-backfeed').value = settings.printer?.backfeed_dots ?? 0;
   $('#set-dead').value = settings.printer?.label_dead_zone_mm ?? 0;
   await loadLayouts();
@@ -637,7 +640,7 @@ async function loadLayouts() {
     <div class="paper">${l.svg}</div>
     <div class="who">${esc(l.title || l.name)}</div>
     <div class="why">${esc(l.description)}</div>
-    <div class="fill">${esc(l.code)} · ${l.dots} von ${l.height_dots} Punkten</div>
+    <div class="fill">${esc(l.code)} (${l.code_mm} mm) · braucht ${l.mm} mm${l.passt ? '' : ' <b>– passt nicht!</b>'}</div>
   </div>`).join('');
 
   box.querySelectorAll('[data-layout]').forEach((el) => el.addEventListener('click', async () => {
@@ -653,7 +656,10 @@ async function saveLabelGeometry() {
   const body = {
     label_width_mm: parseFloat($('#set-lw').value) || 50,
     label_height_mm: parseFloat($('#set-lh').value) || 30,
-    label_orientation: $('#set-orient').value,
+    label_feed_edge: $('#set-feededge').value,
+    label_rotate: $('#set-rotate').checked,
+    label_code: $('#set-code').value,
+    label_code_size: $('#set-codesize').value,
     backfeed_dots: parseInt($('#set-backfeed').value, 10) || 0,
     label_dead_zone_mm: parseFloat($('#set-dead').value) || 0,
   };
@@ -662,7 +668,8 @@ async function saveLabelGeometry() {
   await loadLayouts();
 }
 
-['#set-lw', '#set-lh', '#set-orient', '#set-backfeed', '#set-dead'].forEach((sel) => {
+['#set-lw', '#set-lh', '#set-feededge', '#set-rotate', '#set-code',
+ '#set-codesize', '#set-backfeed', '#set-dead'].forEach((sel) => {
   const el = $(sel);
   if (el) el.addEventListener('change', () => saveLabelGeometry().catch((e) => toast(e.message, 'error')));
 });

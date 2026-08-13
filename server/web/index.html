@@ -262,10 +262,24 @@
         <div class="row">
           <label class="field">Breite (mm)<input id="set-lw" type="number" min="20" max="110" style="width:100px"></label>
           <label class="field">Höhe (mm)<input id="set-lh" type="number" min="15" max="110" style="width:100px"></label>
-          <label class="field">Ausrichtung
-            <select id="set-orient" style="width:150px">
-              <option value="quer">Querformat</option>
-              <option value="hoch">Hochformat</option>
+          <label class="field">Vorschubkante
+            <select id="set-feededge" style="width:200px">
+              <option value="hoehe">Höhe läuft durch den Drucker</option>
+              <option value="breite">Breite läuft durch den Drucker</option>
+            </select></label>
+          <label class="row tight" style="align-self:end">
+            <input id="set-rotate" type="checkbox"> Text um 90° drehen</label>
+          <label class="field">Code
+            <select id="set-code" style="width:170px">
+              <option value="auto">automatisch</option>
+              <option value="code128">Strichcode (flach)</option>
+              <option value="qr">QR-Code (quadratisch)</option>
+            </select></label>
+          <label class="field">Codegröße
+            <select id="set-codesize" style="width:120px">
+              <option value="klein">klein</option>
+              <option value="mittel">mittel</option>
+              <option value="gross">groß</option>
             </select></label>
           <label class="field">Totbereich (mm)
             <input id="set-dead" type="number" min="0" max="20" step="0.5" style="width:120px"></label>
@@ -280,7 +294,15 @@
           alles auf <i>ein</i> Etikett passt.<br>
           <b>Rückzug:</b> holt diesen Streifen zurück (8 Punkte = 1 mm), dann passt
           wieder mehr drauf. Nicht jeder Drucker kann rückwärts fahren – klein
-          anfangen und testen; verschluckt sich der Vorschub, wieder auf 0.</p>
+          anfangen und testen; verschluckt sich der Vorschub, wieder auf 0.<br>
+          <b>Code:</b> der größte Hebel für die Etikettenhöhe. Ein QR ist quadratisch
+          und kostet so viel Höhe wie Breite (6–12 mm), ein Strichcode ist flach und
+          kostet nur seine Höhe (4–6 mm). Bei gedrehtem Text steht ein Strichcode
+          allerdings quer zur Schrift – lesbar bleibt er, schön ist es nicht.
+          <i>automatisch</i> heißt: gedreht ein QR, sonst ein Strichcode.<br>
+          <b>Vorschubkante:</b> welche Etikettenkante in Papierrichtung läuft. Sie
+          begrenzt, wie viel Inhalt draufpasst – gibt die Rolle vor, nicht der
+          Geschmack. Das Drehen des Textes ist davon unabhängig.</p>
         <div id="layout-picker" class="layouts"></div>
       </div>
     </div>

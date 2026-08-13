@@ -50,8 +50,15 @@ async def list_layouts(session: AsyncSession = Depends(get_session)):
             [b for b in payload["blocks"] if b.get("t") not in ("feed", "back")]
         )
         codes = [b["t"] for b in payload["blocks"] if b["t"] in ("qr", "code128")]
+        mm = used / label_service.DOTS_PER_MM
         out.append({
             "name": name,
+            "mm": round(mm, 1),
+            "code_mm": round(
+                label_service.total_dots(
+                    [b for b in payload["blocks"] if b["t"] in ("qr", "code128")]
+                ) / label_service.DOTS_PER_MM, 1),
+            "passt": used <= payload["height_dots"] - label_service.SAFETY_DOTS,
             "code": "QR-Code" if codes and codes[0] == "qr" else "Strichcode",
             "rotate": payload["rotate"],
             "title": label_service.TITLES.get(name, name),
