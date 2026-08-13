@@ -429,6 +429,37 @@ def draw_datepad(c, screen, digits=""):
         c.string(label, x + w // 2, ly2 + btn_h // 2, C_TEXT, "MC")
 
 
+KB = ("qwertzuiop", "asdfghjkl", "yxcvbnm")
+
+
+def draw_keyboard(c, screen):
+    input_h = 30
+    c.rrect(8, c.body_y, W - 16, input_h, 5, C_SURFACE)
+    c.set_font(4)
+    wert = screen.get("value") or ""
+    c.string(wert + "_" if wert else "...", 14, c.body_y + 4,
+             C_TEXT if wert else C_MUTED)
+    gap = 3
+    keys_y = c.body_y + input_h + 6
+    row_h = (H - 6 - keys_y - 3 * gap) // 4
+    y = keys_y
+    for i, reihe in enumerate(KB):
+        slots = len(reihe) + (1 if i == 2 else 0)
+        w = (W - 12 - (slots - 1) * gap) // slots
+        x = 6
+        for ch in reihe:
+            button(c, x, y, w, row_h, ch, C_SURFACE)
+            x += w + gap
+        if i == 2:
+            button(c, x, y, w, row_h, "<-", C_DANGER)
+        y += row_h + gap
+    mode_w, ok_w = 70, 90
+    space_w = W - 12 - mode_w - ok_w - 2 * gap
+    button(c, 6, y, mode_w, row_h, "ABC", C_SURFACE)
+    button(c, 6 + mode_w + gap, y, space_w, row_h, "LEERTASTE", C_SURFACE)
+    button(c, 6 + mode_w + gap + space_w + gap, y, ok_w, row_h, "OK", C_OK)
+
+
 def draw_message(c, screen):
     lines = screen.get("lines", [])
     y = c.body_y + 20
@@ -446,5 +477,6 @@ def render(screen) -> Canvas:
     draw_title(c, screen)
     kind = screen.get("kind", "message")
     {"tiles": draw_tiles, "list": draw_list, "home": draw_home, "cards": draw_cards,
-     "datepad": draw_datepad, "message": draw_message}.get(kind, draw_message)(c, screen)
+     "datepad": draw_datepad, "keyboard": draw_keyboard,
+     "message": draw_message}.get(kind, draw_message)(c, screen)
     return c

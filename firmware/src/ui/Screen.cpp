@@ -557,13 +557,20 @@ char Screen::keyboardCharAt(uint8_t row, uint8_t col) const {
 
 void Screen::drawKeyboard() {
     // Eingabezeile
-    _spr.fillRoundRect(8, BODY_Y, W - 16, 26, 5, C_SURFACE);
+    const int16_t inputH = 30;
+    _spr.fillRoundRect(8, BODY_Y, W - 16, inputH, 5, C_SURFACE);
     _spr.setTextFont(4);
     _spr.setTextColor(_textValue.isEmpty() ? C_MUTED : C_TEXT, C_SURFACE);
-    _spr.drawString(_textValue.isEmpty() ? "..." : (_textValue + "_"), 14, BODY_Y + 2);
+    _spr.drawString(_textValue.isEmpty() ? "..." : (_textValue + "_"), 14, BODY_Y + 4);
 
     const int16_t gap = 3;
-    const int16_t rowH = 36;
+
+    // Tastenhoehe aus dem vorhandenen Platz statt fest 36 Pixel. Die vier
+    // Reihen endeten sonst rund 60 Pixel ueber dem unteren Rand - Platz, der
+    // bei einer Tastatur, die mit dem Finger bedient wird, nirgends besser
+    // aufgehoben ist als in der Tastengroesse.
+    const int16_t keysY = BODY_Y + inputH + 6;
+    const int16_t rowH = (H - 6 - keysY - 3 * gap) / 4;
 
     // Zeichenreihe zeichnen: `count` Tasten plus optional eine breitere
     // Sondertaste (Ruecktaste) im letzten Slot dieser Zeile.
@@ -580,7 +587,7 @@ void Screen::drawKeyboard() {
         if (withBackspace) button(x, y, w, rowH, "<-", C_DANGER, "__kbback");
     };
 
-    int16_t y = BODY_Y + 32;
+    int16_t y = keysY;
     drawCharRow(0, _kbNumeric ? strlen(KB_NUM1) : strlen(KB_ROW1), y, false);
     y += rowH + gap;
     drawCharRow(1, _kbNumeric ? strlen(KB_NUM2) : strlen(KB_ROW2), y, false);
