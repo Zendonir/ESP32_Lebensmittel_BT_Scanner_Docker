@@ -223,13 +223,18 @@ def _code_blocks(item: dict, cfg: dict, prefer_qr: bool, height: int, scale: int
     label = item.get("label", "")
     if not label:
         return []
+
     # ESC V dreht nur Zeichen. Strichcode (GS k) und Bitmap laufen weiter in
-    # Papierrichtung - bei gedrehtem Text stuenden sie also quer zur Schrift.
-    # Beim QR-Code ist das gleichgueltig, der ist aus jeder Richtung lesbar
-    # und quadratisch; ein Strichcode dagegen saehe verdreht aus und wuerde
-    # die Hoehenrechnung sprengen.
+    # Papierrichtung - bei gedrehtem Text steht der Strichcode also quer zur
+    # Schrift. Genau das ist auf dem ersten Querformat-Ausdruck passiert.
+    #
+    # Im gedrehten Fall ist der QR-Code deshalb keine Vorliebe, sondern
+    # Bedingung: er ist quadratisch und aus jeder Richtung lesbar. Der Schalter
+    # "QR" in den Einstellungen wird hier bewusst uebergangen - sonst waehlt
+    # man Querformat und bekommt stillschweigend ein unbrauchbares Etikett.
     if is_rotated(cfg):
-        prefer_qr = True
+        return [{"t": "qr", "v": label, "scale": scale}]
+
     if prefer_qr and cfg.get("qr", True):
         return [{"t": "qr", "v": label, "scale": scale}]
     if cfg.get("code128", True):
@@ -312,7 +317,19 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     backfeed = max(0, min(MAX_BACKFEED_DOTS, int(printer_cfg.get("backfeed_dots", 0))))
     pitch = int(stack_mm * DOTS_PER_MM)
 
-    budget = pitch + backfeed - SAFETY_DOTS
+    # Der Streifen am Etikettenanfang, den der Drucker nicht erreicht: zwischen
+    # Druckkopf und Abrisskante liegt Papier, das nach dem Abreissen schon
+    # durch ist. Er zaehlt nicht zur bedruckbaren Hoehe.
+    #
+    # Das fehlte, und deshalb rutschte das Etikett aufs naechste: die Rechnung
+    # ging von der vollen Etikettenteilung aus, tatsaechlich stand der Anfang
+    # aber schon hinter dem Kopf. Was hinten nicht mehr passte - der Code -
+    # landete auf dem Folgeetikett. Ein Rueckzug holt den Bereich zurueck und
+    # gibt ihn hier wieder frei.
+    dead = max(0, int(float(printer_cfg.get("label_dead_zone_mm", 0)) * DOTS_PER_MM))
+    verloren = max(0, dead - backfeed)
+
+    budget = pitch + backfeed - dead - SAFETY_DOTS
     blocks = _fit(_build(layout, item, printer_cfg, chars), budget)
     if backfeed:
         blocks.insert(0, {"t": "back", "dots": backfeed})
@@ -333,9 +350,11 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
         # Vorschau zeichnet danach und muss die Drehung nicht nachrechnen.
         "line_mm": line_mm,
         "stack_mm": stack_mm,
-        # Bedruckbare Hoehe: die Etikettenteilung plus dem, was der Rueckzug
-        # aus dem Totbereich zurueckholt.
-        "height_dots": pitch + backfeed,
+        # Bedruckbare Hoehe: die Etikettenteilung, abzueglich des Streifens,
+        # den der Drucker nicht erreicht, zuzueglich dem, was der Rueckzug
+        # davon zurueckholt.
+        "height_dots": pitch - verloren,
+        "dead_dots": dead,
         "blocks": blocks,
     }
 

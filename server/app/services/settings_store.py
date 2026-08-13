@@ -39,6 +39,11 @@ DEFAULTS: dict[str, Any] = {
         "label_height_mm": 30,
         "label_layout": "standard",
         "label_orientation": "quer",
+        # Streifen am Etikettenanfang, den der Druckkopf nicht erreicht.
+        # Bestimmt, wie viel vom Etikett wirklich bedruckbar ist - ohne diese
+        # Angabe rechnet der Server mit der vollen Hoehe und der letzte Block
+        # rutscht aufs naechste Etikett.
+        "label_dead_zone_mm": 0,
         # Rueckzug vor dem Druck, in Punkten. Holt den Totbereich zwischen
         # Druckkopf und Abrisskante zurueck. 0 = aus, weil nicht jeder
         # ESC/POS-Drucker rueckwaerts fahren kann.

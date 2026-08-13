@@ -235,14 +235,76 @@ def test_rueckzug_verschiebt_die_folgeetiketten_nicht(rueckzug):
     assert not zurueck or rendered["blocks"][0]["t"] == "back"
 
 
-def test_rueckzug_schafft_platz_fuers_layout():
-    """Der zurueckgeholte Streifen ist zusaetzlich bedruckbare Flaeche."""
+def test_rueckzug_ohne_totbereich_schafft_keine_flaeche():
+    """Zurueckziehen holt nur zurueck, was der Totbereich genommen hat.
+
+    Erst hiess es, der Rueckzug vergroessere die Druckflaeche immer - das war
+    falsch: gibt es keinen Totbereich, faehrt der Drucker dabei in die Luecke
+    vor dem Etikett und gewinnt nichts.
+    """
     basis = {"label": "LEB000042", "name": "Brot", "expiry_date": "2026-12-24"}
     cfg = {"label_layout": "vollstaendig", "label_width_mm": 50,
            "label_height_mm": 30, "qr": True, "code128": True}
     ohne = labels_service.render_label(basis, cfg)
     mit = labels_service.render_label(basis, {**cfg, "backfeed_dots": 40})
-    assert mit["height_dots"] == ohne["height_dots"] + 40
+    assert mit["height_dots"] == ohne["height_dots"]
+
+
+def test_gedreht_niemals_strichcode_auch_wenn_qr_abgeschaltet_ist():
+    """Der Schalter "QR" darf das Querformat nicht kaputt machen.
+
+    ESC V dreht nur Zeichen; ein Strichcode laeuft weiter in Papierrichtung
+    und steht dann quer zur Schrift. Genau so kam der erste Querformat-Druck
+    heraus - Text gedreht, Strichcode nicht, und beides zusammen passte nicht
+    mehr auf ein Etikett.
+    """
+    rendered = labels_service.render_label(
+        {"label": "LEB000008", "name": "Natürliches Mineralwasser",
+         "brand": "Vilsa", "expiry_date": "2028-11-12", "added_date": "2026-08-12",
+         "quantity": 1, "location": "Kühlschrank"},
+        {"label_layout": "vollstaendig", "label_orientation": "quer",
+         "qr": False, "code128": True},
+    )
+    types = [b["t"] for b in rendered["blocks"]]
+    assert "code128" not in types and "qr" in types
+
+
+@pytest.mark.parametrize("totbereich", [0, 3, 6, 10])
+@pytest.mark.parametrize("layout", sorted(labels_service.LAYOUTS))
+def test_totbereich_haelt_das_etikett_bei_einem(layout, totbereich):
+    """Was der Druckkopf nicht erreicht, zaehlt nicht zur bedruckbaren Hoehe.
+
+    Ohne diese Rechnung ging der Server von der vollen Etikettenteilung aus,
+    tatsaechlich stand der Anfang aber schon hinter dem Kopf - der Code
+    rutschte aufs Folgeetikett.
+    """
+    rendered = labels_service.render_label(
+        {"label": "LEB000008", "name": "Natürliches Mineralwasser",
+         "brand": "Vilsa", "expiry_date": "2028-11-12", "added_date": "2026-08-12",
+         "quantity": 1, "location": "Kühlschrank"},
+        {"label_layout": layout, "label_orientation": "quer",
+         "label_width_mm": 50, "label_height_mm": 30,
+         "label_dead_zone_mm": totbereich, "qr": True, "code128": True},
+    )
+    inhalt = labels_service.total_dots(
+        [b for b in rendered["blocks"] if b["t"] not in ("feed", "back")]
+    )
+    bedruckbar = (30 - totbereich) * labels_service.DOTS_PER_MM
+    assert inhalt <= bedruckbar - labels_service.SAFETY_DOTS
+
+    # Und der Papiervorschub bleibt trotzdem genau eine Etikettenteilung,
+    # sonst wandern die Folgeetiketten.
+    assert labels_service.total_dots(rendered["blocks"]) == 30 * labels_service.DOTS_PER_MM
+
+
+def test_rueckzug_holt_den_totbereich_als_druckflaeche_zurueck():
+    basis = {"label": "LEB000008", "name": "Mineralwasser",
+             "expiry_date": "2028-11-12", "added_date": "2026-08-12"}
+    cfg = {"label_layout": "vollstaendig", "label_width_mm": 50,
+           "label_height_mm": 30, "label_dead_zone_mm": 6, "qr": True}
+    ohne = labels_service.render_label(basis, cfg)
+    mit = labels_service.render_label(basis, {**cfg, "backfeed_dots": 48})
+    assert mit["height_dots"] == ohne["height_dots"] + 48
 
 
 def test_quer_dreht_den_text_und_nimmt_den_qr_code():
