@@ -204,8 +204,14 @@ def test_name_wird_nicht_abgeschnitten(layout):
          "expiry_date": "2026-12-24", "added_date": "2026-01-01"},
         {"label_layout": layout, "paper_chars": 32, "qr": True, "code128": True},
     )
-    gedruckt = " ".join(b["v"] for b in rendered["blocks"] if b["t"] == "text")
-    assert "Rueckenfilet - Schwein" in gedruckt
+    # Der klassische Zuschnitt stellt die Sorte in die Kategoriezeile, so wie
+    # das Vorgaengerprojekt es tat - im Namen steht sie dort nicht.
+    gedruckt = " ".join(
+        [b["v"] for b in rendered["blocks"] if b["t"] == "text"]
+        + [f'{b.get("k")} {b.get("v")}' for b in rendered["blocks"] if b["t"] == "row"]
+    )
+    assert "Rueckenfilet" in gedruckt
+    assert "Schwein" in gedruckt
 
 
 @pytest.mark.parametrize("rueckzug", [0, 24, 40, 999])
@@ -248,6 +254,44 @@ def test_rueckzug_ohne_totbereich_schafft_keine_flaeche():
     ohne = labels_service.render_label(basis, cfg)
     mit = labels_service.render_label(basis, {**cfg, "backfeed_dots": 40})
     assert mit["height_dots"] == ohne["height_dots"]
+
+
+def test_klassischer_zuschnitt_folgt_dem_vorgaengerprojekt():
+    """Zeilenfolge und Strichcode wie in LabelRenderer.cpp des alten Projekts."""
+    rendered = labels_service.render_label(
+        {"label": "LEB000008", "name": "Mineralwasser", "category": "Getraenke",
+         "subcategory": "", "expiry_date": "2028-11-12", "added_date": "2026-08-12",
+         "quantity": 1, "unit": ""},
+        {"label_layout": "klassisch", "label_rotate": False,
+         "label_code": "code128", "household": "Familie Muster"},
+    )
+    beschriftungen = [b.get("k") for b in rendered["blocks"] if b["t"] == "row"]
+    assert beschriftungen == ["Kategorie", "Einlagerung", "MHD", "Menge", "Haushalt"]
+    assert "code128" in [b["t"] for b in rendered["blocks"]]
+
+
+def test_klassisch_kuerzt_von_unten_und_behaelt_das_mhd():
+    """Auf Endlospapier war die Hoehe egal, auf 30 mm nicht.
+
+    Was wegfaellt, faellt von unten weg - aber nie das MHD, denn dafuer klebt
+    das Etikett ueberhaupt am Glas.
+    """
+    item = {"label": "LEB000008", "name": "Mineralwasser", "category": "Getraenke",
+            "expiry_date": "2028-11-12", "added_date": "2026-08-12", "quantity": 1}
+    cfg = {"label_layout": "klassisch", "label_rotate": False,
+           "label_code": "code128", "household": "Familie Muster",
+           "label_width_mm": 50, "label_height_mm": 30,
+           "label_feed_edge": "hoehe"}
+
+    for totbereich in (0, 4, 8, 12):
+        rendered = labels_service.render_label(
+            item, {**cfg, "label_dead_zone_mm": totbereich}
+        )
+        typen = [b["t"] for b in rendered["blocks"]]
+        beschriftungen = [b.get("k") for b in rendered["blocks"] if b["t"] == "row"]
+        assert "MHD" in beschriftungen, f"MHD fehlt bei {totbereich} mm Totbereich"
+        assert "code128" in typen
+        assert labels_service.total_dots(rendered["blocks"]) == 240
 
 
 def test_gedreht_niemals_strichcode_auch_wenn_qr_abgeschaltet_ist():

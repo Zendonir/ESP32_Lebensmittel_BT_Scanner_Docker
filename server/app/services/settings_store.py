@@ -37,17 +37,19 @@ DEFAULTS: dict[str, Any] = {
         # draufpasst - siehe services/labels.py.
         "label_width_mm": 50,
         "label_height_mm": 30,
-        "label_layout": "standard",
+        "label_layout": "klassisch",
         # Welche Etikettenkante in Papierrichtung laeuft. Sie begrenzt, wie
         # viel Inhalt auf ein Etikett passt. Gibt die Rolle vor, nicht der
         # Geschmack - deshalb getrennt vom Drehen des Textes.
         "label_feed_edge": "hoehe",    # hoehe | breite
-        "label_rotate": True,          # Text um 90 Grad drehen
+        "label_rotate": False,         # Text um 90 Grad drehen
         "label_orientation": "quer",   # Altbestand, wird nur noch gelesen
         # Welcher Code aufs Etikett kommt und wie gross. Auf einem 30-mm-
         # Etikett ist das die groesste Stellschraube: ein QR ist quadratisch
         # und kostet so viel Hoehe wie Breite, ein Strichcode ist flach.
-        "label_code": "auto",          # auto | qr | code128
+        # Strichcode als Vorgabe: er ist flach und kostet nur ein Drittel
+        # der Hoehe eines QR-Codes.
+        "label_code": "code128",       # auto | qr | code128
         "label_code_size": "mittel",   # klein | mittel | gross
         # Streifen am Etikettenanfang, den der Druckkopf nicht erreicht.
         # Bestimmt, wie viel vom Etikett wirklich bedruckbar ist - ohne diese

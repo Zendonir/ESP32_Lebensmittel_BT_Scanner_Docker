@@ -140,10 +140,16 @@ def _fit(blocks: list[dict], budget: int) -> list[dict]:
     Der Code zum Auslagern ist davon ausgenommen - ohne ihn ist das Etikett
     wertlos, weil sich der Eintrag dann nicht mehr wegscannen laesst.
     """
-    keep = [b for b in blocks if b.get("t") in ("qr", "code128")]
+    def geschuetzt(block: dict) -> bool:
+        # Der Code zum Auslagern und alles, was ein Layout ausdruecklich
+        # behalten will (das MHD im klassischen Zuschnitt).
+        return block.get("t") in ("qr", "code128") or bool(block.get("keep"))
+
     out = list(blocks)
     while total_dots(out) > budget:
-        droppable = [i for i, b in enumerate(out) if b not in keep and b.get("t") != "feed"]
+        droppable = [
+            i for i, b in enumerate(out) if not geschuetzt(b) and b.get("t") != "feed"
+        ]
         if not droppable:
             break
         out.pop(droppable[-1])
@@ -157,6 +163,7 @@ def _fit(blocks: list[dict], budget: int) -> list[dict]:
 # Den Code nennen die Beschreibungen bewusst nicht: welcher gedruckt wird,
 # haengt an der Ausrichtung (siehe _code_blocks) und stuende hier sonst falsch.
 LAYOUTS: dict[str, str] = {
+    "klassisch": "Wie im Vorgaengerprojekt: Name gross, feste Zeilen, Strichcode.",
     "zeile": "Name und MHD in einer Zeile. Der kuerzeste Zuschnitt.",
     "sparsam": "Name und MHD untereinander, sonst nichts.",
     "kompakt": "Name und MHD gross. Aus zwei Metern lesbar.",
@@ -167,13 +174,14 @@ LAYOUTS: dict[str, str] = {
 # Anzeigename fuer die Oberflaeche - der Schluessel bleibt umlautfrei, damit
 # er unveraendert in der Datenbank stehen kann.
 TITLES: dict[str, str] = {
+    "klassisch": "Klassisch",
     "zeile": "Einzeiler",
     "kompakt": "Kompakt",
     "standard": "Standard",
     "vollstaendig": "Vollständig",
     "sparsam": "Sparsam",
 }
-DEFAULT_LAYOUT = "standard"
+DEFAULT_LAYOUT = "klassisch"
 
 
 def is_rotated(cfg: dict) -> bool:
@@ -300,6 +308,38 @@ def _build(layout: str, item: dict, cfg: dict, chars: int) -> list[dict]:
     label = item.get("label", "")
     location = item.get("location", "")
     brand = item.get("brand", "")
+
+    if layout == "klassisch":
+        # 1:1 der Zuschnitt aus dem Vorgaengerprojekt (LabelRenderer.cpp):
+        # Name fett und doppelt hoch, darunter eine feste Zeilenfolge, unten
+        # ein Code 128 ohne Klartextzeile. Kategorie und Sorte stehen dort
+        # zusammen in einer Zeile ("Fleisch & Fisch / Schwein") und nicht am
+        # Namen - deshalb hier _title() nicht verwendet.
+        #
+        # Auf Endlospapier war die Hoehe damals egal. Auf einem 30-mm-Etikett
+        # ist sie es nicht: passt die Folge nicht, faellt sie von unten nach
+        # weg (Haushalt zuerst, MHD und Name zuletzt). Der Code bleibt immer.
+        blocks = _title_blocks(item.get("name", "") or "Unbekanntes Produkt",
+                               chars, large=True)
+
+        kategorie = " / ".join(
+            teil for teil in (item.get("category", ""), item.get("subcategory", ""))
+            if teil and teil != "Barcode"
+        )
+        if kategorie:
+            blocks.append({"t": "row", "k": "Kategorie", "v": kategorie})
+        blocks.append({"t": "row", "k": "Einlagerung",
+                       "v": to_display(item.get("added_date", ""))})
+        # Reihenfolge wie im Original. Das MHD steht darin in der Mitte und
+        # fiele beim Kuerzen vor Menge und Haushalt weg - dabei ist es der
+        # Grund, warum das Etikett ueberhaupt klebt. Deshalb geschuetzt.
+        blocks.append({"t": "row", "k": "MHD", "v": expiry or "-",
+                       "underline": True, "keep": True})
+        blocks.append({"t": "row", "k": "Menge", "v": _quantity(item) or "1 St."})
+        haushalt = cfg.get("household") or settings.household
+        if haushalt:
+            blocks.append({"t": "row", "k": "Haushalt", "v": haushalt})
+        return blocks + _code_blocks(item, cfg)
 
     if layout == "zeile":
         # Sparsamster Zuschnitt: Name und MHD teilen sich eine Zeile. Der Code
