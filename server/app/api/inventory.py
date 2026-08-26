@@ -173,6 +173,32 @@ async def scan(req: ScanRequest, session: AsyncSession = Depends(get_session)):
         await workflow.on_scan(session, dev_sess, code)
         return {"ok": True, "routed_to": sess_id}
 
+    # Ein eigenes Etikett gehoert nie zu OpenFoodFacts. Ohne diese Abzweigung
+    # wanderte die Etikettennummer dorthin, kam erwartungsgemaess als
+    # "unbekannt" zurueck - und das Abscannen eines Etiketts am Handy tat
+    # nichts, obwohl der Hinweistext daneben "eigenes Etikett = auslagern"
+    # verspricht. Auslagern braucht kein Terminal: der Artikel liegt schon
+    # irgendwo, die Datenbank weiss wo.
+    if workflow.is_label(code):
+        item = await inv.find_active_by_label(session, code)
+        if item is not None:
+            await inv.remove_item(session, item, reason="mobil")
+            await session.commit()
+            await hub.notify_ui("inventory")
+            return {"ok": True, "routed_to": None, "action": "removed",
+                    "label": item.label, "name": item.name}
+
+        # Derselbe Zweitscan bucht wieder ein - wie am Geraet.
+        restored = await inv.restore_by_label(session, code)
+        if restored is not None:
+            await session.commit()
+            await hub.notify_ui("inventory")
+            return {"ok": True, "routed_to": None, "action": "restored",
+                    "label": restored.label, "name": restored.name}
+
+        return {"ok": False, "routed_to": None, "action": "unknown_label",
+                "label": code}
+
     product = await openfoodfacts.lookup(session, code)
     await session.commit()
     return {

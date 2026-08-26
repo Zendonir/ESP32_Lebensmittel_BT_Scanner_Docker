@@ -1124,7 +1124,12 @@ async def _save_draft(session: AsyncSession, sess: DeviceSession) -> None:
 # ---------------------------------------------------------------------------
 # Scan
 # ---------------------------------------------------------------------------
-def _is_label(code: str) -> bool:
+def is_label(code: str) -> bool:
+    """Ist das eine eigene Etikettennummer (LEB000123) und kein Produktcode?
+
+    Oeffentlich, weil die REST-Schnittstelle dieselbe Unterscheidung braucht:
+    ein Etikett gehoert nie zu OpenFoodFacts.
+    """
     return code.upper().startswith(settings.label_prefix.upper()) and code[
         len(settings.label_prefix):
     ].isdigit()
@@ -1139,7 +1144,7 @@ async def on_scan(session: AsyncSession, sess: DeviceSession, code: str) -> None
     # Auslagern geht immer: der Artikel liegt schon irgendwo, dafuer braucht es
     # keinen aktiven Lagerort. Einlagern dagegen schon - sonst entstuende ein
     # Eintrag ohne Ort, und danach sucht ihn niemand.
-    if _is_label(code):
+    if is_label(code):
         sess.touch()
         await _scan_label(session, sess, code)
         await push_screen(session, sess)

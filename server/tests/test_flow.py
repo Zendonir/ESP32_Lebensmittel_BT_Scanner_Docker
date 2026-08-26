@@ -480,3 +480,46 @@ def test_geraeteworkflow_ohne_hardware(client):
             assert await inv.find_active_by_label(session, label) is not None
 
     asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())
+
+
+# ------------------------------------------------------- Scan ohne Terminal
+def test_eigenes_etikett_wird_ohne_terminal_ausgelagert(client):
+    """Am Handy gescanntes Etikett lagert aus - auch ohne Terminal.
+
+    Vorher ging jeder Code an OpenFoodFacts, auch die eigene Etikettennummer.
+    Die kam erwartungsgemaess als "unbekannt" zurueck, und der Scan tat nichts
+    - obwohl der Hinweistext daneben "eigenes Etikett = auslagern" verspricht.
+    Zum Auslagern braucht es kein Terminal: der Artikel liegt schon irgendwo.
+    """
+    angelegt = client.post("/api/labels", json={
+        "name": "Testwasser", "expiry_date": "2028-11-12", "print": False,
+    }).json()
+    etikett = angelegt["labels"][0]
+
+    antwort = client.post("/api/inventory/scan", json={"code": etikett}).json()
+    assert antwort["action"] == "removed"
+    assert antwort["label"] == etikett
+
+    zustand = client.get(f"/api/inventory/{etikett}").json()
+    assert zustand["status"] == "removed"
+
+    # Derselbe Scan noch einmal bucht wieder ein - wie am Geraet.
+    zweiter = client.post("/api/inventory/scan", json={"code": etikett}).json()
+    assert zweiter["action"] == "restored"
+    assert client.get(f"/api/inventory/{etikett}").json()["status"] == "active"
+
+
+def test_unbekanntes_eigenes_etikett_geht_nicht_an_openfoodfacts(client, monkeypatch):
+    """Eine Etikettennummer ist nie ein Produktcode.
+
+    Sie dorthin zu schicken kann nur scheitern - und traegt nebenbei die
+    eigenen Nummern nach draussen.
+    """
+    from app.services import openfoodfacts
+
+    async def darf_nicht(*args, **kwargs):
+        raise AssertionError("OpenFoodFacts wurde fuer ein eigenes Etikett gefragt")
+
+    monkeypatch.setattr(openfoodfacts, "lookup", darf_nicht)
+    antwort = client.post("/api/inventory/scan", json={"code": "LEB999999"}).json()
+    assert antwort["action"] == "unknown_label"

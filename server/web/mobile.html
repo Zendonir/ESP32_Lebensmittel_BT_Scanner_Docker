@@ -174,19 +174,56 @@ function attachSwipe() {
 }
 
 // -------------------------------------------------------------------- Scannen
-let stream = null, detectTimer = null;
+//
+// Zwei Dinge muessen stimmen, damit die Kamera scannt, und sie haben nichts
+// miteinander zu tun:
+//
+//   1. Zugriff auf die Kamera. Den gibt jeder Browser nur in einem sicheren
+//      Kontext her - also ueber HTTPS oder auf localhost. Ueber http:// an
+//      einer LAN-Adresse gibt es `navigator.mediaDevices` schlicht nicht.
+//   2. Ein Decoder. Chrome und Android bringen `BarcodeDetector` mit, Safari
+//      nicht - und auf dem iPhone ist jeder Browser Safari. Dafuer liegt
+//      ZXing in js/vendor, nachgeladen nur wenn noetig.
+//
+// Frueher stand hier eine einzige Meldung "wird von diesem Browser nicht
+// unterstuetzt" fuer beide Faelle. Die war doppelt falsch: am iPhone lag es
+// nicht am Browser, sondern am fehlenden Decoder, und wer ueber http zugreift,
+// haette ewig nach einem anderen Browser gesucht.
+let stream = null, detectTimer = null, zxingReader = null;
+
+function kameraMoeglich() {
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+function ladeZXing() {
+  if (window.ZXing) return Promise.resolve();
+  return new Promise((ok, fail) => {
+    const tag = document.createElement('script');
+    tag.src = '/static/js/vendor/zxing.min.js';
+    tag.onload = ok;
+    tag.onerror = () => fail(new Error('Decoder liess sich nicht laden'));
+    document.head.appendChild(tag);
+  });
+}
 
 function renderScan() {
   count.textContent = '';
-  const supported = 'BarcodeDetector' in window;
+  const kamera = kameraMoeglich();
+  const hinweis = kamera ? '' : `<div class="card">
+      <b>Die Kamera ist hier nicht verfügbar.</b><br>
+      Browser geben sie nur über eine gesicherte Verbindung frei. Diese Seite
+      läuft über <span class="mono">${esc(location.protocol)}//${esc(location.host)}</span>.
+      Über <b>https://</b> oder direkt am Rechner (localhost) geht es; am
+      einfachsten mit einem Reverse Proxy oder einem Tunneldienst vor dem
+      Container. Bis dahin den Code bitte eintippen.</div>`;
+
   view.innerHTML = `<div id="scanview">
-    ${supported ? '<video id="cam" playsinline muted autoplay></video>' :
-      '<div class="card">Die Kamera-Erkennung wird von diesem Browser nicht unterstützt. Code bitte eintippen.</div>'}
+    ${kamera ? '<video id="cam" playsinline muted autoplay></video>' : hinweis}
     <form class="row" id="manual" style="margin-top:12px">
       <input id="code" placeholder="Barcode / LEB000123" style="flex:1" inputmode="text">
       <button class="primary">Senden</button>
     </form>
-    <p class="muted" style="margin-top:10px">
+    <p class="muted" style="margin-top:10px" id="scanhint">
       Der Code läuft durch denselben Ablauf wie am Terminal: eigenes Etikett = auslagern,
       Produkt-Barcode = einlagern.</p>
     <div id="scanresult"></div></div>`;
@@ -197,37 +234,90 @@ function renderScan() {
     if (code) { await sendScan(code); document.getElementById('code').value = ''; }
   });
 
-  if (supported) startCamera();
+  if (kamera) startCamera();
+}
+
+// Entprellen. Die Kamera liefert denselben Code zehnmal pro Sekunde, und ein
+// zweiter Scan desselben Etiketts bucht es wieder ein - haelt man das Etikett
+// nach dem Auslagern nur eine Sekunde zu lang vor die Linse, waere es also
+// sofort wieder im Bestand. Deshalb nach jedem Treffer eine harte Pause, in
+// der gar nichts angenommen wird, und nicht nur eine Sperre je Code.
+const SCAN_PAUSE_MS = 4000;
+let pauseBis = 0;
+async function treffer(value) {
+  if (!value || Date.now() < pauseBis) return;
+  pauseBis = Date.now() + SCAN_PAUSE_MS;
+  navigator.vibrate?.(60);
+  await sendScan(value);
 }
 
 async function startCamera() {
+  const hint = document.getElementById('scanhint');
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-    const cam = document.getElementById('cam');
-    cam.srcObject = stream;
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' },
+    });
+  } catch (e) {
+    toast(`Kamera nicht verfügbar: ${e.message}`, 'warn');
+    return;
+  }
+  const cam = document.getElementById('cam');
+  if (!cam) return;
+  cam.srcObject = stream;
+  // iOS spielt erst nach play() ab, obwohl autoplay gesetzt ist.
+  cam.play?.().catch(() => {});
+
+  if ('BarcodeDetector' in window) {
     const detector = new BarcodeDetector({
       formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code'],
     });
-    let last = '', lastAt = 0;
     detectTimer = setInterval(async () => {
       try {
         const codes = await detector.detect(cam);
-        if (!codes.length) return;
-        const value = codes[0].rawValue;
-        // Entprellen: die Kamera liefert denselben Code 10x pro Sekunde.
-        if (value === last && Date.now() - lastAt < 3000) return;
-        last = value; lastAt = Date.now();
-        navigator.vibrate?.(60);
-        await sendScan(value);
+        if (codes.length) await treffer(codes[0].rawValue);
       } catch { /* Einzelbild ohne Treffer */ }
     }, 350);
-  } catch (e) {
-    toast(`Kamera nicht verfügbar: ${e.message}`, 'warn');
+    return;
   }
+
+  // Safari: Decoder nachladen. Er bringt seine eigene Kameraschleife mit und
+  // uebernimmt das laufende Bild, statt ein zweites Mal darauf zuzugreifen.
+  if (hint) hint.textContent = 'Decoder wird geladen …';
+  try {
+    await ladeZXing();
+  } catch (e) {
+    toast(e.message, 'error');
+    if (hint) hint.textContent = 'Decoder nicht verfügbar - Code bitte eintippen.';
+    return;
+  }
+  if (hint) {
+    hint.textContent = 'Code vor die Kamera halten. Eigenes Etikett = auslagern, '
+      + 'Produkt-Barcode = einlagern.';
+  }
+
+  const hints = new Map();
+  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+    ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+    ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
+    ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+    ZXing.BarcodeFormat.QR_CODE,
+  ]);
+  zxingReader = new ZXing.BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 250 });
+  zxingReader.decodeFromStream(stream, cam, (result) => {
+    if (result) treffer(result.getText());
+  }).catch((e) => toast(`Erkennung fehlgeschlagen: ${e.message}`, 'error'));
 }
 
 function stopCamera() {
   if (detectTimer) { clearInterval(detectTimer); detectTimer = null; }
+  // Der nachgeladene Decoder haelt eine eigene Schleife auf dem Videobild.
+  // Ohne dieses reset() laeuft sie weiter, wenn man den Reiter wechselt - das
+  // frisst Akku und liefert Treffer fuer einen Bildschirm, der gar nicht mehr
+  // offen ist.
+  if (zxingReader) {
+    try { zxingReader.reset(); } catch { /* schon beendet */ }
+    zxingReader = null;
+  }
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
 }
 
@@ -237,6 +327,20 @@ async function sendScan(code) {
     const box = document.getElementById('scanresult');
     if (res.routed_to) {
       toast(`An ${res.routed_to} gesendet`, 'success');
+    } else if (res.action === 'removed' || res.action === 'restored') {
+      // Bewusst kein render(): das wuerde den Scan-Bildschirm neu aufbauen,
+      // die Kamera neu starten und die Pause oben zuruecksetzen - das Etikett
+      // liefe dann in einer Schleife aus dem Bestand und wieder hinein.
+      const wort = res.action === 'removed' ? 'ausgelagert' : 'wieder eingebucht';
+      toast(`${res.name || res.label} ${wort}`, 'success');
+      if (box) {
+        box.innerHTML = `<div class="card" style="margin-top:12px">
+          <b>${esc(res.name || res.label)}</b>
+          <div class="muted">${wort}</div>
+          <div class="mono muted">${esc(res.label)}</div></div>`;
+      }
+    } else if (res.action === 'unknown_label') {
+      toast(`Etikett ${res.label} ist nicht im Bestand`, 'warn');
     } else if (res.product) {
       toast(res.product.name || 'Produkt unbekannt');
       if (box) box.innerHTML = `<div class="card" style="margin-top:12px">
