@@ -139,9 +139,24 @@ export function liveConnect(onEvent, onStatus) {
   let socket = null;
   let retry = 1000;
 
-  const open = () => {
+  // Eintrittskarte fuer den Socket. Ist kein Web-Passwort gesetzt, braucht der
+  // Server keine und die Anfrage schadet auch nicht; ist eines gesetzt, kann
+  // die Seite das Passwort nicht selbst mitschicken - HTTP Basic liegt beim
+  // Browser, und eine WebSocket-Verbindung nimmt keine eigenen Kopfzeilen an.
+  const holeTicket = async () => {
+    try {
+      const antwort = await post('/api/ws-ticket');
+      return antwort?.ticket || '';
+    } catch {
+      return '';
+    }
+  };
+
+  const open = async () => {
+    const ticket = await holeTicket();
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-    socket = new WebSocket(`${scheme}://${location.host}/ws/ui`);
+    const suffix = ticket ? `?ticket=${encodeURIComponent(ticket)}` : '';
+    socket = new WebSocket(`${scheme}://${location.host}/ws/ui${suffix}`);
 
     socket.onopen = () => { retry = 1000; onStatus(true); };
     socket.onmessage = (ev) => {

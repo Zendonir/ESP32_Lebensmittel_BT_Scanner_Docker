@@ -132,6 +132,10 @@ async def add_items(
             session.add(job)
             jobs.append(job)
 
+    # Nur die tatsaechlich entstandenen Druckauftraege der Rolle anrechnen -
+    # nicht die vergebenen Nummern.
+    await label_service.consume_roll(session, len(jobs))
+
     await session.flush()
     return items, jobs
 

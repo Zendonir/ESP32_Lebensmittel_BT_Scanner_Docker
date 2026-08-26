@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import re
 
-# Die feste Auswahl. Aenderungen hier wirken nur auf neue Installationen -
-# bestehende Kategorien in der Datenbank bleiben, wie sie sind.
-# Muss zu services/seed.CATEGORIES passen: match_off darf nur Namen liefern,
-# die es als Kategorie auch wirklich gibt.
+# Die feste Auswahl. Muss zu services/seed.CATEGORIES passen, sonst liefert
+# match_off Namen, die es als Kategorie gar nicht gibt - ein Test haelt die
+# beiden Listen zusammen, der Kommentar allein tat es nicht.
+#
+# Aenderungen hier wirken nur auf neue Installationen; bestehende Kategorien
+# in der Datenbank bleiben, wie sie sind.
 FIXED = (
     "Getraenke",
     "Milchprodukte",

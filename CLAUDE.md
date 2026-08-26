@@ -18,11 +18,15 @@ server/app/
   config.py      Einstellungen aus der Umgebung (kein Config-File!)
   models.py      ORM: inventory, events, products, templates, categories,
                  locations, shopping_list, devices, print_jobs, settings
-  api/           inventory · catalog · labels · system
+  api/           inventory · catalog · labels · system · firmware
   device/        protocol · hub · workflow · routes
-  services/      inventory · labels · openfoodfacts · notify · scheduler ·
-                 dates · settings_store · seed
+  services/      inventory · labels · categories · openfoodfacts · notify ·
+                 scheduler · dates · settings_store · seed · importer · firmware
 server/web/      index.html · mobile.html · js/ · css/ (kein Build-Schritt)
+                 js/vendor/  ZXing – Barcodes aus der Handykamera, siehe
+                             das README dort
+firmware/scripts/ gen_gfx_font.py  · preview_screens.py (Bildschirme ansehen,
+                  ohne zu flashen – Zweitschrift von Screen.cpp!)
 firmware/src/    main.cpp · core/ · scanner/ · ui/ · printer/
 ```
 
@@ -62,9 +66,10 @@ aus Name (Konstante oben in der Datei), einer `_screen_*`-Funktion und einer
 Der Zustand (`DeviceSession`) liegt im Arbeitsspeicher und wird beim Trennen
 verworfen – nach einem Reconnect steht das Gerät auf dem Startbildschirm.
 
-Die Firmware kennt nur fünf Darstellungsarten: `tiles`, `list`, `date`,
-`number`, `message`. Wer eine sechste braucht, muss die Firmware anfassen –
-vorher prüfen, ob sich das Ziel mit den vorhandenen erreichen lässt.
+Die Firmware kennt diese Darstellungsarten: `tiles`, `list`, `date`, `number`,
+`message`, `keyboard`, `home`, `cards`, `datepad`. Wer eine weitere braucht,
+muss die Firmware anfassen – vorher prüfen, ob sich das Ziel mit den
+vorhandenen erreichen lässt.
 
 ## Firmware
 
@@ -123,6 +128,11 @@ cd firmware && pio run --target upload # flashen
 | JSON-Liste in der Datenbank ändert sich nicht | neue Liste zuweisen, nicht `append()` – SQLAlchemy erkennt In-Place-Änderungen nicht |
 | Druckauftrag verschwindet | nie direkt senden, immer über `print_jobs` |
 | Terminal zeigt „Kein Server" | Token in `.env` und im WLAN-Portal vergleichen |
+| Etikett läuft auf das nächste über | Totbereich in den Einstellungen eintragen; der Druckkopf erreicht den Anfang nicht |
+| Strichcode steht quer zur Schrift | `ESC V` dreht nur Zeichen – gedreht geht nur der QR-Code |
+| Folgeetiketten wandern | Ein Etikett muss **genau** eine Teilung Papier verbrauchen, siehe `total_dots()` |
+| Umlaute tanzen in der Zeile | Hinting staucht Zeichen mit Aufsatz; `gen_gfx_font.py` zieht die Grundlinie nach |
+| Kamera-Scan geht am iPhone nicht | Safari hat kein `BarcodeDetector` (ZXing springt ein) **und** braucht HTTPS |
 
 ## Entwicklungsregeln
 

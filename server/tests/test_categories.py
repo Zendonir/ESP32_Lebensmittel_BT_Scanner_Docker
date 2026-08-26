@@ -93,3 +93,28 @@ def test_anzeigename_haengt_die_sorte_an():
 def test_anzeigename_wiederholt_die_sorte_nicht():
     """Steht die Sorte schon im Namen, waere "Schweinefilet - Schwein" albern."""
     assert cat.display_name("Schweinefilet", "Schwein") == "Schweinefilet"
+
+
+def test_feste_auswahl_deckt_sich_mit_der_erstbefuellung():
+    """FIXED und seed.CATEGORIES muessen dieselben Namen tragen.
+
+    match_off liefert die Schreibweise aus FIXED. Weicht sie von dem ab, was
+    tatsaechlich angelegt wird, landet im Bestand eine Kategorie, nach der
+    sich nicht filtern laesst. Ein Kommentar hat das bisher behauptet -
+    geprueft hat es niemand, und genau da war schon einmal ein Fehler drin
+    ("Tiefkühl" gegen "Tiefkuehl").
+    """
+    from app.services import seed
+
+    angelegt = [name for name, _farbe in seed.CATEGORIES]
+    assert sorted(cat.FIXED) == sorted(angelegt)
+
+
+def test_jede_regel_zeigt_auf_eine_vorhandene_kategorie():
+    """Auch die Regeln duerfen keine Kategorie erfinden."""
+    ziele = {name for name, _woerter in cat._RULES}
+    assert ziele <= set(cat.FIXED), f"nicht in FIXED: {ziele - set(cat.FIXED)}"
+
+
+def test_unterkategorien_haengen_an_vorhandenen_kategorien():
+    assert set(cat.SUBCATEGORIES) <= set(cat.FIXED)

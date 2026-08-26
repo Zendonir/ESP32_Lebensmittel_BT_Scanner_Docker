@@ -137,6 +137,8 @@ async def reprint(
     )
     job = PrintJob(label=item.label, payload=payload, status="queued")
     session.add(job)
+    # Ein Nachdruck verbraucht ein Etikett wie jeder andere Druck auch.
+    await label_service.consume_roll(session, 1)
     await inv.log_event(session, "print", label=item.label, name=item.name)
     await session.commit()
 
@@ -166,6 +168,7 @@ async def test_print(
     )
     job = PrintJob(label="TEST", payload=payload, status="queued")
     session.add(job)
+    await label_service.consume_roll(session, 1)
     await session.commit()
     target = device_id or (hub.online_ids()[0] if hub.online_ids() else None)
     if not target:

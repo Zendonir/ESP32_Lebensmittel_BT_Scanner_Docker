@@ -523,3 +523,46 @@ def test_unbekanntes_eigenes_etikett_geht_nicht_an_openfoodfacts(client, monkeyp
     monkeypatch.setattr(openfoodfacts, "lookup", darf_nicht)
     antwort = client.post("/api/inventory/scan", json={"code": "LEB999999"}).json()
     assert antwort["action"] == "unknown_label"
+
+
+# ------------------------------------------------------------------- Rolle
+def test_rolle_zaehlt_nur_was_wirklich_gedruckt_wird(client):
+    """Nummer vergeben und Papier verbrauchen sind zwei verschiedene Dinge.
+
+    Das haing frueher zusammen: ein Eintrag ohne Haken bei "drucken"
+    verbrauchte Papier, das nie durch den Drucker lief. Bei abgeschaltetem
+    Drucker lief der Zaehler durchgehend mit, und die Anzeige "Label-Rest"
+    sank, ohne dass jemand druckte.
+    """
+    client.post("/api/labels/roll?size=100")
+    vorher = client.get("/api/labels/roll").json()["used"]
+
+    client.post("/api/labels", json={"name": "Ohne Druck", "print": False})
+    assert client.get("/api/labels/roll").json()["used"] == vorher
+
+    client.post("/api/labels", json={"name": "Mit Druck", "print": True, "count": 3})
+    assert client.get("/api/labels/roll").json()["used"] == vorher + 3
+
+
+def test_nachdruck_verbraucht_ein_etikett(client):
+    """Er tat es real, aber nicht in der Rechnung."""
+    client.post("/api/labels/roll?size=100")
+    etikett = client.post(
+        "/api/labels", json={"name": "Nachdruckprobe", "print": False}
+    ).json()["labels"][0]
+
+    vorher = client.get("/api/labels/roll").json()["used"]
+    client.post(f"/api/labels/reprint/{etikett}")
+    assert client.get("/api/labels/roll").json()["used"] == vorher + 1
+
+
+def test_nummernzaehler_laeuft_unabhaengig_von_der_rolle(client):
+    """Eine neue Rolle darf keine Etikettennummer zweimal vergeben."""
+    erste = client.post(
+        "/api/labels", json={"name": "A", "print": False}
+    ).json()["labels"][0]
+    client.post("/api/labels/roll?size=50")
+    zweite = client.post(
+        "/api/labels", json={"name": "B", "print": False}
+    ).json()["labels"][0]
+    assert erste != zweite

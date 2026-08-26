@@ -45,6 +45,19 @@ _STARTED = time.time()
 
 
 # --------------------------------------------------------------------- Geraete
+@router.post("/ws-ticket")
+async def ws_ticket():
+    """Eintrittskarte fuer den Live-Socket der Oberflaeche.
+
+    Diese Route liegt hinter dem Web-Passwort; wer sie aufrufen darf, darf
+    auch zuhoeren. Siehe device/routes.py fuer den Grund, warum es ueberhaupt
+    eine Karte braucht.
+    """
+    from ..device.routes import TICKET_GUELTIG_S, neues_ui_ticket
+
+    return {"ticket": neues_ui_ticket(), "expires_in": TICKET_GUELTIG_S}
+
+
 @router.get("/devices", response_model=list[DeviceOut])
 async def list_devices(session: AsyncSession = Depends(get_session)):
     rows = (await session.execute(select(Device).order_by(Device.name))).scalars().all()

@@ -6,6 +6,8 @@ import asyncio
 import contextlib
 import json
 import logging
+import secrets
+import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
@@ -63,12 +65,52 @@ async def _mark_offline(device_id: str) -> None:
             await session.commit()
 
 
+# Kurzlebige Eintrittskarten fuer den Oberflaechen-Socket.
+#
+# Das Web-Passwort laeuft ueber HTTP Basic. Bei einem WebSocket kann die Seite
+# aber keine eigenen Kopfzeilen setzen, und ob der Browser die gespeicherten
+# Zugangsdaten an den Handshake haengt, ist nicht festgelegt - Verlass ist
+# darauf keiner. Das Passwort in die Adresse zu schreiben verbietet sich: URLs
+# landen in Protokollen und im Verlauf.
+#
+# Also holt die Seite ueber die (passwortgeschuetzte) REST-Schnittstelle eine
+# Eintrittskarte und legt die an den Socket. Sie gilt eine Minute und genau
+# einmal.
+_TICKETS: dict[str, float] = {}
+TICKET_GUELTIG_S = 60
+
+
+def neues_ui_ticket() -> str:
+    jetzt = time.monotonic()
+    for karte, ablauf in list(_TICKETS.items()):
+        if ablauf < jetzt:
+            _TICKETS.pop(karte, None)
+    karte = secrets.token_urlsafe(24)
+    _TICKETS[karte] = jetzt + TICKET_GUELTIG_S
+    return karte
+
+
+def _ticket_einloesen(karte: str) -> bool:
+    ablauf = _TICKETS.pop(karte, None)
+    return ablauf is not None and ablauf >= time.monotonic()
+
+
+def _ui_websocket_erlaubt(ws: WebSocket) -> bool:
+    """Ohne Web-Passwort steht der Socket offen, sonst braucht er eine Karte."""
+    if not settings.ui_password:
+        return True
+    return _ticket_einloesen(ws.query_params.get("ticket", ""))
+
+
 @router.websocket("/ws/device")
 async def device_socket(ws: WebSocket) -> None:
     token = ws.query_params.get("token", "")
     device_id = (ws.query_params.get("id") or "").strip()
 
-    if token != settings.device_token or not device_id:
+    # compare_digest statt ==: sonst laesst sich das Token ueber die Laufzeit
+    # des Vergleichs Zeichen fuer Zeichen erraten. Die beiden anderen Stellen
+    # im Projekt machen es schon richtig, ausgerechnet die wichtigste nicht.
+    if not device_id or not secrets.compare_digest(token, settings.device_token):
         await ws.close(code=4401, reason="nicht autorisiert")
         log.warning("Geraeteverbindung abgelehnt (id=%r)", device_id)
         return
@@ -229,7 +271,16 @@ async def _store_telemetry(session, device_id: str, sess, msg: dict) -> None:
 
 @router.websocket("/ws/ui")
 async def ui_socket(ws: WebSocket) -> None:
-    """Live-Signale fuer das Web-Interface (nur Server -> Browser)."""
+    """Live-Signale fuer das Web-Interface (nur Server -> Browser).
+
+    Ist ein Web-Passwort gesetzt, gilt es auch hier. Die Verbindung stand
+    vorher jedem offen, waehrend jede REST-Route dahinter verschlossen war -
+    verraten haette sie zwar nur *dass* sich etwas geaendert hat und nicht
+    was, aber "mit Passwort kommt keiner rein" soll ohne Fussnote gelten.
+    """
+    if not _ui_websocket_erlaubt(ws):
+        await ws.close(code=4401, reason="nicht autorisiert")
+        return
     await ws.accept()
     await hub.add_ui(ws)
     try:

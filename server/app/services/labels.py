@@ -21,16 +21,37 @@ _lock = asyncio.Lock()
 
 
 async def next_labels(session: AsyncSession, count: int = 1) -> list[str]:
-    """`count` fortlaufende, garantiert eindeutige Etikettennummern."""
+    """`count` fortlaufende, garantiert eindeutige Etikettennummern.
+
+    Zaehlt bewusst **nicht** die Rolle mit: eine Nummer zu vergeben und Papier
+    zu verbrauchen sind zwei verschiedene Dinge. Dafuer gibt es consume_roll().
+    """
     async with _lock:
         start = int(await settings_store.get(session, "label_counter", 0))
         labels = [f"{settings.label_prefix}{start + i + 1:06d}" for i in range(count)]
         await settings_store.put(session, "label_counter", start + count)
-
-        used = int(await settings_store.get(session, "roll_used", 0))
-        await settings_store.put(session, "roll_used", used + count)
         await session.commit()
     return labels
+
+
+async def consume_roll(session: AsyncSession, count: int = 1) -> None:
+    """Verbrauchte Etiketten der Rolle anrechnen - je Druckauftrag eines.
+
+    Das haing frueher an next_labels(), also am Vergeben der Nummer. Damit
+    zaehlte die Rolle in beide Richtungen falsch: ein Eintrag, der ohne Haken
+    bei "drucken" angelegt wurde, verbrauchte Papier, das nie durch den
+    Drucker lief - und ein Nachdruck verbrauchte keins, obwohl er es tat. Bei
+    abgeschaltetem Drucker lief der Zaehler sogar durchgehend mit.
+
+    Kein Commit hier: der Aufrufer schreibt die Bestandsaenderung und den
+    Verbrauch zusammen fest, sonst steht die Rolle auf einem Stand, zu dem es
+    keinen Eintrag gibt.
+    """
+    if count <= 0:
+        return
+    async with _lock:
+        used = int(await settings_store.get(session, "roll_used", 0))
+        await settings_store.put(session, "roll_used", used + count)
 
 
 async def roll_state(session: AsyncSession) -> dict:
@@ -97,11 +118,6 @@ SAFETY_DOTS = 16
 # Risiko, dass das Etikett aus der Fuehrung rutscht.
 MAX_BACKFEED_DOTS = 100
 
-
-def label_dots(cfg: dict) -> int:
-    """Nutzbare Hoehe eines Etiketts in Punkten."""
-    height_mm = float(cfg.get("label_height_mm", 30))
-    return max(0, int(height_mm * DOTS_PER_MM) - SAFETY_DOTS)
 
 
 def block_dots(block: dict) -> int:
