@@ -1,6 +1,7 @@
 #include "BLEScanner.h"
 
 #include <NimBLEDevice.h>
+#include <esp_task_wdt.h>
 
 #include "config.h"
 
@@ -84,7 +85,16 @@ static void notifyCallback(NimBLERemoteCharacteristic *chr, uint8_t *data,
 
 // ---------------------------------------------------------------------------
 void BLEScanner::begin() {
+    // Beides kann fehlschlagen (Heap erschoepft, alle Client-Plaetze belegt).
+    // Vorher wurde das nicht geprueft und _started trotzdem gesetzt - loop()
+    // hat den Nullzeiger dann beim ersten Kopplungsversuch dereferenziert.
+    // Lieber gar kein Scanner als ein Geraet, das beim Einschalten des
+    // Scanners neu startet.
     _mutex = xSemaphoreCreateMutex();
+    if (_mutex == nullptr) {
+        log_e("Kein Speicher fuer den Scanner-Mutex - BLE bleibt aus");
+        return;
+    }
 
     NimBLEDevice::init("Lebensmittel-Terminal");
     NimBLEDevice::setPower(9);   // dBm - NimBLE 2.x nimmt keine esp_power_level_t mehr
@@ -92,6 +102,12 @@ void BLEScanner::begin() {
     NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
 
     client = NimBLEDevice::createClient();
+    if (client == nullptr) {
+        log_e("NimBLE-Client liess sich nicht anlegen - BLE bleibt aus");
+        vSemaphoreDelete(_mutex);
+        _mutex = nullptr;
+        return;
+    }
     client->setClientCallbacks(&clientCallbacks, false);
 
     // Intervall 30-50 ms, Slave-Latenz 4, Aufsichtszeit 6 s.
@@ -117,6 +133,14 @@ void BLEScanner::begin() {
 void BLEScanner::_onDisconnect() {
     _state = State::Idle;         // auch hier, nicht nur im Fehlerpfad
     _battery = -1;
+
+    // Angefangenen Code wegwerfen. Bricht die Verbindung mitten in einem
+    // Barcode ab (Leerlauf-Timeout, Akku leer, Funkloch), blieben die schon
+    // empfangenen Ziffern sonst stehen und klebten beim naechsten Mal vorn an
+    // den neuen Code. Heraus kaeme eine gueltig aussehende, aber falsche
+    // Nummer - und damit ein falsches Produkt im Bestand. Der Rueckruf laeuft
+    // auf dem NimBLE-Task, dem _buffer ohnehin allein gehoert.
+    _buffer = "";
     // Kurz durchatmen, dann steht sofort wieder der gerichtete
     // Verbindungswunsch - der kostet nichts und faengt den Scanner in dem
     // Moment ein, in dem er sich wieder meldet.
@@ -154,13 +178,12 @@ void BLEScanner::_onReport(const uint8_t *data, size_t length) {
         if (key == 0) continue;
 
         if (key == 0x28 || key == 0x58) {        // Enter / Ziffernblock-Enter
-            if (_buffer.length() > 0) {
-                if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
-                    _pending = _buffer;
-                    xSemaphoreGive(_mutex);
-                }
-                _buffer = "";
-            }
+            if (_buffer.length() > 0 && pushCode(_buffer)) _buffer = "";
+            // Schlug die Uebergabe fehl, bleibt der Code im Puffer stehen und
+            // der naechste Enter versucht es erneut. Vorher wurde _buffer in
+            // jedem Fall geleert - ein Scan verschwand dann spurlos, und der
+            // Benutzer stand vor einem Geraet, das auf seinen Piep hin nichts
+            // tat.
             continue;
         }
         if (key == 0x2A) {                        // Backspace
@@ -174,13 +197,50 @@ void BLEScanner::_onReport(const uint8_t *data, size_t length) {
     }
 }
 
-bool BLEScanner::readCode(String &code) {
-    if (_pending.isEmpty()) return false;
+// Fertigen Code in die Warteschlange legen. Laeuft auf dem NimBLE-Task.
+// false = nicht uebernommen, der Aufrufer behaelt ihn.
+bool BLEScanner::pushCode(const String &code) {
+    if (_mutex == nullptr) return false;
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(20)) != pdTRUE) return false;
-    code = _pending;
-    _pending = "";
+
+    // Ueber eine gewoehnliche Ortsvariable rechnen: ++/-- direkt auf einem
+    // volatile ist seit C++20 verworfen (-Wvolatile), und hier schuetzt
+    // ohnehin der Mutex - volatile ist nur fuer den mutexlosen Vorabblick in
+    // readCode() da.
+    uint8_t count = _codeCount;
+
+    if (count >= CODE_QUEUE) {
+        // Kann nur passieren, wenn der Hauptloop minutenlang nicht abholt -
+        // dann ist der aelteste Code ohnehin nichts mehr wert.
+        log_w("Scan-Warteschlange voll - aeltester Code verworfen");
+        _codeHead = (uint8_t)((_codeHead + 1) % CODE_QUEUE);
+        count = (uint8_t)(count - 1);
+    }
+    _codes[(_codeHead + count) % CODE_QUEUE] = code;
+    _codeCount = (uint8_t)(count + 1);
+
     xSemaphoreGive(_mutex);
-    return code.length() > 0;
+    return true;
+}
+
+bool BLEScanner::readCode(String &code) {
+    // Vorabblick ohne Mutex: _codeCount ist volatile, der Rest wird erst
+    // unter dem Mutex angefasst. So kostet der Normalfall (nichts da) nichts.
+    if (_codeCount == 0 || _mutex == nullptr) return false;
+    if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(20)) != pdTRUE) return false;
+
+    bool got = false;
+    const uint8_t count = _codeCount;
+    if (count > 0) {
+        code = _codes[_codeHead];
+        _codes[_codeHead] = "";          // Speicher gleich zurueckgeben
+        _codeHead = (uint8_t)((_codeHead + 1) % CODE_QUEUE);
+        _codeCount = (uint8_t)(count - 1);
+        got = code.length() > 0;
+    }
+
+    xSemaphoreGive(_mutex);
+    return got;
 }
 
 // Gestaffelter Rueckzug in den Ruhezustand. Ohne Angabe waechst die Wartezeit
@@ -261,7 +321,17 @@ void BLEScanner::beginConnect() {
 // genau einmal pro Kopplung und nur, wenn wirklich ein Scanner geantwortet
 // hat - nicht mehr bei jedem erfolglosen Suchlauf.
 void BLEScanner::finishConnect() {
+    // Die Dienstsuche ist der einzige Punkt in der Firmware, an dem ein
+    // einzelner Loop-Durchlauf laenger als der Watchdog (WDT_TIMEOUT_S)
+    // dauern kann: jede GATT-Abfrage wartet auf die Gegenstelle, und bei
+    // einer angeschlagenen Funkstrecke laeuft sie in die NimBLE-eigene
+    // Zeitgrenze von 30 s. Der Reset am Loop-Anfang liegt dann schon eine
+    // Weile zurueck - ohne das Fuettern hier starten wir das Geraet neu,
+    // obwohl nur der Scanner klemmt.
+    esp_task_wdt_reset();
+
     NimBLERemoteService *hid = client->getService(NimBLEUUID(SVC_HID));
+    esp_task_wdt_reset();
     if (hid == nullptr) {
         // Wichtig zu protokollieren: von aussen sieht das wie ein spontaner
         // Verbindungsabbruch aus (Trenngrund 0x16 - "vom Geraet selbst
@@ -280,6 +350,7 @@ void BLEScanner::finishConnect() {
         if (!chr->getUUID().equals(NimBLEUUID(CHR_REPORT))) continue;
         if (!chr->canNotify()) continue;
         if (chr->subscribe(true, notifyCallback)) subscribed++;
+        esp_task_wdt_reset();
     }
 
     if (subscribed == 0) {
@@ -296,6 +367,7 @@ void BLEScanner::finishConnect() {
         }
     }
 
+    esp_task_wdt_reset();
     const NimBLEAddress peer = client->getPeerAddress();
 
     // Genau eine Kopplung behalten. Sonst zeigt getBondedAddress(0) nach einem
@@ -316,6 +388,7 @@ void BLEScanner::finishConnect() {
             client->getValue(NimBLEUUID((uint16_t)0x1800), NimBLEUUID((uint16_t)0x2A00));
         if (gapName.length()) name = String(gapName.c_str());
     }
+    esp_task_wdt_reset();
     _deviceName = name.isEmpty() ? String(peer.toString().c_str()) : name;
     _address = String(peer.toString().c_str());
     _state = State::Connected;           // Erfolgspfad

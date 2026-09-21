@@ -154,6 +154,12 @@
 
 #define WS_PATH "/ws/device"
 
+// Groesste Nachricht, die vom Server angenommen wird. Grosszuegig bemessen -
+// die laengste Bildschirmbeschreibung (Inventarliste mit Suchbegriff) liegt
+// bei rund 3 KB. Alles darueber ist kein Bildschirm mehr, sondern ein Fehler
+// auf der Gegenseite, und wird verworfen statt den Heap zu fuellen.
+#define MAX_MESSAGE_BYTES 8192
+
 // ============================================================================
 // Zeitverhalten
 // ============================================================================

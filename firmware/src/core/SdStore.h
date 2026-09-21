@@ -24,16 +24,25 @@ public:
     // weiss mounted() beim System-Panel Bescheid.
     void probe() { ensureMounted(); }
 
-    // Fuers System-Panel: ob beim Start eine Karte gefunden wurde. Kein neuer
-    // Mount-Versuch - ein Wechsel im laufenden Betrieb wird nicht erkannt,
-    // wie im Vorgaengerprojekt auch.
+    // Fuers System-Panel: ob zuletzt eine Karte gefunden wurde. Fragt selbst
+    // nicht nach - das tun saveSettings() und loadSettings().
     bool mounted() const { return _mounted; }
 
 private:
     void ensureMounted();
 
     bool _mounted = false;
-    bool _mountTried = false;
+
+    // Naechster erlaubter Mount-Versuch. Ein gelungener Mount wird behalten;
+    // ein misslungener darf spaeter wiederholt werden.
+    //
+    // Vorher gab es genau einen Versuch beim Start, danach nie wieder. Damit
+    // lief ausgerechnet die Wiederherstellung ins Leere, fuer die es die
+    // Karte gibt: wer vor einem Terminal steht, das den Server nicht findet,
+    // steckt die Karte *jetzt* hinein - und Net::trackConnectionHealth fragt
+    // nach 90 Sekunden Ausfall genau danach. Gesehen wurde sie nie.
+    uint32_t _nextTryMs = 0;
+    bool     _everTried = false;
 };
 
 extern SdStore sdStore;

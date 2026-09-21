@@ -20,16 +20,28 @@ static constexpr int16_t  SCROLL_DEAD_PX  = 8;     // px Totzone, bevor der Drag
 // Vorgaengerprojekt hatte dafuer denselben Zaehler.
 static constexpr uint8_t RELEASE_DEBOUNCE_TICKS = 2;
 
-bool Touch::begin() {
+// Wie oft ein Lesefehler in Folge auftreten darf, bevor der Controller als
+// weg gilt. Ein einzelner misslungener Transfer ist Alltag (Stoerung auf dem
+// Bus, Controller gerade beschaeftigt) und darf nichts ausloesen.
+static constexpr uint8_t READ_FAIL_LIMIT = 100;   // 100 x TOUCH_POLL_MS = 2 s
+static constexpr uint32_t PROBE_INTERVAL_MS = 2000;
+
+bool Touch::probe() {
     // Wire wurde bereits in Board::begin() gestartet - dort muss der Bus
     // stehen, bevor der Expander den Display-Reset loesen kann.
     Wire.beginTransmission(TOUCH_ADDR);
-    _ok = Wire.endTransmission() == 0;
+    return Wire.endTransmission() == 0;
+}
+
+bool Touch::begin() {
+    _ok = probe();
+    _nextProbeMs = millis() + PROBE_INTERVAL_MS;
     if (!_ok) {
 #if defined(BOARD_WAVESHARE_35B)
-        log_e("AXS15231B-Touch nicht gefunden (0x%02X)", TOUCH_ADDR);
+        log_e("AXS15231B-Touch nicht gefunden (0x%02X) - es wird weiter gesucht",
+              TOUCH_ADDR);
 #else
-        log_e("FT6336 nicht gefunden (0x%02X)", TOUCH_ADDR);
+        log_e("FT6336 nicht gefunden (0x%02X) - es wird weiter gesucht", TOUCH_ADDR);
 #endif
     }
     return _ok;
@@ -80,13 +92,49 @@ bool Touch::read(int16_t &x, int16_t &y) {
 
 Gesture Touch::poll(bool scrollable) {
     Gesture g;
-    if (!_ok) return g;
 
     if (millis() - _lastPoll < TOUCH_POLL_MS) return g;
     _lastPoll = millis();
 
+    // Kein Controller (noch nicht oder nicht mehr) - in Ruhe weiter suchen.
+    // Der Takt ist bewusst gemaechlich: ein I2C-Transfer an eine Adresse, an
+    // der niemand antwortet, kostet die volle Wartezeit aus Board::begin().
+    if (!_ok) {
+        if ((int32_t)(millis() - _nextProbeMs) < 0) return g;
+        _nextProbeMs = millis() + PROBE_INTERVAL_MS;
+        if (!probe()) return g;
+        log_i("Touchcontroller (0x%02X) meldet sich - Bedienung steht wieder",
+              TOUCH_ADDR);
+        _ok = true;
+        _readFails = 0;
+        _down = false;
+        _dragging = false;
+        _releaseDebounce = 0;
+        return g;
+    }
+
     int16_t px = 0, py = 0;
     const bool contact = read(px, py);
+
+    // Ein Controller, der dauerhaft nicht mehr antwortet, ist kein "Finger
+    // liegt nicht auf": read() liefert dann fuer beides false, und ohne diese
+    // Unterscheidung wuerde die Firmware bis zum Neustart stumm auf Beruehrung
+    // warten, die nie kommt.
+    if (!contact) {
+        if (++_readFails >= READ_FAIL_LIMIT) {
+            _readFails = 0;
+            if (!probe()) {
+                log_e("Touchcontroller antwortet nicht mehr - es wird neu gesucht");
+                _ok = false;
+                _down = false;
+                _dragging = false;
+                _nextProbeMs = millis() + PROBE_INTERVAL_MS;
+                return g;
+            }
+        }
+    } else {
+        _readFails = 0;
+    }
 
     if (contact) {
         _releaseDebounce = 0;

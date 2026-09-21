@@ -133,6 +133,16 @@ cd firmware && pio run --target upload # flashen
 | Folgeetiketten wandern | Ein Etikett muss **genau** eine Teilung Papier verbrauchen, siehe `total_dots()` |
 | Umlaute tanzen in der Zeile | Hinting staucht Zeichen mit Aufsatz; `gen_gfx_font.py` zieht die Grundlinie nach |
 | Kamera-Scan geht am iPhone nicht | Safari hat kein `BarcodeDetector` (ZXing springt ein) **und** braucht HTTPS |
+| Terminal steht nach einem Netzausfall dauerhaft in der Einrichtung | Das selbsttaetig geoeffnete Portal schliesst sich wieder (`Net::stopPortal`); von Hand geoeffnet bleibt es offen |
+| Barcode falsch, mit Zeichen davor | `_buffer` wird auf jedem Trennpfad geleert - ein abgebrochener Code klebte sonst vorn am naechsten |
+| Scan geht spurlos verloren | Uebergabe an den Hauptloop nur unter dem Mutex, und `_buffer` bleibt stehen, wenn sie misslingt |
+| Rueckwaerts unerklaerliche Abstuerze im Heap | Kein `String` ohne Mutex zwischen NimBLE-Task und Hauptloop anfassen |
+| Touch tot, Rest laeuft | `Touch::poll()` sucht den Controller alle 2 s erneut - beim Start wie im Betrieb |
+| SD-Karte wird nicht erkannt, wenn sie spaeter kommt | `SdStore::ensureMounted()` versucht es weiter, solange keine sitzt |
+| Etikett kommt doppelt aus dem Drucker | Ein Auftrag in `sent` wird nur beim Reconnect erneut geschickt, sonst nie |
+| Druckauftrag steht ewig auf `sent` | Nach `PRINT_STALE_SECONDS` zurueck in die Schlange |
+| SQLite-PRAGMA wirkt nicht | `foreign_keys`/`synchronous` gelten je Verbindung - gehoeren in den `connect`-Listener in `db.py`, nicht in `init_db()` |
+| Ein haengender Browser friert das Terminal ein | Jeder Sendevorgang hat eine Zeitgrenze (`hub.SEND_TIMEOUT_S`) |
 
 ## Entwicklungsregeln
 

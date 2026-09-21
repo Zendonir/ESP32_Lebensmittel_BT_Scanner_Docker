@@ -24,7 +24,9 @@ public:
 
     // Einrichtungsportal von Hand oeffnen (System-Panel, "WLAN einrichten"),
     // ohne auf BOOT-beim-Start oder einen anhaltenden Ausfall zu warten.
-    void forcePortal() { if (!_portalActive) startPortal(); }
+    // Von Hand geoeffnet bleibt es offen, bis jemand speichert - nur das
+    // selbsttaetig geoeffnete schliesst sich wieder (siehe startPortal).
+    void forcePortal() { if (!_portalActive) startPortal(false); }
     String ip() const;
     int  rssi() const;
 
@@ -35,7 +37,8 @@ public:
     bool sendEvent(const char *type);
 
 private:
-    void startPortal();
+    void startPortal(bool automatic);
+    void stopPortal();
     void handlePortal();
     void connectWifi();
     void startSocket();
@@ -47,12 +50,21 @@ private:
     bool _wsConnected   = false;
     bool _wsStarted     = false;
     bool _portalActive  = false;
+
+    // Selbsttaetig geoeffnetes Portal (Net::trackConnectionHealth) gegen von
+    // Hand geoeffnetes unterscheiden. Nur das erste darf sich wieder
+    // schliessen, wenn die Verbindung von allein zurueckkommt - wer das
+    // Portal bewusst aufgemacht hat, soll nicht mitten im Tippen
+    // herausgeworfen werden.
+    bool _portalAuto    = false;
+    bool _portalRoutes  = false;   // HTTP-Routen nur einmal anmelden
+    volatile bool _closePortal = false;
+
     uint32_t _lastWifiTry = 0;
-    uint32_t _helloAt     = 0;
 
     // Gestufte Wiederherstellung bei anhaltendem Ausfall - siehe config.h.
     uint32_t _disconnectedSince = 0;   // 0 = gerade verbunden
-    bool     _sdRetryDone       = false;
+    uint32_t _nextSdRetryMs     = 0;   // naechster Blick auf die SD-Karte
 };
 
 extern Net net;

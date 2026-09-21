@@ -209,6 +209,7 @@ async def _handle_message(device_id: str, sess, raw: str, client_ip: str) -> Non
                     int(msg.get("job", 0)),
                     bool(msg.get("ok")),
                     str(msg.get("error", "")),
+                    device_id=device_id,
                 )
 
             elif kind == "pong":

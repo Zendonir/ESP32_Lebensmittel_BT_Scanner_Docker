@@ -75,6 +75,7 @@ private:
     void finishConnect();      // Dienstsuche, einmalig nach erfolgreicher Verbindung
     void backoff(uint32_t delayMs = 0);
     void readBatteryNow();
+    bool pushCode(const String &code);   // aus dem NimBLE-Rueckruf
 
     volatile State _state = State::Idle;
     volatile uint32_t _connectStartedMs = 0;
@@ -85,8 +86,27 @@ private:
 
     String _deviceName;
     String _address;
-    String _buffer;            // Zeichen bis zum Enter
-    String _pending;           // fertiger Code, wartet auf readCode()
+    String _buffer;            // Zeichen bis zum Enter (nur NimBLE-Task)
+
+    // Fertige Codes, die auf readCode() warten.
+    //
+    // Vorher stand hier ein einzelner String, und readCode() sah ihn ohne
+    // Mutex an ("isEmpty()"), waehrend der NimBLE-Task ihn gerade zuwies. Eine
+    // String-Zuweisung gibt den alten Puffer frei und legt einen neuen an -
+    // der Hauptloop las also unter Umstaenden auf einen bereits freigegebenen
+    // Zeiger. Das faellt nicht als Absturz an der Fundstelle auf, sondern
+    // spaeter als zerschossener Heap an voellig anderer Stelle.
+    //
+    // Jetzt: jeder Zugriff auf die Eintraege laeuft unter dem Mutex, und die
+    // Zaehlvariable ist volatile, damit der schnelle Vorabblick in readCode()
+    // ohne Mutex gueltig bleibt. Vier Plaetze statt einem, damit ein zweiter
+    // Barcode nicht den ersten ueberschreibt, falls der Hauptloop gerade
+    // einen Druckauftrag abarbeitet.
+    static constexpr uint8_t CODE_QUEUE = 4;
+    String   _codes[CODE_QUEUE];
+    uint8_t  _codeHead = 0;
+    volatile uint8_t _codeCount = 0;
+
     int    _battery = -1;
 
     uint32_t _nextTryMs   = 0;
