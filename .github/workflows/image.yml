@@ -42,11 +42,19 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # "latest" folgt den *Releases*, nicht dem letzten Commit auf main.
+          #
+          # Vorher zeigte es auf den jeweils neuesten main-Stand - also auf
+          # einen Entwicklungsstand, den niemand geprueft hat. Wer
+          # ":latest" einsetzt, meint aber "die neueste fertige Fassung",
+          # und genau die soll er bekommen. Der Kopf von main bleibt als
+          # ":main" erreichbar, fuer alle, die ihn wirklich wollen.
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
       - name: Bauen und schieben
         uses: docker/build-push-action@v6

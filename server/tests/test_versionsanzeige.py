@@ -169,3 +169,56 @@ async def test_gleichstand_hat_keinen_neuesten_commit(monkeypatch):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_hinweis_sagt_wo_man_hinklickt(monkeypatch):
+    """"Das Abbild neu ziehen" hilft niemandem vor der TrueNAS-Oberflaeche.
+
+    Der Hinweis nennt jetzt die Schritte und das Abbild mit der neuen
+    Versionsnummer - aus derselben Quelle wie die Pruefung, damit beides
+    nicht auseinanderlaeuft.
+    """
+    monkeypatch.setenv("APP_VERSION", "v1.0.0")
+    # Settings ist eingefroren - also eine geaenderte Kopie einsetzen.
+    import dataclasses
+
+    monkeypatch.setattr(
+        updates, "settings",
+        dataclasses.replace(
+            updates.settings,
+            app_image="ghcr.io/zendonir/esp32_lebensmittel_bt_scanner_docker:1.0.0",
+        ),
+    )
+    _client_mit(
+        {"tag_name": "v1.1.0", "published_at": "2026-10-01T08:00:00Z",
+         "name": "Etiketten", "html_url": "https://github.com/x/y/releases/v1.1.0"},
+        monkeypatch,
+    )
+
+    ergebnis = await updates.check(force=True)
+    assert ergebnis["update_verfuegbar"] is True
+    assert ergebnis["abbild"].endswith(":1.1.0")
+
+    schritte = " ".join(ergebnis["anleitung"])
+    assert "TrueNAS" in schritte
+    assert "1.1.0" in schritte          # die Nummer, die einzutragen ist
+    assert "/data" in schritte          # und dass die Daten bleiben
+
+
+@pytest.mark.anyio
+async def test_auf_latest_genuegt_speichern(monkeypatch):
+    """Wer keinen Versionstag faehrt, muss nichts eintragen."""
+    monkeypatch.setenv("APP_VERSION", "main")
+    monkeypatch.setenv("APP_COMMIT", "a" * 40)
+    _client_mit(
+        {"ahead_by": 1, "behind_by": 0,
+         "commits": [{"sha": "b" * 40,
+                      "commit": {"message": "Neu", "committer": {"date": "2026-10-01T08:00:00Z"}}}]},
+        monkeypatch,
+    )
+
+    ergebnis = await updates.check(force=True)
+    schritte = " ".join(ergebnis["anleitung"])
+    assert "Speichern" in schritte
+    assert "Tag" not in schritte.split("Passiert nichts")[0]

@@ -53,6 +53,55 @@ def _ist_tag(version: str) -> bool:
     return version.startswith("v") and version[1:2].isdigit()
 
 
+def _abbild_mit_tag(tag: str) -> str:
+    """Das eigene Abbild, aber mit einem anderen Tag.
+
+    `app_image` steht als vollstaendige Angabe in der Umgebung, damit der
+    Hinweis die Adresse nennen kann, die im NAS wirklich eingetragen ist -
+    und nicht eine, die wir uns zusammenbauen.
+    """
+    basis = settings.app_image.rsplit(":", 1)[0] if ":" in settings.app_image.rsplit("/", 1)[-1] else settings.app_image
+    return f"{basis}:{tag.lstrip('v')}" if tag else settings.app_image
+
+
+def _anleitung(stand: dict, neueste: dict) -> list[str]:
+    """Was zu tun ist - in Klicks, nicht in Allgemeinplaetzen.
+
+    Der Hinweis lautete frueher sinngemaess "das Abbild neu ziehen und den
+    Container ersetzen". Das ist richtig und hilft niemandem, der vor der
+    TrueNAS-Oberflaeche sitzt und wissen will, wo er hinklicken soll.
+    """
+    laeuft_auf_tag = _ist_tag(stand["version"])
+    neu = str(neueste.get("version", "")).lstrip("v")
+
+    schritte = ["In TrueNAS: Apps -> lebensmittel-scanner -> Bearbeiten."]
+    if laeuft_auf_tag and neu:
+        schritte.append(
+            f"Beim Abbild den Tag von {stand['version'].lstrip('v')} auf {neu} "
+            "aendern, dann Speichern."
+        )
+        schritte.append(
+            "Wer dauerhaft die jeweils neueste fertige Fassung will, traegt "
+            "statt einer Nummer 'latest' ein - dann genuegt kuenftig "
+            "Bearbeiten und Speichern."
+        )
+    else:
+        schritte.append(
+            "Ohne etwas zu aendern Speichern. TrueNAS legt den Container "
+            "dabei neu an und zieht das Abbild frisch."
+        )
+        schritte.append(
+            "Passiert nichts, laeuft das Abbild aus einem zwischen"
+            "gespeicherten Stand - dann einmal den Tag von 'latest' auf eine "
+            "Versionsnummer setzen und wieder zurueck."
+        )
+    schritte.append(
+        "Die Daten liegen im Volume unter /data und bleiben unberuehrt. Das "
+        "Terminal verbindet sich von selbst wieder."
+    )
+    return schritte
+
+
 async def _github(client: httpx.AsyncClient, pfad: str) -> Any:
     antwort = await client.get(f"https://api.github.com/repos/{settings.app_repo}{pfad}")
 
@@ -178,14 +227,13 @@ async def check(force: bool = False) -> dict:
         return ergebnis
 
     if ergebnis["update_verfuegbar"]:
-        ergebnis["hinweis"] = (
-            "Ein neuerer Stand liegt bereit. Der Server aktualisiert sich "
-            "nicht selbst: das Abbild neu ziehen und den Container ersetzen "
-            f"({settings.app_image}). Die Daten liegen im Volume unter /data "
-            "und bleiben dabei unberuehrt."
-        )
+        neueste = ergebnis["neueste"] or {}
+        ergebnis["hinweis"] = "Ein neuerer Stand liegt bereit."
+        ergebnis["anleitung"] = _anleitung(stand, neueste)
+        ergebnis["abbild"] = _abbild_mit_tag(str(neueste.get("version", "")))
     else:
         ergebnis["hinweis"] = "Dieser Server laeuft auf dem neuesten Stand."
+        ergebnis["anleitung"] = []
 
     _cache.clear()
     _cache.update(ergebnis)
