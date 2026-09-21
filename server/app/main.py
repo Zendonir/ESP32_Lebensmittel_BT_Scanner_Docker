@@ -32,6 +32,42 @@ log = logging.getLogger("lebensmittel")
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
+class _Oberflaeche(StaticFiles):
+    """Statische Dateien, die der Browser nach einem Update wirklich neu holt.
+
+    Ohne `Cache-Control` wendet ein Browser die sogenannte heuristische
+    Frischedauer an: er behaelt die Datei einfach eine Weile, geschaetzt aus
+    ihrem Alter. Nach einem Server-Update bekam man dadurch das neue
+    `index.html` (das ist die Seite selbst), aber noch das alte `app.js` -
+    und damit eine Oberflaeche, deren Beschriftungen zum Aufbau passen und
+    deren Verhalten nicht.
+
+    Das ist nicht theoretisch: genau so ist das entfernte Feld "Nachschub"
+    zur Falle geworden. Das alte Skript griff darauf zu, fand es im neuen
+    Aufbau nicht mehr, brach mitten im Fuellen der Einstellungen ab - und
+    die halbe Etikettenmaske blieb leer, ohne dass irgendwo etwas von einem
+    Fehler stand.
+
+    `no-cache` heisst nicht "nicht zwischenspeichern", sondern "vor jeder
+    Benutzung nachfragen". Mit dem ETag antwortet der Server dann meist mit
+    einem leeren 304 - es kostet also eine Anfrage, keine Uebertragung.
+    """
+
+    def file_response(self, *args, **kwargs):
+        antwort = super().file_response(*args, **kwargs)
+        antwort.headers["Cache-Control"] = "no-cache"
+        return antwort
+
+
+def _seite(datei: str, medientyp: str | None = None) -> FileResponse:
+    """Eine der beiden HTML-Seiten - aus demselben Grund ohne Vorratshaltung."""
+    return FileResponse(
+        WEB_DIR / datei,
+        media_type=medientyp,
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
@@ -117,20 +153,20 @@ async def unhandled(request: Request, exc: Exception):
 # Web-Interface
 # --------------------------------------------------------------------------
 if WEB_DIR.is_dir():
-    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+    app.mount("/static", _Oberflaeche(directory=WEB_DIR), name="static")
 
     @app.get("/", include_in_schema=False)
     async def index(_: None = Depends(require_ui_auth)):
-        return FileResponse(WEB_DIR / "index.html")
+        return _seite("index.html")
 
     @app.get("/mobile", include_in_schema=False)
     async def mobile(_: None = Depends(require_ui_auth)):
-        return FileResponse(WEB_DIR / "mobile.html")
+        return _seite("mobile.html")
 
     @app.get("/manifest.json", include_in_schema=False)
     async def manifest():
-        return FileResponse(WEB_DIR / "manifest.json")
+        return _seite("manifest.json")
 
     @app.get("/sw.js", include_in_schema=False)
     async def service_worker():
-        return FileResponse(WEB_DIR / "sw.js", media_type="application/javascript")
+        return _seite("sw.js", "application/javascript")

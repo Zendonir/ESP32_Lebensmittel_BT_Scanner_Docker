@@ -678,6 +678,29 @@ $('#sim-form').addEventListener('submit', async (ev) => {
 });
 
 // ---------------------------------------------------------------------- System
+
+// Ein Feld fuellen, ohne dass ein fehlendes den Rest mitreisst.
+//
+// `$('#weg').value = x` wirft, wenn es das Element nicht gibt - und riss damit
+// alles mit, was danach kam. Genau das ist passiert, als das Feld "Nachschub"
+// entfernt wurde: ein Browser mit noch altem Skript und schon neuem Aufbau
+// brach mitten im Fuellen ab, und die halbe Etikettenmaske blieb leer. Ohne
+// Fehlermeldung, ohne Hinweis - man sah nur leere Felder und hielt das
+// Update fuer kaputt.
+//
+// Aufbau und Skript werden hier nie gleichzeitig ausgetauscht (der Browser
+// hat das eine schon und das andere noch nicht), also darf ein Unterschied
+// zwischen beiden nicht mehr kosten als das eine Feld.
+function setzen(auswahl, wert) {
+  const el = $(auswahl);
+  if (!el) {
+    console.warn(`Feld ${auswahl} gibt es nicht mehr - uebersprungen`);
+    return;
+  }
+  if (el.type === 'checkbox') el.checked = Boolean(wert);
+  else el.value = wert;
+}
+
 async function loadSystem() {
   const [info, settings, events] = await Promise.all([
     get('/api/system'), get('/api/settings'), get('/api/events?limit=60'),
@@ -697,21 +720,21 @@ async function loadSystem() {
     Terminals online ${info.devices.count}<br>
     Kanäle ${Object.entries(info.notify).filter(([, v]) => v).map(([k]) => k).join(', ') || 'keine'}`;
 
-  $('#set-expiring-days').value = settings.ui?.expiring_days ?? 7;
-  $('#set-brightness').value = settings.device_ui?.brightness ?? 80;
-  $('#set-idle').value = settings.device_ui?.idle_seconds ?? 60;
-  $('#set-beep').checked = settings.device_ui?.beep ?? true;
-  $('#set-print-enabled').checked = settings.printer?.enabled ?? true;
-  $('#set-paper').value = settings.printer?.paper_chars ?? 32;
-  $('#set-lw').value = settings.printer?.label_width_mm ?? 50;
-  $('#set-lh').value = settings.printer?.label_height_mm ?? 30;
-  $('#set-feededge').value = settings.printer?.label_feed_edge ?? 'hoehe';
-  $('#set-rotate').checked = settings.printer?.label_rotate ?? true;
-  $('#set-code').value = settings.printer?.label_code ?? 'auto';
-  $('#set-codesize').value = settings.printer?.label_code_size ?? 'mittel';
-  $('#set-labelend').value = settings.printer?.label_end ?? 'feed';
-  $('#set-backfeed').value = settings.printer?.backfeed_dots ?? 0;
-  $('#set-dead').value = settings.printer?.label_dead_zone_mm ?? 0;
+  setzen('#set-expiring-days', settings.ui?.expiring_days ?? 7);
+  setzen('#set-brightness', settings.device_ui?.brightness ?? 80);
+  setzen('#set-idle', settings.device_ui?.idle_seconds ?? 60);
+  setzen('#set-beep', settings.device_ui?.beep ?? true);
+  setzen('#set-print-enabled', settings.printer?.enabled ?? true);
+  setzen('#set-paper', settings.printer?.paper_chars ?? 32);
+  setzen('#set-lw', settings.printer?.label_width_mm ?? 50);
+  setzen('#set-lh', settings.printer?.label_height_mm ?? 30);
+  setzen('#set-feededge', settings.printer?.label_feed_edge ?? 'hoehe');
+  setzen('#set-rotate', settings.printer?.label_rotate ?? true);
+  setzen('#set-code', settings.printer?.label_code ?? 'auto');
+  setzen('#set-codesize', settings.printer?.label_code_size ?? 'mittel');
+  setzen('#set-labelend', settings.printer?.label_end ?? 'feed');
+  setzen('#set-backfeed', settings.printer?.backfeed_dots ?? 0);
+  setzen('#set-dead', settings.printer?.label_dead_zone_mm ?? 0);
   await loadLayouts();
 
   $('#sys-events').innerHTML = events.map((e) => `<tr>
