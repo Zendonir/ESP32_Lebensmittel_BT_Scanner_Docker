@@ -154,6 +154,8 @@ void Printer::writeBlocks(JsonArray blocks) {
             code128(String(block["v"] | ""), block["height"] | 40);
         } else if (type == "feed") {
             feedDots(block["dots"] | 0);
+        } else if (type == "form") {
+            formFeed();
         } else if (type == "back") {
             backfeedDots(block["dots"] | 0);
         }
@@ -341,6 +343,21 @@ void Printer::backfeedDots(uint8_t dots) {
     // weiter zurueck als 255 Punkte gehoert das Etikett nicht gezogen.
     if (dots == 0) return;
     uart.write(0x1B); uart.write('j'); uart.write(dots);
+}
+
+// GS FF - drucken und bis zur naechsten Trennluecke bzw. Marke fahren.
+//
+// Fuer gestanzte Etiketten der richtige Abschluss: der Drucker sucht die
+// Luecke mit seinem Sensor, statt sich auf unsere Punkterechnung zu
+// verlassen. Damit stimmt die Registrierung bei *jedem* Etikett neu und ein
+// Rest von ein paar Punkten kann sich nicht ueber die Rolle aufsummieren.
+//
+// Drucker ohne Sensor kennen den Befehl nicht. Die meisten ignorieren ihn
+// stillschweigend - dann fehlt der Restvorschub und das naechste Etikett
+// beginnt zu frueh. Deshalb schickt der Server ihn nur, wenn er in den
+// Einstellungen ausdruecklich verlangt wird (printer.label_end).
+void Printer::formFeed() {
+    uart.write(0x1D); uart.write(0x0C);
 }
 
 void Printer::feedDots(uint16_t dots) {

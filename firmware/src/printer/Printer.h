@@ -38,6 +38,7 @@ private:
     void qr(const String &data, uint16_t reserved);
     void code128(const String &data, uint8_t height);
     void feedDots(uint16_t dots);
+    void formFeed();
     void backfeedDots(uint8_t dots);
     void reset();
     String toCp1252(const String &utf8) const;

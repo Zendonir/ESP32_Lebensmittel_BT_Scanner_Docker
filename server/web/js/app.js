@@ -590,6 +590,7 @@ async function loadSystem() {
   $('#set-rotate').checked = settings.printer?.label_rotate ?? true;
   $('#set-code').value = settings.printer?.label_code ?? 'auto';
   $('#set-codesize').value = settings.printer?.label_code_size ?? 'mittel';
+  $('#set-labelend').value = settings.printer?.label_end ?? 'feed';
   $('#set-backfeed').value = settings.printer?.backfeed_dots ?? 0;
   $('#set-dead').value = settings.printer?.label_dead_zone_mm ?? 0;
   await loadLayouts();
@@ -654,6 +655,7 @@ async function saveLabelGeometry() {
     label_rotate: $('#set-rotate').checked,
     label_code: $('#set-code').value,
     label_code_size: $('#set-codesize').value,
+    label_end: $('#set-labelend').value,
     backfeed_dots: parseInt($('#set-backfeed').value, 10) || 0,
     label_dead_zone_mm: parseFloat($('#set-dead').value) || 0,
   };
@@ -663,7 +665,7 @@ async function saveLabelGeometry() {
 }
 
 ['#set-lw', '#set-lh', '#set-feededge', '#set-rotate', '#set-code',
- '#set-codesize', '#set-backfeed', '#set-dead'].forEach((sel) => {
+ '#set-codesize', '#set-labelend', '#set-backfeed', '#set-dead'].forEach((sel) => {
   const el = $(sel);
   if (el) el.addEventListener('change', () => saveLabelGeometry().catch((e) => toast(e.message, 'error')));
 });

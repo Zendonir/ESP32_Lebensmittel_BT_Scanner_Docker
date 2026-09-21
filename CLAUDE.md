@@ -134,6 +134,7 @@ cd firmware && pio run --target upload # flashen
 | QR-Code wird nicht gelesen | Module muessen quadratisch sein und eine Ruhezone haben; die Reservierung ist ein Vielfaches von 8, weil `ESC *` in Baendern druckt |
 | Einstellung wirkt nicht | Erst pruefen, ob sie ueberhaupt gelesen wird - `post_feed_dots`, `printer.qr` und `printer.code128` standen jahrelang in der Oberflaeche, ohne dass sie jemand auswertete |
 | Etikett laeuft trotzdem ueber | `render_label()` meldet es in `overflow`; kleinerer Code oder kuerzerer Zuschnitt |
+| Versatz summiert sich ueber die Rolle | Bei gestanzten Etiketten `label_end: "formfeed"` - der Drucker sucht die Luecke mit seinem Sensor (`GS FF`) und registriert bei jedem Etikett neu, statt unserer Rechnung zu vertrauen |
 | Umlaute tanzen in der Zeile | Hinting staucht Zeichen mit Aufsatz; `gen_gfx_font.py` zieht die Grundlinie nach |
 | Kamera-Scan geht am iPhone nicht | Safari hat kein `BarcodeDetector` (ZXing springt ein) **und** braucht HTTPS |
 | Terminal steht nach einem Netzausfall dauerhaft in der Einrichtung | Das selbsttaetig geoeffnete Portal schliesst sich wieder (`Net::stopPortal`); von Hand geoeffnet bleibt es offen |

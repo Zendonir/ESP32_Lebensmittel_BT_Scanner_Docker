@@ -173,7 +173,7 @@ def block_dots(block: dict) -> int:
         # acht Punktzeilen auf einmal, weniger geht nicht.
         side = (21 + 2 * QR_QUIET) * int(block.get("scale", 3))
         return -(-side // QR_BAND) * QR_BAND
-    if kind == "feed":
+    if kind in ("feed", "form"):
         return int(block.get("dots", 0))
     if kind == "back":
         # Rueckzug zaehlt negativ. Dadurch stimmt total_dots() weiterhin mit
@@ -506,9 +506,24 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     # Rest bis zur Perforation vorschieben, damit das naechste Etikett oben
     # anfaengt - aber nur den Rest, nicht pauschal. total_dots() enthaelt den
     # Rueckzug negativ, der Vorschub gleicht ihn damit von selbst wieder aus.
+    #
+    # Bei gestanzten Etiketten geht es besser: hat der Drucker einen
+    # Luecken- oder Markensensor, faehrt `GS FF` von selbst bis zum Anfang des
+    # naechsten Etiketts. Dann haengt die Registrierung nicht mehr an unserer
+    # Rechnung, sondern der Drucker findet die Perforation bei *jedem* Etikett
+    # neu - ein Rest von ein paar Punkten kann sich nicht mehr aufsummieren.
+    # Das ist der eigentlich richtige Weg fuer Rollen mit Trennluecke, aber
+    # nicht jeder Drucker kann es; deshalb eine Einstellung und nicht die
+    # Vorgabe.
     remaining = pitch - total_dots(blocks)
     if remaining > 0:
-        blocks.append({"t": "feed", "dots": remaining})
+        if printer_cfg.get("label_end") == "formfeed":
+            # `dots` bleibt drin, damit total_dots() und die Vorschau
+            # weiterhin eine volle Teilung sehen - die Firmware schiebt
+            # stattdessen bis zur Luecke.
+            blocks.append({"t": "form", "dots": remaining})
+        else:
+            blocks.append({"t": "feed", "dots": remaining})
 
     # Jedem Block seine Hoehe mitgeben.
     #
@@ -522,7 +537,7 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     # `dots` und laufen ueber `ESC J` / `ESC j`, die vom Zeilenabstand
     # unabhaengig sind.
     for block in blocks:
-        if block.get("t") not in ("feed", "back"):
+        if block.get("t") not in ("feed", "form", "back"):
             block["h"] = block_dots(block)
 
     return {
@@ -586,7 +601,8 @@ def render_preview_svg(payload: dict, cfg: dict) -> str:
     for block in payload.get("blocks", []):
         kind = block.get("t")
         dots = block_dots(block)
-        if kind == "back":
+        if kind in ("back", "form", "feed"):
+            y += dots if kind != "back" else 0
             continue
         if kind == "text":
             large = block.get("large")

@@ -114,3 +114,23 @@ def test_zu_kleines_etikett_wird_gemeldet_statt_verschluckt():
     cfg = _cfg(label_height_mm=8, label_code="qr", label_code_size="gross")
     payload = L.render_label(ITEM, cfg)
     assert payload["overflow"] > 0
+
+
+def test_formularvorschub_ersetzt_den_berechneten_rest():
+    """Bei gestanzten Etiketten sucht der Drucker die Luecke selbst.
+
+    Die Teilung muss auch dann rechnerisch aufgehen - die Vorschau und
+    `total_dots()` zeigen weiterhin eine volle Teilung -, aber der letzte
+    Block ist `form` statt `feed`. Die Firmware schickt dafuer `GS FF`, und
+    damit stimmt die Registrierung bei jedem Etikett neu, statt an unserer
+    Punkterechnung zu haengen.
+    """
+    payload = L.render_label(ITEM, _cfg(label_end="formfeed"))
+    letzter = payload["blocks"][-1]
+    assert letzter["t"] == "form"
+    assert letzter["dots"] > 0
+    assert L.total_dots(payload["blocks"]) == int(payload["stack_mm"] * L.DOTS_PER_MM)
+
+    # Ohne die Einstellung bleibt es beim berechneten Vorschub.
+    ohne = L.render_label(ITEM, _cfg())
+    assert ohne["blocks"][-1]["t"] == "feed"

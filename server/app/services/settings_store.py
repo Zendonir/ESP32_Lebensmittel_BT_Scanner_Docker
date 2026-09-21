@@ -59,6 +59,17 @@ DEFAULTS: dict[str, Any] = {
         # Angabe rechnet der Server mit der vollen Hoehe und der letzte Block
         # rutscht aufs naechste Etikett.
         "label_dead_zone_mm": 0,
+        # Wie ein Etikett endet.
+        #
+        # "feed" schiebt den ausgerechneten Rest vor - dann haengt alles an
+        # der Rechnung. "formfeed" laesst den Drucker selbst bis zur naechsten
+        # Trennluecke fahren (`GS FF`); die Registrierung stimmt dann bei
+        # jedem Etikett neu und ein Rest kann sich nicht aufsummieren. Das ist
+        # bei gestanzten Etiketten der bessere Weg - aber nur, wenn der
+        # Drucker einen Luecken- oder Markensensor hat. Deshalb nicht die
+        # Vorgabe: wer ihn nicht hat, bekaeme je nach Modell einen vollen
+        # Seitenvorschub oder gar nichts.
+        "label_end": "feed",           # feed | formfeed
         # Rueckzug vor dem Druck, in Punkten. Holt den Totbereich zwischen
         # Druckkopf und Abrisskante zurueck. 0 = aus, weil nicht jeder
         # ESC/POS-Drucker rueckwaerts fahren kann.

@@ -108,7 +108,16 @@ ESC/POS-Bytes um und kennt kein Layout.
 ```
 
 Blockarten: `text` (`align` 0/1/2, `bold`, `large`), `row` (zweispaltig,
-`underline`), `sep`, `qr`, `code128`, `feed`, `back`.
+`underline`), `sep`, `qr`, `code128`, `feed`, `form`, `back`.
+
+`form` schließt ein Etikett mit `GS FF` ab, statt den ausgerechneten Rest
+vorzuschieben: der Drucker sucht die Trennlücke mit seinem eigenen Sensor. Bei
+gestanzten Etiketten ist das der robustere Abschluss, weil die Registrierung
+dann bei jedem Etikett neu stimmt und ein Rest von ein paar Punkten sich nicht
+über die Rolle aufsummieren kann. Drucker ohne Lücken- oder Markensensor
+kennen den Befehl nicht, deshalb schickt ihn der Server nur auf ausdrückliche
+Einstellung (`printer.label_end`). Der Block trägt weiterhin `dots`, damit
+`total_dots()` und die Vorschau eine volle Teilung sehen.
 
 ### `h` – die Höhe ist verbindlich
 
