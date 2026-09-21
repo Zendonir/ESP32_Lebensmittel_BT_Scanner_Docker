@@ -20,8 +20,15 @@ RUN mkdir -p /data && \
     chown -R scanner:scanner /data /app
 USER scanner
 
+# Herkunft des Abbilds. APP_VERSION ist der Tag bzw. Zweig, APP_COMMIT der
+# Stand, APP_BUILT der Zeitpunkt - damit das System-Panel sagen kann, was
+# laeuft, und services/updates.py, ob es der neueste ist.
 ARG APP_VERSION=dev
-ENV APP_VERSION=${APP_VERSION}
+ARG APP_COMMIT=""
+ARG APP_BUILT=""
+ENV APP_VERSION=${APP_VERSION} \
+    APP_COMMIT=${APP_COMMIT} \
+    APP_BUILT=${APP_BUILT}
 
 VOLUME ["/data"]
 EXPOSE 8080

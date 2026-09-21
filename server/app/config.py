@@ -93,6 +93,34 @@ class Settings:
     firmware_dir: str = field(
         default_factory=lambda: os.getenv("FIRMWARE_DIR", "/data/firmware")
     )
+    # --- Herkunft des Servers ---------------------------------------------
+    # Wofuer der eigene Stand verglichen wird (services/updates.py). Steht
+    # getrennt von firmware_repo, auch wenn beide heute aufs selbe zeigen:
+    # das eine ist die Quelle der Terminal-Abbilder, das andere die des
+    # Servers, und wer das Projekt forkt, aendert womoeglich nur eines.
+    app_repo: str = field(
+        default_factory=lambda: os.getenv(
+            "APP_REPO", "Zendonir/ESP32_Lebensmittel_BT_Scanner_Docker"
+        )
+    )
+    # Dienst, der den Container ersetzen darf (Watchtower o.ae.). Leer = der
+    # Update-Knopf in der Oberflaeche erklaert nur, was einzurichten waere.
+    # Bewusst aus der Umgebung und nicht aus den Einstellungen: wer die Adresse
+    # zur Laufzeit setzen koennte, koennte den Server auf einen beliebigen
+    # Dienst zeigen lassen.
+    update_hook_url: str = field(
+        default_factory=lambda: os.getenv("UPDATE_HOOK_URL", "")
+    )
+    update_hook_token: str = field(
+        default_factory=lambda: os.getenv("UPDATE_HOOK_TOKEN", "")
+    )
+
+    app_image: str = field(
+        default_factory=lambda: os.getenv(
+            "APP_IMAGE", "ghcr.io/zendonir/esp32_lebensmittel_bt_scanner_docker:latest"
+        )
+    )
+
     # Repository, aus dessen neuestem Release die Abbilder geholt werden.
     firmware_repo: str = field(
         default_factory=lambda: os.getenv(

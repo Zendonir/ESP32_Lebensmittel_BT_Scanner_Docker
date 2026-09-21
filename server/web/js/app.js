@@ -234,6 +234,113 @@ $('#test-print').addEventListener('click', async () => {
   try { await post('/api/labels/test-print'); toast('Testdruck gesendet', 'success'); }
   catch (e) { toast(e.message, 'error'); }
 });
+// Kalibrierdruck: ein Messstreifen, kein Etikett. Die Anleitung kommt vom
+// Server und nicht aus dieser Datei - sonst beschreibt sie irgendwann einen
+// Streifen, der so gar nicht mehr gedruckt wird.
+$('#calibrate').addEventListener('click', async () => {
+  const box = $('#calibration-guide');
+  try {
+    const r = await post('/api/labels/calibrate');
+    box.innerHTML = `
+      <p class="muted" style="margin:0 0 8px">
+        Streifen gesendet (${r.laenge_mm} mm Papier). Mit einem Lineal
+        nachmessen und die Werte unten eintragen.</p>
+      <ol style="margin:0;padding-left:20px">${r.anleitung.map((a) => `
+        <li style="margin-bottom:8px">
+          <b>${esc(a.titel)}</b><br>
+          <span>${esc(a.messen)}</span><br>
+          <span class="muted" style="font-size:12px">${esc(a.bedeutet)}</span>
+        </li>`).join('')}</ol>`;
+    box.hidden = false;
+    toast('Kalibrierdruck gesendet', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+});
+// Update-Pruefung. Fragt beim Ursprung nach und sagt, wie weit dieser Server
+// zurueck ist - aktualisiert aber nichts: ein Dienst, der sich selbst
+// ersetzt, braucht einen Rueckweg, und den gibt es noch nicht.
+$('#update-check').addEventListener('click', async () => {
+  const box = $('#update-state');
+  box.textContent = 'Wird geprüft …';
+  try {
+    const r = await get('/api/system/update?force=true');
+    if (r.fehler) {
+      box.innerHTML = `<span style="color:var(--warn,#cc9218)">${esc(r.fehler)}</span>`;
+      return;
+    }
+    const teile = [];
+    if (r.update_verfuegbar) {
+      const n = r.neueste || {};
+      teile.push(`<b>Update verfügbar:</b> ${esc(n.version || '')}`
+        + (n.commit_kurz ? ` · ${esc(n.commit_kurz)}` : '')
+        + (r.rueckstand ? ` · ${r.rueckstand} Commit(s) zurück` : ''));
+      if (n.titel) teile.push(`<span class="muted">${esc(n.titel)}</span>`);
+    } else {
+      teile.push('<b>Aktuell.</b>');
+    }
+    if (r.hinweis) teile.push(`<span class="muted">${esc(r.hinweis)}</span>`);
+    teile.push(`<a href="${esc(r.url)}" target="_blank" rel="noopener">Änderungen ansehen</a>`);
+
+    // Den Knopf nur zeigen, wenn es etwas zu tun gibt *und* jemand da ist,
+    // der den Container ersetzen darf. Sonst statt eines toten Knopfes die
+    // Erklärung, was dafür fehlt.
+    const anstoss = r.anstoss || {};
+    $('#update-apply').hidden = !(r.update_verfuegbar && anstoss.moeglich);
+    if (r.update_verfuegbar && !anstoss.moeglich) {
+      teile.push(`<span class="muted">${esc(anstoss.hinweis || '')}</span>`);
+    }
+    box.innerHTML = teile.join('<br>');
+  } catch (e) {
+    box.innerHTML = `<span style="color:var(--danger,#f04640)">${esc(e.message)}</span>`;
+  }
+});
+// Aktualisieren. Der Server lädt dabei nichts und führt nichts aus - er
+// bittet den eingerichteten Dienst, das neue Abbild zu ziehen und diesen
+// Container zu ersetzen. Wir verlieren dabei die Verbindung; statt auf eine
+// Antwort zu warten, warten wir auf das Wiederkommen.
+$('#update-apply').addEventListener('click', async () => {
+  if (!confirm('Server aktualisieren?\n\nDer Container wird dabei ersetzt. '
+      + 'Das Terminal verliert kurz die Verbindung und verbindet sich von '
+      + 'selbst wieder. Die Daten im Volume bleiben unberührt.')) return;
+
+  const box = $('#update-state');
+  const knopf = $('#update-apply');
+  knopf.disabled = true;
+  try {
+    const r = await post('/api/system/update/apply');
+    box.innerHTML = `<b>${esc(r.hinweis)}</b><br>`
+      + '<span class="muted">Warte auf den Neustart …</span>';
+    await warteAufServer(box);
+  } catch (e) {
+    box.innerHTML = `<span style="color:var(--danger,#f04640)">${esc(e.message)}</span>`;
+    knopf.disabled = false;
+  }
+});
+
+// Nach dem Ersetzen antwortet der Server erst nicht und dann wieder. Genau
+// das ist das Signal - eine Rückmeldung vom alten Container kann es nicht
+// geben, der ist ja weg.
+async function warteAufServer(box) {
+  const bis = Date.now() + 180000;
+  let warWeg = false;
+  while (Date.now() < bis) {
+    await new Promise((r) => setTimeout(r, 2000));
+    try {
+      const h = await fetch('/api/health', { cache: 'no-store' });
+      if (!h.ok) throw new Error('nicht bereit');
+      if (warWeg) {
+        box.innerHTML = '<b>Fertig.</b> <span class="muted">Der Server ist '
+          + 'wieder da. Die Seite wird neu geladen …</span>';
+        setTimeout(() => location.reload(), 1500);
+        return;
+      }
+    } catch {
+      warWeg = true;   // jetzt wird ersetzt
+      box.innerHTML = '<b>Der Server wird ersetzt …</b>';
+    }
+  }
+  box.innerHTML = '<span class="muted">Der Server ist nach drei Minuten nicht '
+    + 'zurückgekommen. Im TrueNAS nachsehen, ob die App läuft.</span>';
+}
 $('#queue-reload').addEventListener('click', () => loadLabels());
 $('#queue-clear').addEventListener('click', async () => {
   await del('/api/labels/queue');
@@ -571,8 +678,14 @@ async function loadSystem() {
   ]);
   state.settings = settings;
 
+  // Fassung lesbar statt als 40-Zeichen-Hash: Zweig bzw. Tag, kurzer Commit,
+  // Baudatum. Ohne das war die Frage "laeuft hier der aktuelle Stand?" vom
+  // Panel aus nicht zu beantworten.
+  const stand = [esc(info.version)];
+  if (info.commit_kurz) stand.push(esc(info.commit_kurz));
+  if (info.gebaut) stand.push(fmtTime(info.gebaut));
   $('#sys-info').innerHTML = `
-    Version ${esc(info.version)}<br>Python ${esc(info.python)}<br>
+    Fassung ${stand.join(' · ')}<br>Python ${esc(info.python)}<br>
     Datenbank ${esc(info.database)}<br>Zeitzone ${esc(info.timezone)}<br>
     Laufzeit ${Math.floor(info.uptime / 3600)} h ${Math.floor((info.uptime % 3600) / 60)} min<br>
     Terminals online ${info.devices.count}<br>
@@ -584,15 +697,13 @@ async function loadSystem() {
   $('#set-beep').checked = settings.device_ui?.beep ?? true;
   $('#set-print-enabled').checked = settings.printer?.enabled ?? true;
   $('#set-paper').value = settings.printer?.paper_chars ?? 32;
-  $('#set-feed').value = settings.printer?.post_feed_dots ?? 86;
-  $('#set-qr').checked = settings.printer?.qr ?? true;
-  $('#set-c128').checked = settings.printer?.code128 ?? true;
   $('#set-lw').value = settings.printer?.label_width_mm ?? 50;
   $('#set-lh').value = settings.printer?.label_height_mm ?? 30;
   $('#set-feededge').value = settings.printer?.label_feed_edge ?? 'hoehe';
   $('#set-rotate').checked = settings.printer?.label_rotate ?? true;
   $('#set-code').value = settings.printer?.label_code ?? 'auto';
   $('#set-codesize').value = settings.printer?.label_code_size ?? 'mittel';
+  $('#set-labelend').value = settings.printer?.label_end ?? 'feed';
   $('#set-backfeed').value = settings.printer?.backfeed_dots ?? 0;
   $('#set-dead').value = settings.printer?.label_dead_zone_mm ?? 0;
   await loadLayouts();
@@ -615,9 +726,6 @@ $('#set-device-save').addEventListener('click', () => saveSetting('device_ui', {
 $('#set-printer-save').addEventListener('click', () => saveSetting('printer', {
   enabled: $('#set-print-enabled').checked,
   paper_chars: parseInt($('#set-paper').value, 10) || 32,
-  post_feed_dots: parseInt($('#set-feed').value, 10) || 0,
-  qr: $('#set-qr').checked,
-  code128: $('#set-c128').checked,
 }));
 
 async function saveSetting(key, body) {
@@ -660,6 +768,7 @@ async function saveLabelGeometry() {
     label_rotate: $('#set-rotate').checked,
     label_code: $('#set-code').value,
     label_code_size: $('#set-codesize').value,
+    label_end: $('#set-labelend').value,
     backfeed_dots: parseInt($('#set-backfeed').value, 10) || 0,
     label_dead_zone_mm: parseFloat($('#set-dead').value) || 0,
   };
@@ -669,7 +778,7 @@ async function saveLabelGeometry() {
 }
 
 ['#set-lw', '#set-lh', '#set-feededge', '#set-rotate', '#set-code',
- '#set-codesize', '#set-backfeed', '#set-dead'].forEach((sel) => {
+ '#set-codesize', '#set-labelend', '#set-backfeed', '#set-dead'].forEach((sel) => {
   const el = $(sel);
   if (el) el.addEventListener('change', () => saveLabelGeometry().catch((e) => toast(e.message, 'error')));
 });

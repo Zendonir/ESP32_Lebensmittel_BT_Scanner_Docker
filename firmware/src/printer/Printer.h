@@ -31,17 +31,31 @@ public:
 
 private:
     void writeBlocks(JsonArray blocks);
-    void textLine(const String &text, uint8_t align, bool bold, bool large);
-    void row(const String &key, const String &value, bool underline);
-    void separator();
-    void qr(const String &data, uint8_t scale);
+    void lineSpacing(uint8_t dots);
+    void textLine(const String &text, uint8_t align, bool bold, bool large, uint16_t height);
+    void row(const String &key, const String &value, bool underline, uint16_t height);
+    void separator(uint16_t height);
+    void qr(const String &data, uint16_t reserved);
+    void raster(const char *b64, size_t b64len, uint16_t w, uint16_t h);
     void code128(const String &data, uint8_t height);
     void feedDots(uint16_t dots);
+    void formFeed();
     void backfeedDots(uint8_t dots);
     void reset();
     String toCp1252(const String &utf8) const;
 
     static constexpr size_t MAX_QUEUE = 8;
+
+    // Ruhezone des QR-Codes in Modulen. Muss mit services/labels.QR_QUIET
+    // uebereinstimmen - der Server reserviert danach die Hoehe.
+    static constexpr int QR_QUIET = 2;
+
+    // Obergrenze fuer einen einzelnen Rasterblock, in Bytes auf der Leitung.
+    // Muss unter der Schwelle in process() bleiben, sonst wartet write() doch
+    // wieder auf die 9600-Baud-Leitung und der Loop steht. Ein ganzes Etikett
+    // als Bild (50x30 mm sind rund 12 KB) passt damit noch nicht - dafuer
+    // muesste process() das Bild ueber mehrere Durchlaeufe verteilen.
+    static constexpr size_t MAX_RASTER_TRAFFIC = 4096;
 
     struct Job {
         int jobId = 0;
@@ -53,6 +67,10 @@ private:
     uint8_t _chars = 32;
     bool    _rotate = false;   // Hochkant: Text um 90 Grad gedreht
     bool    _ready = false;
+
+    // Zuletzt gesetzter Zeilenabstand (`ESC 3 n`). -1 = unbekannt, der
+    // naechste Block setzt ihn in jedem Fall.
+    int16_t _spacing = -1;
 };
 
 extern Printer printer;

@@ -21,7 +21,7 @@ from .api import catalog, firmware, inventory, labels, system
 from .config import settings
 from .db import init_db, session_scope
 from .device import routes as device_routes
-from .services import scheduler, seed
+from .services import scheduler, seed, updates
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -42,7 +42,17 @@ async def lifespan(app: FastAPI):
         log.warning(
             "DEVICE_TOKEN steht auf dem Standardwert - bitte in der .env aendern!"
         )
-    log.info("Server bereit auf %s:%s", settings.host, settings.port)
+    stand = updates.current()
+    herkunft = " · ".join(
+        teil for teil in (stand["commit_kurz"], stand["gebaut"]) if teil
+    )
+    log.info(
+        "Server bereit auf %s:%s - Fassung %s%s",
+        settings.host,
+        settings.port,
+        stand["version"],
+        f" ({herkunft})" if herkunft else "",
+    )
     try:
         yield
     finally:
@@ -52,7 +62,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Lebensmittel-Scanner",
     description="Zentrale Datenverwaltung fuer ESP32-BLE-Scanner-Terminals",
-    version="2.0",
+    # Nicht noch einmal fest eintragen: hier stand "2.0", waehrend das
+    # System-Panel APP_VERSION zeigte. Zwei Versionsangaben, die sich
+    # widersprechen, sind schlimmer als eine ungenaue.
+    version=updates.current()["version"],
     lifespan=lifespan,
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",

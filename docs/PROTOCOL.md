@@ -97,20 +97,79 @@ ESC/POS-Bytes um und kennt kein Layout.
 {
   "t": "print", "job": 17, "chars": 32,
   "blocks": [
-    { "t": "text", "v": "Haushalt Mueller", "align": 1 },
-    { "t": "text", "v": "Kirschmarmelade", "align": 1, "bold": true, "large": true },
-    { "t": "sep" },
-    { "t": "row", "k": "MHD", "v": "24.12.2026", "underline": true },
-    { "t": "row", "k": "Menge", "v": "500 g" },
-    { "t": "code128", "v": "LEB000042" },
-    { "t": "qr", "v": "LEB000042" },
-    { "t": "feed", "dots": 86 }
+    { "t": "text", "v": "Kirschmarmelade", "align": 1, "bold": true, "large": true, "h": 48 },
+    { "t": "sep", "h": 24 },
+    { "t": "row", "k": "MHD", "v": "24.12.2026", "underline": true, "h": 24 },
+    { "t": "row", "k": "Menge", "v": "500 g", "h": 24 },
+    { "t": "code128", "v": "LEB000042", "height": 30, "h": 30 },
+    { "t": "feed", "dots": 42 }
   ]
 }
 ```
 
 Blockarten: `text` (`align` 0/1/2, `bold`, `large`), `row` (zweispaltig,
-`underline`), `sep`, `qr`, `code128`, `feed`.
+`underline`), `sep`, `qr`, `code128`, `raster`, `feed`, `form`, `back`.
+
+`raster` druckt ein fertig gerechnetes Schwarzweißbild: `w`/`h` in Punkten,
+`d` die Bilddaten als Base64 – zeilenweise, ein Bit je Punkt, jede Zeile auf
+ganze Bytes aufgefüllt, höchstwertiges Bit links. Die Firmware sortiert daraus
+die Bänder für `ESC *`.
+
+Damit lässt sich etwas drucken, was der Textmodus grundsätzlich nicht kann:
+zwei Dinge nebeneinander. Im Textmodus kennt der Drucker nur Zeilen, weshalb
+ein QR-Code dort immer seine volle Höhe kostet, statt sich den Platz mit dem
+Text zu teilen. Heute nutzt das nur der Kalibrierdruck
+(`services/calibration.py`); ein ganzes Etikett als ein Bild geht noch nicht,
+weil `Printer::process()` einen Auftrag am Stück in den Sendepuffer schreibt
+und 50×30 mm rund 12 KB wären – dafür müsste das Bild über mehrere
+Loop-Durchläufe verteilt werden. Bis dahin lehnt die Firmware zu große Blöcke
+ab (`MAX_RASTER_TRAFFIC`) und schiebt stattdessen den Platz leer vor, damit
+wenigstens die Teilung stimmt.
+
+`form` schließt ein Etikett mit `GS FF` ab, statt den ausgerechneten Rest
+vorzuschieben: der Drucker sucht die Trennlücke mit seinem eigenen Sensor. Bei
+gestanzten Etiketten ist das der robustere Abschluss, weil die Registrierung
+dann bei jedem Etikett neu stimmt und ein Rest von ein paar Punkten sich nicht
+über die Rolle aufsummieren kann. Drucker ohne Lücken- oder Markensensor
+kennen den Befehl nicht, deshalb schickt ihn der Server nur auf ausdrückliche
+Einstellung (`printer.label_end`). Der Block trägt weiterhin `dots`, damit
+`total_dots()` und die Vorschau eine volle Teilung sehen.
+
+### `h` – die Höhe ist verbindlich
+
+Jeder Block außer `feed` und `back` trägt in `h` die Höhe in Punkten, mit der
+der Server gerechnet hat. Die Firmware stellt den Zeilenabstand vor jeder
+Zeile ausdrücklich darauf ein (`ESC 3 n`), statt den Standardabstand des
+Druckers zu nehmen.
+
+Das ist keine Feinheit, sondern die Bedingung dafür, dass das Konzept
+überhaupt trägt. Vorher rechnete der Server mit 24 Punkten je Zeile
+(`LINE_DOTS`, exakt die Schrifthöhe von Font A) und sagte es dem Drucker nie;
+`ESC @` stellt dort den Standard ein – laut Spezifikation 1/6 Zoll, bei
+203 dpi also rund 34 Punkte. Beim klassischen Zuschnitt auf 50×30 mm ergab das
+314 statt 240 Punkten: **9,2 mm Überlauf je Etikett**, nach drei Stück ein
+ganzes Etikett Versatz. Totbereich, Rückzug und `SAFETY_DOTS` waren allesamt
+Gegenmittel gegen ein Symptom, dessen Ursache diese Rechnung selbst war.
+
+Zwei Blöcke rechnen nicht über den Zeilenabstand:
+
+* `code128` – der Abstand wird auf 0 gesetzt, `GS k` schiebt genau seine
+  Strichcodehöhe vor. `h` ist deshalb gleich `height`.
+* `qr` – `h` ist der **reservierte** Platz, ein Vielfaches von 8 (`ESC *`
+  druckt immer acht Punktzeilen auf einmal). Die Firmware leitet daraus ihre
+  Modulgröße ab, zeichnet den Code quadratisch mit zwei Modulen Ruhezone und
+  füllt auf `h` auf. Vorher steckten zwei Modulzeilen in einem Durchgang –
+  senkrecht also fest 4 Punkte je Modul, waagerecht aber `scale`: quadratisch
+  war der Code nur bei Skalierung 4, bei „mittel" 3:4 gestaucht, bei „klein"
+  2:4. Eine Ruhezone wurde gar nicht gedruckt.
+
+Fehlt `h`, fällt die Firmware auf die Schrifthöhe zurück – ein älterer Server
+bleibt damit bedienbar.
+
+Der Renderer meldet im Auftrag außerdem `overflow`: die Punkte, die über die
+bedruckbare Höhe hinausgehen. 0 heißt, das Etikett endet genau an der
+Perforation. Alles andere gehört in die Oberfläche, statt still aufs
+Folgeetikett zu laufen.
 
 Ablauf und Fehlerbehandlung:
 

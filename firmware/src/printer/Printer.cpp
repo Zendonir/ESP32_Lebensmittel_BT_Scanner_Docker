@@ -2,6 +2,8 @@
 
 #include <qrcode.h>
 
+#include "mbedtls/base64.h"
+
 Printer printer;
 
 static HardwareSerial uart(1);
@@ -11,7 +13,12 @@ void Printer::begin(uint32_t baud) {
     // Sekunde Leitungszeit. Passt es komplett in den Puffer, kehrt write()
     // sofort zurueck und der UART-Treiber sendet im Hintergrund weiter - sonst
     // steht der ganze Loop (und damit die Bedienung) waehrend des Druckens.
-    uart.setTxBufferSize(2048);
+    //
+    // 4 KB statt 2: ein QR-Code als Bitmap ist allein rund ein Kilobyte, dazu
+    // kommen die Textzeilen. Mit 2 KB und der alten Schwelle von 1 KB konnte
+    // ein Etikett groesser sein als der freie Platz - dann lief write() doch
+    // wieder auf die 9600-Baud-Leitung und der Loop stand.
+    uart.setTxBufferSize(8192);
     uart.begin(baud, SERIAL_8N1, PRINTER_RX, PRINTER_TX);
     _ready = true;
     reset();
@@ -20,6 +27,11 @@ void Printer::begin(uint32_t baud) {
 void Printer::reset() {
     uart.write((const uint8_t *)"\x1B\x40", 2);   // ESC @ - Initialisieren
     uart.write((const uint8_t *)"\x1B\x74\x10", 3);  // ESC t 16 - Codepage WPC1252
+    // ESC @ stellt den Standard-Zeilenabstand des Druckers wieder her (laut
+    // Spezifikation 1/6 Zoll, also rund 34 Punkte bei 203 dpi). Was das
+    // konkret ist, weiss nur der Drucker - deshalb gilt er hier als
+    // unbekannt, und der erste Block setzt ihn in jedem Fall neu.
+    _spacing = -1;
 }
 
 // UTF-8 -> CP1252. Der Drucker kennt kein UTF-8; ohne diese Umsetzung werden
@@ -81,7 +93,7 @@ int Printer::process(bool &ok, String &error) {
     // Sonst laeuft der Puffer bei mehreren Auftraegen hintereinander voll und
     // write() wartet doch wieder auf die 9600-Baud-Leitung. Der Auftrag bleibt
     // solange in der Warteschlange und kommt im naechsten Durchlauf dran.
-    if (uart.availableForWrite() < 1024) return 0;
+    if (uart.availableForWrite() < 6144) return 0;
 
     Job &job = _queue[_head];
     const int id = job.jobId;
@@ -104,31 +116,66 @@ int Printer::process(bool &ok, String &error) {
     return id;
 }
 
+// Zeilenabstand ausdruecklich setzen (`ESC 3 n`, Angabe in Punkten).
+//
+// Das ist die Stelle, an der das Etikettenkonzept vorher auseinanderlief.
+// `ESC @` in reset() stellt den *Standardabstand* des Druckers ein - laut
+// Spezifikation 1/6 Zoll, bei 203 dpi also rund 34 Punkte. Der Server rechnet
+// aber mit 24 (services/labels.LINE_DOTS), und niemand hat dem Drucker je
+// gesagt, dass er sich daran halten soll. Beim klassischen Zuschnitt kamen so
+// 314 statt 240 Punkten heraus: jedes Etikett schob 9,2 mm zu weit, nach drei
+// Stueck war der Stapel ein ganzes Etikett verschoben.
+//
+// Jetzt schickt der Server zu jedem Block die Hoehe mit, mit der er gerechnet
+// hat, und hier wird sie durchgesetzt.
+void Printer::lineSpacing(uint8_t dots) {
+    if (_spacing == (int16_t)dots) return;   // schon gesetzt, nichts zu tun
+    uart.write(0x1B); uart.write('3'); uart.write(dots);
+    _spacing = (int16_t)dots;
+}
+
 void Printer::writeBlocks(JsonArray blocks) {
     if (blocks.isNull()) return;
     for (JsonObject block : blocks) {
         const String type = String(block["t"] | "");
+        // `h` ist die Hoehe, mit der der Server gerechnet hat. Fehlt sie
+        // (aelterer Server), bleibt es beim bisherigen Verhalten.
+        const uint16_t height = block["h"] | 0;
+
         if (type == "text") {
             textLine(String(block["v"] | ""), block["align"] | 0,
-                     block["bold"] | false, block["large"] | false);
+                     block["bold"] | false, block["large"] | false, height);
         } else if (type == "row") {
             row(String(block["k"] | ""), String(block["v"] | ""),
-                block["underline"] | false);
+                block["underline"] | false, height);
         } else if (type == "sep") {
-            separator();
+            separator(height);
         } else if (type == "qr") {
-            qr(String(block["v"] | ""), block["scale"] | 3);
+            qr(String(block["v"] | ""), height);
         } else if (type == "code128") {
             code128(String(block["v"] | ""), block["height"] | 40);
+        } else if (type == "raster") {
+            // as<const char *>() statt String: die Bilddaten sind das
+            // Groesste in der Nachricht, und eine Kopie davon auf dem Heap
+            // waere reine Verschwendung.
+            const char *daten = block["d"] | "";
+            raster(daten, strlen(daten), block["w"] | 0, block["h"] | 0);
         } else if (type == "feed") {
             feedDots(block["dots"] | 0);
+        } else if (type == "form") {
+            formFeed();
         } else if (type == "back") {
             backfeedDots(block["dots"] | 0);
         }
     }
 }
 
-void Printer::textLine(const String &text, uint8_t align, bool bold, bool large) {
+void Printer::textLine(const String &text, uint8_t align, bool bold, bool large,
+                       uint16_t height) {
+    // Ohne Angabe die Schrifthoehe nehmen - genau das, was der Server
+    // ohnehin rechnet.
+    lineSpacing(height ? (uint8_t)min<uint16_t>(height, 255) : (large ? 48 : 24));
+
     // ESC V - 90 Grad gedreht. Hochkant laeuft die Schrift ueber die lange
     // Kante des Etiketts; ohne diesen Befehl muesste die Firmware die Zeilen
     // selbst als Bitmap rechnen.
@@ -146,7 +193,9 @@ void Printer::textLine(const String &text, uint8_t align, bool bold, bool large)
     uart.write(0x1B); uart.write('V'); uart.write((uint8_t)0);
 }
 
-void Printer::row(const String &key, const String &value, bool underline) {
+void Printer::row(const String &key, const String &value, bool underline,
+                  uint16_t height) {
+    lineSpacing(height ? (uint8_t)min<uint16_t>(height, 255) : 24);
     uart.write(0x1B); uart.write('a'); uart.write((uint8_t)0);
 
     const String k = toCp1252(key);
@@ -163,7 +212,8 @@ void Printer::row(const String &key, const String &value, bool underline) {
     uart.write((const uint8_t *)"\r\n", 2);
 }
 
-void Printer::separator() {
+void Printer::separator(uint16_t height) {
+    lineSpacing(height ? (uint8_t)min<uint16_t>(height, 255) : 24);
     uart.write(0x1B); uart.write('a'); uart.write((uint8_t)0);
     for (uint8_t i = 0; i < _chars; i++) uart.write('-');
     uart.write((const uint8_t *)"\r\n", 2);
@@ -198,6 +248,10 @@ void Printer::code128(const String &data, uint8_t height) {
         return;
     }
 
+    // Abstand auf 0: `GS k` schiebt selbst genau die Strichcodehoehe vor. Der
+    // Zeilenabstand des abschliessenden `\r\n` kaeme sonst obendrauf, und
+    // genau den hatte der Server mit CODE128_FEED = 10 nur geraten.
+    lineSpacing(0);
     uart.write(0x1B); uart.write('a'); uart.write(1);      // zentriert
     uart.write(0x1D); uart.write('h'); uart.write(height); // Hoehe in Dots
     uart.write(0x1D); uart.write('w'); uart.write(2);      // Modulbreite
@@ -210,48 +264,79 @@ void Printer::code128(const String &data, uint8_t height) {
     uart.write((const uint8_t *)"\r\n", 2);
 }
 
-void Printer::qr(const String &data, uint8_t scale) {
-    if (data.isEmpty()) return;
-    if (scale < 2) scale = 2;
+void Printer::qr(const String &data, uint16_t reserved) {
+    if (data.isEmpty() || reserved == 0) return;
 
     // Der eingebaute QR-Befehl (GS ( k) fehlt vielen guenstigen Druckern.
     // Deshalb wird der Code selbst gerechnet und als Bitmap gedruckt - das
     // funktioniert auf jedem ESC/POS-Geraet.
-    // Kleinste Version nehmen, die die Daten fasst. Version 3 war fest
-    // verdrahtet und damit immer 29 Module breit - eine Etikettennummer wie
-    // "LEB000123" passt in Version 1 mit 21 Modulen. Auf 30 mm Etikettenhoehe
-    // sind das gesparte 8 Module mal Skalierung, also gut ein Viertel.
     QRCode qrcode;
     uint8_t buffer[qrcode_getBufferSize(3)];
     uint8_t version = 0;
     for (uint8_t v = 1; v <= 3; v++) {
         if (qrcode_initText(&qrcode, buffer, v, ECC_MEDIUM, data.c_str()) == 0) { version = v; break; }
     }
-    if (version == 0) return;
+    if (version == 0) {
+        // Nicht einfach nichts tun: der Platz ist eingeplant, und wer ihn
+        // nicht vorschiebt, verschiebt alle folgenden Etiketten.
+        log_w("QR-Code passt in keine Version - Platz wird vorgeschoben");
+        feedDots(reserved);
+        return;
+    }
 
-    // Ein ESC-*-Durchgang druckt 8 Punktzeilen. Damit der Code nicht in die
-    // Laenge gezogen wird, stecken zwei Modulzeilen in einem Durchgang -
-    // senkrecht und waagerecht also derselbe Faktor.
-    const int size = qrcode.size;
-    const int widthDots = size * scale;
+    // Quadratische Module mit Ruhezone.
+    //
+    // Vorher steckten zwei Modulzeilen in einem `ESC *`-Durchgang (0xF0 oben,
+    // 0x0F unten) - senkrecht also fest 4 Punkte je Modul, waagerecht aber
+    // `scale`. Quadratisch war der Code damit nur bei Skalierung 4; bei der
+    // Vorgabe "mittel" war er 3:4 gestaucht, bei "klein" 2:4. Eine Ruhezone
+    // wurde gar nicht gedruckt. Beides zusammen ergibt Codes, an denen ein
+    // Scanner scheitert.
+    //
+    // Die Skalierung wird jetzt aus dem Platz abgeleitet, den der Server
+    // reserviert hat. Damit passt der Code immer genau hinein, egal welche
+    // Version die Daten verlangen.
+    const int modules = qrcode.size + 2 * QR_QUIET;
+    int scale = reserved / modules;
+    while (scale > 0 && (((modules * scale) + 7) / 8) * 8 > reserved) scale--;
+    if (scale < 1) {
+        log_w("QR-Code passt nicht in %u Punkte - Platz wird vorgeschoben", reserved);
+        feedDots(reserved);
+        return;
+    }
+
+    const int side = modules * scale;
+    const int bands = (side + 7) / 8;
+    const int emitted = bands * 8;
 
     uart.write(0x1B); uart.write('a'); uart.write(1);      // zentriert
-    uart.write(0x1B); uart.write('3'); uart.write(8);      // Zeilenabstand = 8 Punkte
+    lineSpacing(8);                                        // ein Band je Zeile
 
-    for (int y = 0; y < size; y += 2) {
+    for (int band = 0; band < bands; band++) {
         uart.write(0x1B); uart.write('*'); uart.write((uint8_t)0);   // 8-Punkt-Einfachdichte
-        uart.write((uint8_t)(widthDots & 0xFF));
-        uart.write((uint8_t)(widthDots >> 8));
+        uart.write((uint8_t)(side & 0xFF));
+        uart.write((uint8_t)(side >> 8));
 
-        for (int x = 0; x < widthDots; x++) {
-            const int mx = x / scale;
-            const bool top = qrcode_getModule(&qrcode, mx, y);
-            const bool bottom = (y + 1 < size) && qrcode_getModule(&qrcode, mx, y + 1);
-            uart.write((uint8_t)((top ? 0xF0 : 0x00) | (bottom ? 0x0F : 0x00)));
+        for (int x = 0; x < side; x++) {
+            const int mx = x / scale - QR_QUIET;
+            uint8_t column = 0;
+            for (uint8_t bit = 0; bit < 8; bit++) {
+                const int y = band * 8 + bit;
+                if (y >= side) break;
+                const int my = y / scale - QR_QUIET;
+                if (mx >= 0 && my >= 0 && mx < qrcode.size && my < qrcode.size &&
+                    qrcode_getModule(&qrcode, mx, my)) {
+                    column |= (uint8_t)(0x80 >> bit);
+                }
+            }
+            uart.write(column);
         }
         uart.write((const uint8_t *)"\r\n", 2);
     }
-    uart.write(0x1B); uart.write('2');                     // Zeilenabstand zurueck
+
+    // Auf die reservierte Hoehe auffuellen. Die Baender sind ein Vielfaches
+    // von 8, die Reservierung ist es auch - der Rest ist in aller Regel 0.
+    if (reserved > emitted) feedDots((uint16_t)(reserved - emitted));
 }
 
 void Printer::backfeedDots(uint8_t dots) {
@@ -266,6 +351,98 @@ void Printer::backfeedDots(uint8_t dots) {
     // weiter zurueck als 255 Punkte gehoert das Etikett nicht gezogen.
     if (dots == 0) return;
     uart.write(0x1B); uart.write('j'); uart.write(dots);
+}
+
+// Fertig gerechnetes Schwarzweissbild drucken.
+//
+// Zeilenweise, ein Bit je Punkt, jede Zeile auf ganze Bytes aufgefuellt,
+// hoechstwertiges Bit links - so schickt es der Server, und so liegt es auch
+// im Speicher. Der Drucker will es dagegen spaltenweise in Baendern von acht
+// Punktzeilen (`ESC *`), deshalb wird hier umsortiert.
+//
+// Das ist bewusst ein allgemeiner Block und nicht nur ein Hilfsmittel fuer
+// den Kalibrierdruck: damit laesst sich spaeter ein ganzes Etikett
+// serverseitig setzen und als ein Bild schicken. Erst dann kann etwas
+// nebeneinander stehen - im Textmodus kennt der Drucker nur Zeilen, weshalb
+// der QR-Code dort immer seine volle Hoehe kostet.
+void Printer::raster(const char *b64, size_t b64len, uint16_t w, uint16_t h) {
+    if (w == 0 || h == 0 || b64 == nullptr) return;
+
+    const size_t rowBytes = (w + 7u) / 8u;
+    const size_t bands    = (h + 7u) / 8u;
+    const size_t needed   = rowBytes * h;
+
+    // Wie viele Bytes das auf der Leitung wird. Passt es nicht in den
+    // Sendepuffer, wuerde write() auf die 9600-Baud-Leitung warten und der
+    // ganze Loop stuende - genau das, was die Warteschlange vermeiden soll.
+    // Lieber den Platz leer vorschieben und es melden: das Etikett ist dann
+    // unvollstaendig, aber die Teilung stimmt und das Geraet bleibt bedienbar.
+    const size_t traffic = bands * (w + 7u);
+    if (traffic > MAX_RASTER_TRAFFIC) {
+        log_w("Rasterblock zu gross (%ux%u = %u Bytes) - Platz wird vorgeschoben",
+              w, h, (unsigned)traffic);
+        feedDots((uint16_t)(bands * 8));
+        return;
+    }
+
+    uint8_t *bitmap = (uint8_t *)malloc(needed);
+    if (bitmap == nullptr) {
+        log_e("Kein Speicher fuer %u Byte Rasterdaten", (unsigned)needed);
+        feedDots((uint16_t)(bands * 8));
+        return;
+    }
+
+    size_t decoded = 0;
+    const int err = mbedtls_base64_decode(bitmap, needed, &decoded,
+                                          (const unsigned char *)b64, b64len);
+    if (err != 0 || decoded < needed) {
+        log_w("Rasterdaten unbrauchbar (Fehler %d, %u von %u Byte)",
+              err, (unsigned)decoded, (unsigned)needed);
+        free(bitmap);
+        feedDots((uint16_t)(bands * 8));
+        return;
+    }
+
+    uart.write(0x1B); uart.write('a'); uart.write(1);   // zentriert
+    lineSpacing(8);                                     // ein Band je Zeile
+
+    for (size_t band = 0; band < bands; band++) {
+        uart.write(0x1B); uart.write('*'); uart.write((uint8_t)0);  // 8-Punkt-Einfachdichte
+        uart.write((uint8_t)(w & 0xFF));
+        uart.write((uint8_t)(w >> 8));
+
+        for (uint16_t x = 0; x < w; x++) {
+            const size_t byteIndex = x >> 3;
+            const uint8_t mask = (uint8_t)(0x80u >> (x & 7u));
+            uint8_t column = 0;
+            for (uint8_t bit = 0; bit < 8; bit++) {
+                const size_t y = band * 8u + bit;
+                if (y >= h) break;
+                if (bitmap[y * rowBytes + byteIndex] & mask) {
+                    column |= (uint8_t)(0x80u >> bit);
+                }
+            }
+            uart.write(column);
+        }
+        uart.write((const uint8_t *)"\r\n", 2);
+    }
+
+    free(bitmap);
+}
+
+// GS FF - drucken und bis zur naechsten Trennluecke bzw. Marke fahren.
+//
+// Fuer gestanzte Etiketten der richtige Abschluss: der Drucker sucht die
+// Luecke mit seinem Sensor, statt sich auf unsere Punkterechnung zu
+// verlassen. Damit stimmt die Registrierung bei *jedem* Etikett neu und ein
+// Rest von ein paar Punkten kann sich nicht ueber die Rolle aufsummieren.
+//
+// Drucker ohne Sensor kennen den Befehl nicht. Die meisten ignorieren ihn
+// stillschweigend - dann fehlt der Restvorschub und das naechste Etikett
+// beginnt zu frueh. Deshalb schickt der Server ihn nur, wenn er in den
+// Einstellungen ausdruecklich verlangt wird (printer.label_end).
+void Printer::formFeed() {
+    uart.write(0x1D); uart.write(0x0C);
 }
 
 void Printer::feedDots(uint16_t dots) {

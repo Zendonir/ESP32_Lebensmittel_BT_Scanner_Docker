@@ -6,7 +6,9 @@ name: Image veroeffentlichen
 
 on:
   push:
-    branches: ["main", "claude/lebensmittelscanner-redesign-vto9sg"]
+    branches:
+      - main
+      - "claude/**"       # jeder Arbeitszweig bekommt ein Abbild zum Ausprobieren
     tags: ["v*"]
   workflow_dispatch:
 
@@ -57,6 +59,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            APP_VERSION=${{ github.ref_name }}-${{ github.sha }}
+            APP_VERSION=${{ github.ref_name }}
+            APP_COMMIT=${{ github.sha }}
+            APP_BUILT=${{ github.event.repository.updated_at }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

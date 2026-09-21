@@ -25,6 +25,11 @@ services:
     container_name: lebensmittel-scanner
     restart: unless-stopped
 
+    labels:
+      # Erlaubt Watchtower, genau diesen Container zu ersetzen - Grundlage
+      # fuer den Update-Knopf in der Weboberflaeche. Siehe watchtower.yaml.
+      com.centurylinklabs.watchtower.enable: "true"
+
     # Der Apps-Benutzer von TrueNAS. Muss zum Eigentuemer des Datasets passen.
     user: "568:568"
 
@@ -50,6 +55,12 @@ services:
 
       # Passwortschutz des Web-Interface. Leer = im LAN frei zugaenglich.
       UI_PASSWORD: ""
+
+      # --- Update-Knopf in der Weboberflaeche --------------------------------
+      # Leer lassen, wenn Watchtower nicht laeuft - dann erklaert der Knopf
+      # nur, was einzurichten waere. Siehe watchtower.yaml.
+      UPDATE_HOOK_URL: ""
+      UPDATE_HOOK_TOKEN: ""
 
       # SQLite im Volume. Fuer einen Haushalt voellig ausreichend und mit
       # einem Dataset-Snapshot gesichert. Postgres siehe unten.

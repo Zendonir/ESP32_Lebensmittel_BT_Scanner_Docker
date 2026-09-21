@@ -28,9 +28,12 @@ DEFAULTS: dict[str, Any] = {
         "enabled": True,
         "baud": 9600,
         "paper_chars": 32,
-        "post_feed_dots": 86,
-        "qr": True,
-        "code128": True,
+        # "post_feed_dots", "qr" und "code128" standen hier und in der
+        # Oberflaeche, wurden gespeichert - und von niemandem gelesen. Der
+        # Nachschub wird seit der Umstellung auf Etikettenmasse aus der
+        # Teilung gerechnet (services/labels.render_label), und welcher Code
+        # gedruckt wird, entscheidet "label_code". Wer an den drei Reglern
+        # drehte, um das Wandern der Etiketten loszuwerden, drehte ins Leere.
         "household": "",
         # Etikettenmasse in Millimetern. Der Drucker rechnet in Punkten
         # (203 dpi = 8 je mm); daraus ergibt sich, wie viel ueberhaupt
@@ -56,6 +59,17 @@ DEFAULTS: dict[str, Any] = {
         # Angabe rechnet der Server mit der vollen Hoehe und der letzte Block
         # rutscht aufs naechste Etikett.
         "label_dead_zone_mm": 0,
+        # Wie ein Etikett endet.
+        #
+        # "feed" schiebt den ausgerechneten Rest vor - dann haengt alles an
+        # der Rechnung. "formfeed" laesst den Drucker selbst bis zur naechsten
+        # Trennluecke fahren (`GS FF`); die Registrierung stimmt dann bei
+        # jedem Etikett neu und ein Rest kann sich nicht aufsummieren. Das ist
+        # bei gestanzten Etiketten der bessere Weg - aber nur, wenn der
+        # Drucker einen Luecken- oder Markensensor hat. Deshalb nicht die
+        # Vorgabe: wer ihn nicht hat, bekaeme je nach Modell einen vollen
+        # Seitenvorschub oder gar nichts.
+        "label_end": "feed",           # feed | formfeed
         # Rueckzug vor dem Druck, in Punkten. Holt den Totbereich zwischen
         # Druckkopf und Abrisskante zurueck. 0 = aus, weil nicht jeder
         # ESC/POS-Drucker rueckwaerts fahren kann.

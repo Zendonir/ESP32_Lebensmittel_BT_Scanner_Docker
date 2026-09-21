@@ -1,0 +1,73 @@
+# ============================================================================
+# Watchtower - damit der Update-Knopf in der Weboberflaeche etwas tun kann
+#
+# Ein Container kann sein eigenes Abbild nicht ersetzen. Watchtower kann es,
+# und der Lebensmittel-Scanner schickt ihm auf Knopfdruck eine Anfrage.
+#
+# Am einfachsten *nicht* als eigene App einspielen, sondern beide Dienste in
+# EINE Custom App legen: die untenstehende watchtower-Sektion einfach in die
+# vorhandene docker-compose.yaml des Scanners mit hineinschreiben. Dann liegen
+# beide im selben Docker-Netz, "watchtower" loest als Name auf, und es muss
+# gar kein Port veroeffentlicht werden.
+#
+# Als getrennte App geht es auch - dann aber den Port unten veroeffentlichen
+# und beim Scanner statt "http://watchtower:8080/..." die IP des NAS und
+# diesen Port eintragen. Zwei Custom Apps liegen in getrennten Netzen und
+# sehen sich ueber den Dienstnamen nicht.
+#
+# Vorher zwei Dinge:
+#   1. Ein Token erzeugen:   openssl rand -hex 24
+#      Derselbe Wert kommt hier unter WATCHTOWER_HTTP_API_TOKEN *und* beim
+#      Scanner unter UPDATE_HOOK_TOKEN hinein.
+#   2. Beim Scanner die beiden Umgebungsvariablen ergaenzen:
+#        UPDATE_HOOK_URL:   "http://watchtower:8080/v1/update"
+#        UPDATE_HOOK_TOKEN: "<dasselbe Token>"
+#      Laufen beide nicht im selben Docker-Netz, statt "watchtower" die
+#      IP des NAS und den veroeffentlichten Port eintragen.
+#
+# Wichtig zum Mitdenken: Watchtower braucht den Docker-Socket, und wer den
+# hat, ist faktisch root auf dem NAS. Das ist der Preis dafuer, dass
+# ueberhaupt jemand den Container ersetzen kann. Der Scanner selbst bekommt
+# ihn *nicht* - er darf nur eine Anfrage mit Token schicken.
+# ============================================================================
+
+services:
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    # Nur noetig, wenn der Scanner als getrennte App laeuft. In derselben
+    # Custom App ist es ueberfluessig - und ein unnoetig offener Port, ueber
+    # den jeder mit dem Token Container austauschen koennte.
+    # ports:
+    #   - "8081:8080"
+
+    environment:
+      # Auf Anfrage aktualisieren, nicht nach Zeitplan. Ein Haushaltsserver
+      # soll sich nicht mitten in der Nacht von selbst austauschen - und
+      # schon gar nicht, waehrend jemand am Terminal Etiketten druckt.
+      WATCHTOWER_HTTP_API_UPDATE: "true"
+      WATCHTOWER_HTTP_API_PERIODIC_POLLS: "false"
+      WATCHTOWER_HTTP_API_TOKEN: "HIER-DASSELBE-TOKEN-WIE-BEIM-SCANNER"
+
+      # Nur Container anfassen, die es ausdruecklich erlauben. Ohne das
+      # wuerde Watchtower *alle* Apps auf dem NAS aktualisieren - auch die,
+      # bei denen das niemand wollte.
+      WATCHTOWER_LABEL_ENABLE: "true"
+
+      # Das alte Abbild nach dem Wechsel wegraeumen.
+      WATCHTOWER_CLEANUP: "true"
+
+      TZ: "Europe/Berlin"
+
+# ----------------------------------------------------------------------------
+# Beim Scanner (docker-compose.yaml) noch diese Marke ergaenzen, sonst laesst
+# Watchtower ihn wegen WATCHTOWER_LABEL_ENABLE in Ruhe:
+#
+#     labels:
+#       com.centurylinklabs.watchtower.enable: "true"
+# ----------------------------------------------------------------------------
