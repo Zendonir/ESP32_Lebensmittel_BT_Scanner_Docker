@@ -117,10 +117,21 @@ Ablauf und Fehlerbehandlung:
 1. Der Auftrag steht als Zeile in `print_jobs` (`queued`).
 2. Beim Senden wird er `sent`, `attempts` steigt.
 3. `print_result` mit `ok: true` setzt ihn auf `done`, sonst zurück auf
-   `queued`. Nach fünf Versuchen `failed`.
-4. Nach jedem Reconnect sendet der Server offene Aufträge erneut – ein Etikett,
-   das während eines Neustarts entstanden ist, geht nicht verloren.
-5. Ist die Warteschlange der Firmware voll (8 Aufträge), meldet sie sofort
+   `queued`. Nach fünf Versuchen `failed`. Ein erfolgreicher Auftrag zieht
+   sofort den nächsten nach, bis nichts mehr offen ist.
+4. Es liegen nie mehr als `PRINT_BATCH` (4) Aufträge gleichzeitig beim Gerät.
+   Die Warteschlange der Firmware fasst acht; wer sie überfüllt, sammelt für
+   jeden abgelehnten Auftrag einen Versuch ein und schiebt ihn ohne Not
+   Richtung `failed`.
+5. Ein `sent` wird **nicht** erneut gesendet – er liegt im Drucker, und ein
+   zweites Senden heißt ein zweites Etikett. Ausnahme ist der Reconnect: dort
+   ist die Warteschlange der Firmware leer, und erneutes Senden ist die
+   einzige Rettung für das Etikett.
+6. Bleibt zu einem `sent` länger als `PRINT_STALE_SECONDS` (60) die Rückmeldung
+   aus, gilt er als verloren und geht zurück in die Schlange. Ein Etikett
+   braucht unter zwei Sekunden; länger heißt, das Gerät war zwischendurch weg,
+   ohne dass der Server es gemerkt hat.
+7. Ist die Warteschlange der Firmware trotzdem voll, meldet sie sofort
    `ok: false`, statt den Auftrag stillschweigend zu verwerfen.
 
 Gedruckt wird ausschließlich im Hauptloop, höchstens ein Etikett pro Durchlauf.

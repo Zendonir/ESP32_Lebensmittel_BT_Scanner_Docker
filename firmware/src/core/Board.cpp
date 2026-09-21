@@ -35,13 +35,26 @@ bool Board::begin() {
     // wirkt eingefroren, obwohl die Firmware laeuft.
     Wire.setTimeOut(50);
 
-    Wire.beginTransmission(TCA_ADDR);
-    if (Wire.endTransmission() != 0) {
+    // Mehrere Anlaeufe: der Expander haengt an denselben Schienen wie der Rest
+    // des Boards und ist nach dem Einschalten nicht in derselben Millisekunde
+    // ansprechbar wie der ESP32. Ein einziger Versuch traf das gelegentlich zu
+    // frueh - und dann bleibt der Display-Reset gezogen, der Bildschirm zeigt
+    // Rauschen und der Touchcontroller meldet sich nie. Ein Geraet, das nach
+    // dem Stromausfall "kaputt" aussieht und nach dem naechsten Neustart
+    // wieder geht, ist genau dieser Fall.
+    _expanderOk = false;
+    for (uint8_t versuch = 0; versuch < 5; versuch++) {
+        Wire.beginTransmission(TCA_ADDR);
+        if (Wire.endTransmission() == 0) {
+            _expanderOk = true;
+            break;
+        }
+        delay(20);
+    }
+    if (!_expanderOk) {
         log_e("TCA9554 (0x%02X) antwortet nicht - Display bleibt im Reset", TCA_ADDR);
-        _expanderOk = false;
         return false;
     }
-    _expanderOk = true;
 
     // EXIO1 und EXIO7 als Ausgang, alles andere bleibt Eingang.
     write(REG_CONFIG, (uint8_t)~OUTPUT_BITS);

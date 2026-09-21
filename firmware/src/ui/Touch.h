@@ -39,6 +39,8 @@ public:
 private:
     bool read(int16_t &x, int16_t &y);
 
+    bool probe();          // meldet sich der Controller auf dem I2C-Bus?
+
     bool     _ok       = false;
     bool     _down     = false;
     bool     _dragging = false;
@@ -46,6 +48,14 @@ private:
     int16_t  _lastX  = 0, _lastY  = 0;
     uint8_t  _releaseDebounce = 0;
     uint32_t _lastPoll = 0;
+
+    // Wiederanlauf. Meldet sich der Controller beim Start nicht (er braucht
+    // nach dem Reset ueber den Portexpander laenger als das Display) oder
+    // faellt er im Betrieb aus, blieb _ok bisher fuer immer false - das Geraet
+    // war dann bis zum Ziehen des Netzsteckers nicht mehr bedienbar, obwohl
+    // alles andere lief. Deshalb wird es regelmaessig noch einmal versucht.
+    uint32_t _nextProbeMs = 0;
+    uint8_t  _readFails   = 0;
 };
 
 extern Touch touch;

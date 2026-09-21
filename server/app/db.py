@@ -6,6 +6,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -29,6 +30,35 @@ else:
 
 engine = create_async_engine(settings.database_url, **_engine_kwargs)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+
+if _is_sqlite:
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _sqlite_pragmas(dbapi_connection, _record) -> None:
+        """PRAGMAs auf *jeder* Verbindung setzen, nicht nur auf der ersten.
+
+        `journal_mode=WAL` steht im Dateikopf und gilt danach fuer alle
+        Verbindungen. `foreign_keys` und `synchronous` dagegen sind
+        Verbindungssache: sie wurden bisher in init_db() einmalig gesetzt und
+        galten damit ausgerechnet fuer keine der Verbindungen, ueber die der
+        Betrieb laeuft. Fremdschluessel waren also im gesamten laufenden
+        Server abgeschaltet - ein geloeschtes Geraet liess seine
+        Druckauftraege mit einem Verweis ins Leere stehen, statt sie wie in
+        `ondelete="CASCADE"` vorgesehen mitzunehmen.
+
+        `busy_timeout` kommt neu dazu: ohne ihn meldet SQLite bei einem
+        gleichzeitigen Schreibversuch sofort "database is locked" statt kurz
+        zu warten. Genau das trifft aufeinander, wenn der Scheduler nachts
+        aufraeumt, waehrend am Terminal etwas eingebucht wird.
+        """
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+        finally:
+            cursor.close()
 
 
 # Spalten, die nach der ersten Auslieferung dazugekommen sind.
@@ -61,9 +91,10 @@ async def init_db() -> None:
     """Schema anlegen und SQLite auf WAL stellen."""
     async with engine.begin() as conn:
         if _is_sqlite:
+            # Nur das, was in der Datei steht und deshalb genau einmal
+            # gesetzt werden muss. Alles Verbindungsbezogene macht
+            # _sqlite_pragmas.
             await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
-            await conn.exec_driver_sql("PRAGMA synchronous=NORMAL")
-            await conn.exec_driver_sql("PRAGMA foreign_keys=ON")
         await conn.run_sync(_add_missing_columns)
         await conn.run_sync(Base.metadata.create_all)
     log.info("Datenbank bereit (%s)", settings.database_url.split("://", 1)[0])

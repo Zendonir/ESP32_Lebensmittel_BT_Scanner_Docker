@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -812,7 +812,9 @@ async def on_connect(session: AsyncSession, sess: DeviceSession, device: Device)
     device_cfg = await settings_store.get(session, "device_ui", {})
     await hub.send_to(sess.device_id, proto.config(device_cfg))
     await push_screen(session, sess)
-    await flush_print_queue(session, sess.device_id)
+    # Nach einem Neustart ist die Warteschlange der Firmware leer - was hier
+    # noch als "sent" steht, hat das Geraet nie zu Ende gebracht.
+    await flush_print_queue(session, sess.device_id, resend_in_flight=True)
 
 
 async def on_tap(session: AsyncSession, sess: DeviceSession, item: str) -> None:
@@ -1220,22 +1222,91 @@ async def _scan_barcode(session, sess, code) -> None:
 # ---------------------------------------------------------------------------
 # Druckwarteschlange
 # ---------------------------------------------------------------------------
-async def flush_print_queue(session: AsyncSession, device_id: str) -> int:
+# Wie viele Druckauftraege ein Durchgang an das Geraet schickt.
+#
+# Die Warteschlange in der Firmware fasst acht (Printer::MAX_QUEUE); was
+# darueber hinaus ankommt, lehnt das Geraet ab. Vorher gingen bis zu zwanzig
+# auf einmal hinaus - bei einer Sammlung Etiketten zaehlte der Server damit
+# fuer jeden abgelehnten Auftrag einen Versuch, und nach fuenf Durchgaengen
+# stand ein voellig gesunder Auftrag auf "failed", ohne je gedruckt worden zu
+# sein. Vier auf einmal lassen Luft fuer die Auftraege, die gerade laufen.
+PRINT_BATCH = 4
+
+# So lange darf ein Auftrag beim Geraet liegen, bevor er als verloren gilt.
+PRINT_STALE_SECONDS = 60
+
+
+async def flush_print_queue(
+    session: AsyncSession, device_id: str, resend_in_flight: bool = False
+) -> int:
     """Offene Druckauftraege an ein Geraet senden.
 
-    Wird sowohl nach dem Speichern als auch nach jedem Reconnect aufgerufen -
-    ein Etikett, das waehrend eines Neustarts entstanden ist, geht damit nicht
-    verloren.
+    Wird nach dem Speichern, nach jeder Rueckmeldung des Geraets und nach
+    jedem Reconnect aufgerufen - ein Etikett, das waehrend eines Neustarts
+    entstanden ist, geht damit nicht verloren.
+
+    Es bleiben hoechstens `PRINT_BATCH` Auftraege gleichzeitig beim Geraet.
+    Vorher ging jeder Durchgang mit voller Breite hinaus, ohne zu zaehlen, was
+    noch unterwegs war - bei einer Sammlung Etiketten lief die Warteschlange
+    der Firmware damit ueber, jeder abgelehnte Auftrag zaehlte als Versuch,
+    und nach fuenf Durchgaengen stand ein voellig gesunder Auftrag auf
+    "failed", ohne je gedruckt worden zu sein.
+
+    `resend_in_flight` gehoert **nur** zum Reconnect. Ein Auftrag im Zustand
+    "sent" liegt in der Warteschlange der Firmware und wird gerade gedruckt;
+    ihn noch einmal zu schicken heisst, ihn ein zweites Mal zu drucken. Genau
+    das geschah bisher bei jedem Aufruf: wer zwei Artikel kurz hintereinander
+    speicherte, bekam das erste Etikett doppelt aus dem Drucker. Nach einem
+    Geraeteneustart ist die Warteschlange dagegen leer - dort ist erneutes
+    Senden die einzige Rettung fuer das Etikett.
     """
     conn = hub.get(device_id)
     if conn is None:
         return 0
+
+    if resend_in_flight:
+        offen = ("queued", "sent")
+        platz = PRINT_BATCH
+    else:
+        # Auftraege, zu denen seit einer Minute keine Rueckmeldung kam, gelten
+        # als verloren und gehen zurueck in die Schlange.
+        #
+        # Ein Etikett braucht unter zwei Sekunden. Bleibt die Antwort aus, ist
+        # das Geraet zwischendurch weggewesen, ohne dass der Server es gemerkt
+        # hat (halboffener Socket). Ohne diesen Schritt blieb der Auftrag fuer
+        # immer auf "sent" stehen: er wurde nie gedruckt, tauchte in keiner
+        # Fehlerliste auf, und weil er als "unterwegs" zaehlte, versperrte er
+        # auch noch den Platz fuer die naechsten.
+        verfallen = utcnow() - timedelta(seconds=PRINT_STALE_SECONDS)
+        for job in (
+            await session.execute(
+                select(PrintJob).where(
+                    PrintJob.status == "sent", PrintJob.updated_at < verfallen
+                )
+            )
+        ).scalars().all():
+            log.info("Druckauftrag %d ohne Rueckmeldung - zurueck in die Schlange", job.id)
+            job.status = "queued"
+
+        offen = ("queued",)
+        unterwegs = (
+            await session.execute(
+                select(func.count())
+                .select_from(PrintJob)
+                .where(PrintJob.status == "sent")
+            )
+        ).scalar_one()
+        platz = PRINT_BATCH - int(unterwegs)
+        if platz <= 0:
+            await session.commit()
+            return 0
+
     jobs = (
         await session.execute(
             select(PrintJob)
-            .where(PrintJob.status.in_(("queued", "sent")))
+            .where(PrintJob.status.in_(offen))
             .order_by(PrintJob.id)
-            .limit(20)
+            .limit(platz)
         )
     ).scalars().all()
 
@@ -1256,7 +1327,8 @@ async def flush_print_queue(session: AsyncSession, device_id: str) -> int:
 
 
 async def on_print_result(
-    session: AsyncSession, job_id: int, ok: bool, error: str = ""
+    session: AsyncSession, job_id: int, ok: bool, error: str = "",
+    device_id: str = "",
 ) -> None:
     job = await session.get(PrintJob, job_id)
     if job is None:
@@ -1270,3 +1342,11 @@ async def on_print_result(
         job.status = "queued"
         job.error = error[:255]
     await session.commit()
+
+    # Nachruecken lassen. Ohne das blieb alles liegen, was nicht in den ersten
+    # Durchgang gepasst hat: ein Stapel von zehn Etiketten druckte die ersten
+    # und danach nichts mehr, bis jemand etwas anderes speicherte oder das
+    # Geraet neu verband. Ein fehlgeschlagener Auftrag wird hier bewusst nicht
+    # sofort wiederholt - sonst dreht sich ein Drucker ohne Papier im Kreis.
+    if ok and device_id:
+        await flush_print_queue(session, device_id)

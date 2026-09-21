@@ -112,7 +112,12 @@ bringt.
   still auf eine eingelegte SD-Karte gespiegelt (`core/SdStore`) - beim
   allerersten Start (leeres NVS) liest das Gerät sie von dort, statt das
   Einrichtungsportal zu verlangen. Kein Ersatz für das NVS, nur eine
-  Vorbelegung fürs Tauschen defekter Geräte.
+  Vorbelegung fürs Tauschen defekter Geräte. Nach dem Start wird der
+  Kartenleser weiter befragt, solange keine Karte sitzt: wer vor einem
+  Terminal steht, das den Server nicht mehr findet, steckt die Karte
+  *währenddessen* hinein, nicht vorher. Nur Schlüssel, die in der Datei
+  stehen, werden übernommen - eine von Hand geschriebene Datei ohne `token`
+  löscht das Token nicht.
 
 ### Partitionen
 
@@ -129,6 +134,8 @@ Ohne Web-Dateien und ohne Nutzdaten auf dem Gerät entfallen die
 |---|---|
 | Server weg | Terminal zeigt „Kein Server", verbindet alle 3 s neu; ein Scan wartet gepuffert |
 | WLAN weg | Banner „Kein WLAN", expliziter Neuversuch alle 20 s |
+| Ausfall hält an | Nach 90 s wird die SD-Karte gelesen (und danach immer wieder), nach 3 min geht das Einrichtungsportal auf – es **schließt sich von selbst**, sobald der Server wieder antwortet |
+| Touch meldet sich nicht | Alle 2 s ein neuer Anlauf, im Betrieb wie beim Start – ein Controller, der zu spät hochkommt, macht das Gerät nicht dauerhaft unbedienbar |
 | Terminal aus | Server läuft weiter, Web-Interface uneingeschränkt nutzbar |
 | Drucker aus | Auftrag bleibt `queued` und wird nach dem Reconnect erneut gesendet |
 | BLE-Scanner leer | Akkuwarnung einmalig bei <10 %, Anzeige im Web-Interface |

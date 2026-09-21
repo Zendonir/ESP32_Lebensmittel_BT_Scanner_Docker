@@ -50,6 +50,18 @@ bool Printer::enqueue(int jobId, JsonDocument &job) {
     _queue[slot].jobId = jobId;
     _queue[slot].doc.clear();
     _queue[slot].doc.set(job);
+
+    // set() kopiert tief und kann dabei am Heap scheitern. Vorher wurde das
+    // nicht geprueft: der halbe Auftrag kam in die Warteschlange, wurde als
+    // leeres Etikett ausgeworfen und dem Server als gedruckt gemeldet. Das
+    // Etikett fehlte damit endgueltig - kein erneuter Versuch, kein Hinweis.
+    // Jetzt lehnt das Geraet ab, und der Server reiht den Auftrag wieder ein.
+    if (_queue[slot].doc.overflowed()) {
+        log_e("Druckauftrag %d passt nicht in den Speicher - abgelehnt", jobId);
+        _queue[slot].doc.clear();
+        return false;
+    }
+
     _count++;
     return true;
 }
@@ -159,17 +171,42 @@ void Printer::separator() {
 
 void Printer::code128(const String &data, uint8_t height) {
     if (data.isEmpty()) return;
+
+    // Codeset B kennt genau die druckbaren ASCII-Zeichen (0x20-0x7E). Alles
+    // andere - ein Umlaut aus einem Produktnamen kommt als zwei Bytes >= 0x80
+    // an - ergibt keinen lesbaren Strichcode, sondern Streifen, die kein
+    // Scanner entziffert. Und die geschweifte Klammer ist in diesem Befehl das
+    // Fluchtzeichen fuer den Codesatzwechsel: eine einzelne "{" im Text haette
+    // den Drucker mitten im Code auf Codeset A oder C umgeschaltet. Deshalb
+    // wird hier gefiltert und "{" wie vorgesehen verdoppelt.
+    String safe;
+    safe.reserve(data.length() + 4);
+    for (size_t i = 0; i < data.length(); i++) {
+        const uint8_t c = (uint8_t)data[i];
+        if (c < 0x20 || c > 0x7E) continue;
+        if (c == '{') safe += '{';          // "{{" steht fuer eine echte "{"
+        safe += (char)c;
+    }
+
+    // Die Laengenangabe ist ein einzelnes Byte. Passt der Code nicht hinein,
+    // lieber gar keinen Strichcode drucken als einen abgeschnittenen - und
+    // zwar bevor die Vorbereitungsbefehle auf der Leitung sind, sonst bleibt
+    // der Drucker mit halber Einstellung zurueck.
+    const size_t length = safe.length() + 2;
+    if (safe.isEmpty() || length > 255) {
+        log_w("Strichcode uebersprungen (%u brauchbare Zeichen)", (unsigned)safe.length());
+        return;
+    }
+
     uart.write(0x1B); uart.write('a'); uart.write(1);      // zentriert
     uart.write(0x1D); uart.write('h'); uart.write(height); // Hoehe in Dots
     uart.write(0x1D); uart.write('w'); uart.write(2);      // Modulbreite
     uart.write(0x1D); uart.write('H'); uart.write((uint8_t)0);  // keine Klartextzeile
 
     // GS k 73 n {B <Daten> - Codeset B deckt Ziffern und Grossbuchstaben ab.
-    const size_t length = data.length() + 2;
-    if (length > 255) return;
     uart.write(0x1D); uart.write('k'); uart.write(73); uart.write((uint8_t)length);
     uart.write('{'); uart.write('B');
-    uart.write((const uint8_t *)data.c_str(), data.length());
+    uart.write((const uint8_t *)safe.c_str(), safe.length());
     uart.write((const uint8_t *)"\r\n", 2);
 }
 

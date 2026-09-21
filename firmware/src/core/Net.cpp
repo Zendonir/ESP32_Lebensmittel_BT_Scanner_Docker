@@ -53,7 +53,7 @@ void Net::begin() {
     const bool forcePortal = digitalRead(BOOT_BTN) == LOW;
 
     if (!settings.configured() || forcePortal) {
-        startPortal();
+        startPortal(false);   // von Hand bzw. mangels Zugangsdaten - bleibt offen
         return;
     }
     connectWifi();
@@ -70,12 +70,26 @@ void Net::connectWifi() {
     log_i("WLAN-Verbindung zu %s", settings.wifiSsid.c_str());
 }
 
-void Net::startPortal() {
+void Net::startPortal(bool automatic) {
+    if (_portalActive) return;
     _portalActive = true;
+    _portalAuto = automatic;
+    _closePortal = false;
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP(AP_SSID, AP_PASSWORD);
     dns.start(53, "*", WiFi.softAPIP());
     WiFi.scanNetworks(true);
+
+    // Die Routen nur beim ersten Mal anmelden. Das Portal kann sich im Betrieb
+    // oeffnen, schliessen und wieder oeffnen; jedes Mal dieselben Handler
+    // anzuhaengen liesse die Liste im WebServer immer weiter wachsen.
+    if (_portalRoutes) {
+        portal.begin();
+        log_w("Einrichtungsportal wieder aktiv: SSID %s, IP %s", AP_SSID,
+              WiFi.softAPIP().toString().c_str());
+        return;
+    }
+    _portalRoutes = true;
 
     portal.on("/", HTTP_GET, [] {
         String page = FPSTR(PORTAL_HTML);
@@ -97,10 +111,28 @@ void Net::startPortal() {
     });
 
     portal.on("/save", HTTP_POST, [] {
-        settings.wifiSsid   = portal.arg("ssid");
+        // Eingaben pruefen, bevor sie ins NVS wandern. Ein Tippfehler im Port
+        // (66000) lief vorher stillschweigend durch toInt() und den Ueberlauf
+        // nach uint16_t - heraus kam eine Zahl, die niemand eingegeben hat,
+        // und das Geraet fand den Server nie wieder. Am Bildschirm stand dann
+        // nur "Kein Server", und das Portal zeigte den falschen Wert als
+        // waere er richtig.
+        const String ssid = portal.arg("ssid");
+        const String host = portal.arg("host");
+        const long   port = portal.arg("port").toInt();
+
+        if (ssid.isEmpty() || host.isEmpty() || port < 1 || port > 65535) {
+            portal.send(400, "text/html; charset=utf-8",
+                        "<meta charset=utf-8><body style='font:16px system-ui;padding:30px'>"
+                        "WLAN-Name, Server und ein Port zwischen 1 und 65535 werden "
+                        "gebraucht. <a href=/>Zurueck</a></body>");
+            return;
+        }
+
+        settings.wifiSsid   = ssid;
         settings.wifiPass   = portal.arg("pass");
-        settings.serverHost = portal.arg("host");
-        settings.serverPort = portal.arg("port").toInt() ?: 8080;
+        settings.serverHost = host;
+        settings.serverPort = (uint16_t)port;
         settings.token      = portal.arg("token");
         settings.deviceName = portal.arg("name");
         settings.useTls     = portal.arg("tls") == "1";
@@ -120,6 +152,22 @@ void Net::startPortal() {
     portal.begin();
     log_w("Einrichtungsportal aktiv: SSID %s, IP %s", AP_SSID,
           WiFi.softAPIP().toString().c_str());
+}
+
+// Selbsttaetig geoeffnetes Portal wieder schliessen. Der Aufrufer hat vorher
+// festgestellt, dass die gespeicherten Zugangsdaten doch wieder tragen - es
+// gibt dann nichts mehr einzurichten, und ein offener Access Point mit
+// bekanntem Passwort soll nicht laenger stehen als noetig.
+void Net::stopPortal() {
+    if (!_portalActive) return;
+    log_i("Verbindung ist zurueck - Einrichtungsportal wird geschlossen");
+    portal.stop();
+    dns.stop();
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_STA);
+    _portalActive = false;
+    _portalAuto = false;
+    _closePortal = false;
 }
 
 void Net::handlePortal() {
@@ -156,7 +204,12 @@ void Net::handleSocketEvent(uint8_t type, uint8_t *payload, size_t length) {
         case WStype_CONNECTED:
             _wsConnected = true;
             _disconnectedSince = 0;   // Ausfall vorbei - naechster faengt wieder bei 0 an
-            _sdRetryDone = false;
+            _nextSdRetryMs = 0;
+            // Der Ausfall, der das Portal aufgemacht hat, ist vorbei. Nicht
+            // hier schliessen: wir stecken gerade in ws.loop(), und dem den
+            // Netzwerkmodus unter den Fuessen wegzuziehen waere unnoetig
+            // heikel. Der naechste Loop-Durchlauf raeumt auf.
+            if (_portalAuto) _closePortal = true;
             log_i("Server verbunden");
             sendHello();
             break;
@@ -168,8 +221,20 @@ void Net::handleSocketEvent(uint8_t type, uint8_t *payload, size_t length) {
 
         case WStype_TEXT: {
             // Der Server schickt kleine Bildschirmbeschreibungen; 8 KB decken
-            // auch eine lange Liste ab. Bei Ueberlauf wird die Nachricht
-            // verworfen statt den Heap zu sprengen.
+            // auch eine lange Liste ab.
+            //
+            // Die Grenze muss hier stehen und nicht im JsonDocument: seit
+            // ArduinoJson 7 waechst das Dokument mit den Daten, statt bei
+            // einer festen Groesse "NoMemory" zu melden. Der Kommentar
+            // versprach also eine Obergrenze, die es gar nicht mehr gab - ein
+            // ueberlanger Frame haette den Heap leergeraeumt und das Geraet in
+            // den Neustart geschickt. Verwerfen und weitermachen ist besser:
+            // der naechste Bildschirm kommt spaetestens beim naechsten Tippen.
+            if (length > MAX_MESSAGE_BYTES) {
+                log_w("Nachricht verworfen: %u Bytes (Grenze %u)",
+                      (unsigned)length, (unsigned)MAX_MESSAGE_BYTES);
+                return;
+            }
             JsonDocument doc;
             const DeserializationError err = deserializeJson(doc, payload, length);
             if (err) {
@@ -215,7 +280,6 @@ void Net::sendHello() {
 #endif
 
     send(doc);
-    _helloAt = millis();
 }
 
 bool Net::send(const JsonDocument &doc) {
@@ -232,15 +296,26 @@ bool Net::sendEvent(const char *type) {
 }
 
 void Net::loop() {
+    if (_closePortal) stopPortal();
+
     if (_portalActive) {
         handlePortal();
-        return;
+        // Ein von Hand geoeffnetes Portal ist der Endzustand: dort wird
+        // eingerichtet, sonst nichts.
+        if (!_portalAuto) return;
+        // Ein selbsttaetig geoeffnetes dagegen laeuft nebenher weiter - der
+        // Rest dieser Funktion versucht unveraendert, die gespeicherten
+        // Zugangsdaten wieder zum Laufen zu bringen. Ohne das war das Portal
+        // eine Sackgasse: ein Router, der laenger als
+        // PORTAL_FALLBACK_AFTER_MS zum Hochfahren braucht (oder ein
+        // Container, der gerade aktualisiert wird), liess das Terminal
+        // dauerhaft in der Einrichtung stehen, obwohl Minuten spaeter alles
+        // wieder da war. Nur ein Griff zum Netzstecker holte es zurueck.
     }
 
     if (WiFi.status() != WL_CONNECTED) {
         _wsConnected = false;
         trackConnectionHealth(false);
-        if (_portalActive) return;   // trackConnectionHealth kann das Portal ausgeloest haben
 
         // WiFi.setAutoReconnect() greift nicht in jedem Fehlerfall (z.B. wenn
         // der Router waehrend des DHCP-Vorgangs verschwindet). Deshalb alle
@@ -255,7 +330,6 @@ void Net::loop() {
     }
 
     trackConnectionHealth(_wsConnected);
-    if (_portalActive) return;
 
     if (!_wsStarted) startSocket();
     ws.loop();
@@ -267,37 +341,65 @@ void Net::loop() {
 void Net::trackConnectionHealth(bool fullyConnected) {
     if (fullyConnected) {
         _disconnectedSince = 0;
-        _sdRetryDone = false;
+        _nextSdRetryMs = 0;
         return;
     }
 
+    const uint32_t now = millis();
     if (_disconnectedSince == 0) {
-        _disconnectedSince = millis();
+        _disconnectedSince = now;
+        _nextSdRetryMs = now + SD_RETRY_AFTER_MS;
         return;
     }
-    const uint32_t downFor = millis() - _disconnectedSince;
+    const uint32_t downFor = now - _disconnectedSince;
 
-    if (!_sdRetryDone && downFor >= SD_RETRY_AFTER_MS) {
-        _sdRetryDone = true;
-        log_w("Keine Verbindung seit %u s - lese Zugangsdaten erneut von der SD-Karte",
-              downFor / 1000);
-        if (sdStore.loadSettings()) {
+    if ((int32_t)(now - _nextSdRetryMs) >= 0) {
+        // Nicht nur einmal je Ausfall nachsehen, sondern immer wieder.
+        // Genau darum geht es bei diesem Weg: wer vor einem Terminal steht,
+        // das den Server nicht mehr findet, schreibt die richtigen Daten auf
+        // eine Karte und steckt sie hinein - und das ist naturgemaess
+        // *nachdem* der Ausfall begonnen hat. Mit einem einzigen Versuch nach
+        // 90 Sekunden kam die Karte praktisch immer zu spaet.
+        _nextSdRetryMs = now + SD_RETRY_AFTER_MS;
+        log_w("Keine Verbindung seit %u s - Blick auf die SD-Karte", downFor / 1000);
+
+        // Vorher/nachher vergleichen und nur bei echter Aenderung schreiben.
+        // Sonst landete bei jedem Durchgang derselbe Inhalt im NVS - der Flash
+        // haelt das nicht unbegrenzt aus, und neu verbinden muesste man dabei
+        // auch nicht.
+        const String vorherSsid = settings.wifiSsid;
+        const String vorherPass = settings.wifiPass;
+        const String vorherHost = settings.serverHost;
+        const uint16_t vorherPort = settings.serverPort;
+        const String vorherToken = settings.token;
+
+        if (sdStore.loadSettings() &&
+            (settings.wifiSsid != vorherSsid || settings.wifiPass != vorherPass ||
+             settings.serverHost != vorherHost || settings.serverPort != vorherPort ||
+             settings.token != vorherToken)) {
             settings.save();
-            log_i("Zugangsdaten von der SD-Karte uebernommen - neuer Versuch");
+            log_i("Zugangsdaten von der SD-Karte uebernommen - Neustart");
+
+            // Neu starten statt im Betrieb umzuschalten.
+            //
+            // An den Zugangsdaten haengen WLAN-Verbindung, WebSocket-Ziel und
+            // Token gleichzeitig. Die von Hand einzeln nachzuziehen hiesse,
+            // eine halb aufgebaute Verbindung mitten im Betrieb umzubiegen -
+            // fuer einen Weg, der hoechstens einmal im Leben eines Geraets
+            // begangen wird, ist das die aufwendigere und unsicherere
+            // Loesung. Im NVS steht jetzt alles; nach dem Neustart gilt es
+            // von der ersten Zeile an.
+            delay(200);
+            ESP.restart();
         } else {
             log_i("Keine (neue) Datei auf der SD-Karte - Zugangsdaten unveraendert");
         }
-        // Sofort neu verbinden statt auf den naechsten 20-s-Takt zu warten -
-        // eine gerade erst geaenderte Karte soll nicht unnoetig lange warten.
-        WiFi.disconnect();
-        WiFi.begin(settings.wifiSsid.c_str(), settings.wifiPass.c_str());
-        _lastWifiTry = millis();
     }
 
-    if (downFor >= PORTAL_FALLBACK_AFTER_MS) {
+    if (downFor >= PORTAL_FALLBACK_AFTER_MS && !_portalActive) {
         log_w("Weiterhin keine Verbindung nach %u s - Einrichtungsportal wird geoeffnet",
               downFor / 1000);
-        startPortal();
+        startPortal(true);
     }
 }
 

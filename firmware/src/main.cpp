@@ -234,18 +234,28 @@ void loop() {
 
     net.loop();
 
+    // Das Portal kann auch mitten im Betrieb aufgehen (anhaltender
+    // WLAN-/Server-Ausfall, siehe Net::trackConnectionHealth) - dann fehlt der
+    // Bildschirmaufruf aus setup() und das Display wuerde einfach weiter den
+    // letzten Zustand zeigen. Und es kann sich von selbst wieder schliessen,
+    // wenn die Verbindung zurueckkommt; dann muss der Bildschirm ebenso
+    // umgeschaltet werden, sonst stuende dort weiter eine Einrichtungsadresse,
+    // die es gar nicht mehr gibt.
+    static bool wasPortalActive = false;
     if (net.portalActive()) {
-        // Das Portal kann auch mitten im Betrieb aufgehen (anhaltender
-        // WLAN-/Server-Ausfall, siehe Net::trackConnectionHealth) - dann fehlt
-        // der Bildschirmaufruf aus setup() und das Display wuerde einfach
-        // weiter den letzten Zustand zeigen.
-        static bool wasPortalActive = false;
         if (!wasPortalActive) {
             screen.showBoot("Einrichtung", String("WLAN ") + AP_SSID + " - 192.168.4.1");
+            wasPortalActive = true;
         }
-        wasPortalActive = true;
         delay(5);
         return;
+    }
+    if (wasPortalActive) {
+        wasPortalActive = false;
+        screen.showBoot("Verbinde…", settings.serverHost + ":" + String(settings.serverPort));
+        // Waehrend des Portals lief kein BLE-Loop; ein Scanner, der in der
+        // Zwischenzeit abgeschaltet wurde, soll sofort wieder erwartet werden.
+        bleScanner.retryNow();
     }
 
     bleScanner.loop();

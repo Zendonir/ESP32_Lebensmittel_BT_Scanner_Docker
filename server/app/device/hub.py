@@ -17,6 +17,18 @@ from fastapi import WebSocket
 
 log = logging.getLogger(__name__)
 
+# Wie lange ein einzelner Sendevorgang dauern darf.
+#
+# `ws.send_text()` wartet, bis das Betriebssystem die Daten annimmt. Bei einem
+# Gegenueber, das nicht mehr liest - ein abgestuerzter Browser-Tab, ein
+# Terminal im Funkloch, dessen TCP-Verbindung noch halb offen steht - laeuft
+# das Sendefenster voll und der Aufruf kehrt nie zurueck. Ohne Zeitgrenze
+# blieb dann der ganze Ablauf daran haengen: notify_ui() wird mitten in der
+# Verarbeitung eines Scans abgewartet, ein einziger klemmender Browser konnte
+# also das Terminal in der Kueche einfrieren. Lieber die Verbindung aufgeben
+# als den Dienst.
+SEND_TIMEOUT_S = 10.0
+
 
 class DeviceConnection:
     def __init__(self, device_id: str, ws: WebSocket):
@@ -34,10 +46,21 @@ class DeviceConnection:
         """
         if not self.alive:
             return False
+        payload = json.dumps(message, ensure_ascii=False)
         try:
             async with self.send_lock:
-                await self.ws.send_text(json.dumps(message, ensure_ascii=False))
+                await asyncio.wait_for(
+                    self.ws.send_text(payload), timeout=SEND_TIMEOUT_S
+                )
             return True
+        except asyncio.TimeoutError:
+            log.warning(
+                "Geraet %s nimmt seit %.0f s nichts mehr an - Verbindung aufgegeben",
+                self.device_id,
+                SEND_TIMEOUT_S,
+            )
+            self.alive = False
+            return False
         except Exception as exc:
             log.info("Senden an %s fehlgeschlagen: %s", self.device_id, exc)
             self.alive = False
@@ -47,7 +70,8 @@ class DeviceConnection:
 class Hub:
     def __init__(self) -> None:
         self._devices: dict[str, DeviceConnection] = {}
-        self._ui: set[WebSocket] = set()
+        # WebSocket -> Sendeschloss (siehe add_ui)
+        self._ui: dict[WebSocket, asyncio.Lock] = {}
         self._lock = asyncio.Lock()
 
     # ---------------------------------------------------------------- Geraete
@@ -99,31 +123,54 @@ class Hub:
     # ------------------------------------------------------------ Web-Clients
     async def add_ui(self, ws: WebSocket) -> None:
         async with self._lock:
-            self._ui.add(ws)
+            # Je Browser ein eigenes Schloss. Starlette vertraegt keine zwei
+            # gleichzeitigen Sendevorgaenge auf derselben Verbindung: die
+            # Frames schieben sich dann ineinander und der Browser legt auf.
+            # Frueher lief notify_ui() ganz ohne Schloss - und Ereignisse
+            # kommen durchaus gleichzeitig (ein Scan am Terminal und der
+            # Scheduler im selben Augenblick).
+            self._ui[ws] = asyncio.Lock()
 
     async def remove_ui(self, ws: WebSocket) -> None:
         async with self._lock:
-            self._ui.discard(ws)
+            self._ui.pop(ws, None)
+
+    async def _send_ui(self, ws: WebSocket, lock: asyncio.Lock, payload: str) -> bool:
+        try:
+            async with lock:
+                await asyncio.wait_for(ws.send_text(payload), timeout=SEND_TIMEOUT_S)
+            return True
+        except asyncio.TimeoutError:
+            log.warning("Browser nimmt nichts mehr an - Verbindung aufgegeben")
+            return False
+        except Exception:
+            return False
 
     async def notify_ui(self, event: str, data: dict | None = None) -> None:
         """Browser ueber eine Aenderung informieren; sie laden dann neu.
 
         Bewusst nur ein Signal statt eines Datenpakets - so kann kein
         halbaktueller Zustand im Browser haengenbleiben.
+
+        Alle Browser werden gleichzeitig bedient und jeder einzelne mit
+        Zeitgrenze. Vorher lief das der Reihe nach und ohne: ein einziger
+        haengender Tab hielt damit den Aufrufer auf - und aufgerufen wird das
+        mitten in der Verarbeitung eines Scans, also genau dort, wo jemand vor
+        dem Geraet steht und auf den Piep wartet.
         """
         if not self._ui:
             return
         payload = json.dumps({"event": event, "data": data or {}}, ensure_ascii=False)
-        dead: list[WebSocket] = []
-        for ws in list(self._ui):
-            try:
-                await ws.send_text(payload)
-            except Exception:
-                dead.append(ws)
+        targets = list(self._ui.items())
+        results = await asyncio.gather(
+            *(self._send_ui(ws, lock, payload) for ws, lock in targets),
+            return_exceptions=True,
+        )
+        dead = [ws for (ws, _), ok in zip(targets, results) if ok is not True]
         if dead:
             async with self._lock:
                 for ws in dead:
-                    self._ui.discard(ws)
+                    self._ui.pop(ws, None)
 
     def ui_count(self) -> int:
         return len(self._ui)
