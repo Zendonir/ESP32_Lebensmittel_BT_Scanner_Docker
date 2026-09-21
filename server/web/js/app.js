@@ -234,6 +234,27 @@ $('#test-print').addEventListener('click', async () => {
   try { await post('/api/labels/test-print'); toast('Testdruck gesendet', 'success'); }
   catch (e) { toast(e.message, 'error'); }
 });
+// Kalibrierdruck: ein Messstreifen, kein Etikett. Die Anleitung kommt vom
+// Server und nicht aus dieser Datei - sonst beschreibt sie irgendwann einen
+// Streifen, der so gar nicht mehr gedruckt wird.
+$('#calibrate').addEventListener('click', async () => {
+  const box = $('#calibration-guide');
+  try {
+    const r = await post('/api/labels/calibrate');
+    box.innerHTML = `
+      <p class="muted" style="margin:0 0 8px">
+        Streifen gesendet (${r.laenge_mm} mm Papier). Mit einem Lineal
+        nachmessen und die Werte unten eintragen.</p>
+      <ol style="margin:0;padding-left:20px">${r.anleitung.map((a) => `
+        <li style="margin-bottom:8px">
+          <b>${esc(a.titel)}</b><br>
+          <span>${esc(a.messen)}</span><br>
+          <span class="muted" style="font-size:12px">${esc(a.bedeutet)}</span>
+        </li>`).join('')}</ol>`;
+    box.hidden = false;
+    toast('Kalibrierdruck gesendet', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+});
 $('#queue-reload').addEventListener('click', () => loadLabels());
 $('#queue-clear').addEventListener('click', async () => {
   await del('/api/labels/queue');

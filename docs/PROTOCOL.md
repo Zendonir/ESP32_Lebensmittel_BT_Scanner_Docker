@@ -108,7 +108,23 @@ ESC/POS-Bytes um und kennt kein Layout.
 ```
 
 Blockarten: `text` (`align` 0/1/2, `bold`, `large`), `row` (zweispaltig,
-`underline`), `sep`, `qr`, `code128`, `feed`, `form`, `back`.
+`underline`), `sep`, `qr`, `code128`, `raster`, `feed`, `form`, `back`.
+
+`raster` druckt ein fertig gerechnetes Schwarzweißbild: `w`/`h` in Punkten,
+`d` die Bilddaten als Base64 – zeilenweise, ein Bit je Punkt, jede Zeile auf
+ganze Bytes aufgefüllt, höchstwertiges Bit links. Die Firmware sortiert daraus
+die Bänder für `ESC *`.
+
+Damit lässt sich etwas drucken, was der Textmodus grundsätzlich nicht kann:
+zwei Dinge nebeneinander. Im Textmodus kennt der Drucker nur Zeilen, weshalb
+ein QR-Code dort immer seine volle Höhe kostet, statt sich den Platz mit dem
+Text zu teilen. Heute nutzt das nur der Kalibrierdruck
+(`services/calibration.py`); ein ganzes Etikett als ein Bild geht noch nicht,
+weil `Printer::process()` einen Auftrag am Stück in den Sendepuffer schreibt
+und 50×30 mm rund 12 KB wären – dafür müsste das Bild über mehrere
+Loop-Durchläufe verteilt werden. Bis dahin lehnt die Firmware zu große Blöcke
+ab (`MAX_RASTER_TRAFFIC`) und schiebt stattdessen den Platz leer vor, damit
+wenigstens die Teilung stimmt.
 
 `form` schließt ein Etikett mit `GS FF` ab, statt den ausgerechneten Rest
 vorzuschieben: der Drucker sucht die Trennlücke mit seinem eigenen Sensor. Bei

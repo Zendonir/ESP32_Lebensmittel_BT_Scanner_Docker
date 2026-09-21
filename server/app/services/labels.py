@@ -173,6 +173,10 @@ def block_dots(block: dict) -> int:
         # acht Punktzeilen auf einmal, weniger geht nicht.
         side = (21 + 2 * QR_QUIET) * int(block.get("scale", 3))
         return -(-side // QR_BAND) * QR_BAND
+    if kind == "raster":
+        # `ESC *` druckt in Baendern von acht Punktzeilen; ein angefangenes
+        # Band kostet trotzdem die vollen acht.
+        return -(-int(block.get("h", 0)) // QR_BAND) * QR_BAND
     if kind in ("feed", "form"):
         return int(block.get("dots", 0))
     if kind == "back":

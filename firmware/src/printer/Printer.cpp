@@ -2,6 +2,8 @@
 
 #include <qrcode.h>
 
+#include "mbedtls/base64.h"
+
 Printer printer;
 
 static HardwareSerial uart(1);
@@ -16,7 +18,7 @@ void Printer::begin(uint32_t baud) {
     // kommen die Textzeilen. Mit 2 KB und der alten Schwelle von 1 KB konnte
     // ein Etikett groesser sein als der freie Platz - dann lief write() doch
     // wieder auf die 9600-Baud-Leitung und der Loop stand.
-    uart.setTxBufferSize(4096);
+    uart.setTxBufferSize(8192);
     uart.begin(baud, SERIAL_8N1, PRINTER_RX, PRINTER_TX);
     _ready = true;
     reset();
@@ -91,7 +93,7 @@ int Printer::process(bool &ok, String &error) {
     // Sonst laeuft der Puffer bei mehreren Auftraegen hintereinander voll und
     // write() wartet doch wieder auf die 9600-Baud-Leitung. Der Auftrag bleibt
     // solange in der Warteschlange und kommt im naechsten Durchlauf dran.
-    if (uart.availableForWrite() < 3072) return 0;
+    if (uart.availableForWrite() < 6144) return 0;
 
     Job &job = _queue[_head];
     const int id = job.jobId;
@@ -152,6 +154,12 @@ void Printer::writeBlocks(JsonArray blocks) {
             qr(String(block["v"] | ""), height);
         } else if (type == "code128") {
             code128(String(block["v"] | ""), block["height"] | 40);
+        } else if (type == "raster") {
+            // as<const char *>() statt String: die Bilddaten sind das
+            // Groesste in der Nachricht, und eine Kopie davon auf dem Heap
+            // waere reine Verschwendung.
+            const char *daten = block["d"] | "";
+            raster(daten, strlen(daten), block["w"] | 0, block["h"] | 0);
         } else if (type == "feed") {
             feedDots(block["dots"] | 0);
         } else if (type == "form") {
@@ -343,6 +351,83 @@ void Printer::backfeedDots(uint8_t dots) {
     // weiter zurueck als 255 Punkte gehoert das Etikett nicht gezogen.
     if (dots == 0) return;
     uart.write(0x1B); uart.write('j'); uart.write(dots);
+}
+
+// Fertig gerechnetes Schwarzweissbild drucken.
+//
+// Zeilenweise, ein Bit je Punkt, jede Zeile auf ganze Bytes aufgefuellt,
+// hoechstwertiges Bit links - so schickt es der Server, und so liegt es auch
+// im Speicher. Der Drucker will es dagegen spaltenweise in Baendern von acht
+// Punktzeilen (`ESC *`), deshalb wird hier umsortiert.
+//
+// Das ist bewusst ein allgemeiner Block und nicht nur ein Hilfsmittel fuer
+// den Kalibrierdruck: damit laesst sich spaeter ein ganzes Etikett
+// serverseitig setzen und als ein Bild schicken. Erst dann kann etwas
+// nebeneinander stehen - im Textmodus kennt der Drucker nur Zeilen, weshalb
+// der QR-Code dort immer seine volle Hoehe kostet.
+void Printer::raster(const char *b64, size_t b64len, uint16_t w, uint16_t h) {
+    if (w == 0 || h == 0 || b64 == nullptr) return;
+
+    const size_t rowBytes = (w + 7u) / 8u;
+    const size_t bands    = (h + 7u) / 8u;
+    const size_t needed   = rowBytes * h;
+
+    // Wie viele Bytes das auf der Leitung wird. Passt es nicht in den
+    // Sendepuffer, wuerde write() auf die 9600-Baud-Leitung warten und der
+    // ganze Loop stuende - genau das, was die Warteschlange vermeiden soll.
+    // Lieber den Platz leer vorschieben und es melden: das Etikett ist dann
+    // unvollstaendig, aber die Teilung stimmt und das Geraet bleibt bedienbar.
+    const size_t traffic = bands * (w + 7u);
+    if (traffic > MAX_RASTER_TRAFFIC) {
+        log_w("Rasterblock zu gross (%ux%u = %u Bytes) - Platz wird vorgeschoben",
+              w, h, (unsigned)traffic);
+        feedDots((uint16_t)(bands * 8));
+        return;
+    }
+
+    uint8_t *bitmap = (uint8_t *)malloc(needed);
+    if (bitmap == nullptr) {
+        log_e("Kein Speicher fuer %u Byte Rasterdaten", (unsigned)needed);
+        feedDots((uint16_t)(bands * 8));
+        return;
+    }
+
+    size_t decoded = 0;
+    const int err = mbedtls_base64_decode(bitmap, needed, &decoded,
+                                          (const unsigned char *)b64, b64len);
+    if (err != 0 || decoded < needed) {
+        log_w("Rasterdaten unbrauchbar (Fehler %d, %u von %u Byte)",
+              err, (unsigned)decoded, (unsigned)needed);
+        free(bitmap);
+        feedDots((uint16_t)(bands * 8));
+        return;
+    }
+
+    uart.write(0x1B); uart.write('a'); uart.write(1);   // zentriert
+    lineSpacing(8);                                     // ein Band je Zeile
+
+    for (size_t band = 0; band < bands; band++) {
+        uart.write(0x1B); uart.write('*'); uart.write((uint8_t)0);  // 8-Punkt-Einfachdichte
+        uart.write((uint8_t)(w & 0xFF));
+        uart.write((uint8_t)(w >> 8));
+
+        for (uint16_t x = 0; x < w; x++) {
+            const size_t byteIndex = x >> 3;
+            const uint8_t mask = (uint8_t)(0x80u >> (x & 7u));
+            uint8_t column = 0;
+            for (uint8_t bit = 0; bit < 8; bit++) {
+                const size_t y = band * 8u + bit;
+                if (y >= h) break;
+                if (bitmap[y * rowBytes + byteIndex] & mask) {
+                    column |= (uint8_t)(0x80u >> bit);
+                }
+            }
+            uart.write(column);
+        }
+        uart.write((const uint8_t *)"\r\n", 2);
+    }
+
+    free(bitmap);
 }
 
 // GS FF - drucken und bis zur naechsten Trennluecke bzw. Marke fahren.

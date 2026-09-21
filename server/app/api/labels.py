@@ -11,6 +11,7 @@ from ..device import workflow
 from ..device.hub import hub
 from ..models import InventoryItem, PrintJob
 from ..schemas import LabelCreate, LabelCreateResult, PrintJobOut
+from ..services import calibration
 from ..services import inventory as inv
 from ..services import labels as label_service
 from ..services import settings_store
@@ -175,6 +176,46 @@ async def test_print(
         raise HTTPException(503, "Kein Geraet online")
     sent = await workflow.flush_print_queue(session, target)
     return {"ok": bool(sent), "job": job.id}
+
+@router.post("/calibrate")
+async def calibrate(
+    device_id: str | None = None, session: AsyncSession = Depends(get_session)
+):
+    """Kalibrierstreifen drucken.
+
+    Kein Etikett, sondern ein Messstreifen ueber mehrere Teilungen: er laeuft
+    bewusst nicht durch render_label(), damit das Zuschneiden die Messung
+    nicht schon verfaelscht. Was gemessen werden soll und was die Antwort
+    bedeutet, steht in `anleitung` - und zwar aus derselben Quelle wie der
+    Druck, damit Streifen und Erklaerung nicht auseinanderlaufen.
+    """
+    printer_cfg = await settings_store.get(session, "printer", {})
+    _, line_mm = label_service.feed_and_line_mm(printer_cfg)
+    chars = int(printer_cfg.get("paper_chars", 32))
+
+    job = PrintJob(
+        label="KALIBRIERUNG",
+        payload=calibration.build(line_mm=line_mm, chars=chars),
+        status="queued",
+    )
+    session.add(job)
+    # Die Rolle wird hier bewusst nicht belastet: ein Messstreifen ist kein
+    # Etikett, und er verbraucht ohnehin mehrere Teilungen.
+    await session.commit()
+
+    target = device_id or (hub.online_ids()[0] if hub.online_ids() else None)
+    if not target:
+        raise HTTPException(503, "Kein Geraet online")
+    sent = await workflow.flush_print_queue(session, target)
+    return {
+        "ok": bool(sent),
+        "job": job.id,
+        "laenge_mm": round(
+            sum(label_service.block_dots(b) for b in job.payload["blocks"])
+            / label_service.DOTS_PER_MM
+        ),
+        "anleitung": calibration.ANLEITUNG,
+    }
 
 
 @router.get("/queue", response_model=list[PrintJobOut])

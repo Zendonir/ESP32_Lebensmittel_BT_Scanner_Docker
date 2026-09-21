@@ -134,3 +134,67 @@ def test_formularvorschub_ersetzt_den_berechneten_rest():
     # Ohne die Einstellung bleibt es beim berechneten Vorschub.
     ohne = L.render_label(ITEM, _cfg())
     assert ohne["blocks"][-1]["t"] == "feed"
+
+
+# ----------------------------------------------------------- Kalibrierdruck
+def test_kalibrierstreifen_passt_in_den_sendepuffer():
+    """Der Streifen muss in einem Rutsch in die Firmware passen.
+
+    `Printer::process()` faengt erst an, wenn genug Platz im Sendepuffer ist
+    (6144 Byte), und schreibt dann alles am Stueck. Waere der Streifen
+    groesser, wartete write() doch wieder auf die 9600-Baud-Leitung und der
+    ganze Loop stuende - genau das, was die Warteschlange vermeiden soll.
+    """
+    from app.services import calibration as K
+
+    job = K.build(line_mm=50)
+    bytes_auf_der_leitung = 0
+    for b in job["blocks"]:
+        if b["t"] == "raster":
+            baender = -(-b["h"] // 8)
+            bytes_auf_der_leitung += baender * (b["w"] + 7)
+        elif b["t"] in ("text", "row"):
+            bytes_auf_der_leitung += 48 + len(str(b.get("v") or ""))
+        else:
+            bytes_auf_der_leitung += 6
+    assert bytes_auf_der_leitung < 6144
+
+
+def test_kalibrierstreifen_stellt_alle_fragen():
+    """Jede Frage der Anleitung muss im Streifen auch wirklich vorkommen."""
+    from app.services import calibration as K
+
+    job = K.build(line_mm=50)
+    arten = {b["t"] for b in job["blocks"]}
+    assert "raster" in arten     # Zeilenabstand-Marken und Quadrat
+    assert "back" in arten       # Rueckzug (ESC j)
+    assert "form" in arten       # Lueckensensor (GS FF)
+
+    # Das Quadrat muss quadratisch angefordert werden - sonst misst man
+    # nicht die Verzerrung des Druckers, sondern die eigene.
+    quadrat = [b for b in job["blocks"] if b["t"] == "raster" and b["h"] > 8]
+    assert len(quadrat) == 1
+    assert quadrat[0]["w"] == quadrat[0]["h"] == K.BOX_DOTS
+
+
+def test_rasterdaten_sind_vollstaendig_und_randgenau():
+    """Die Firmware liest Zeile fuer Zeile - fehlt ein Byte, druckt sie Muell.
+
+    Und die ueberhaengenden Bits der letzten Spalte muessen geloescht sein,
+    sonst wird der Balken bis zu sieben Punkte breiter als bestellt und die
+    Messung stimmt nicht.
+    """
+    import base64
+
+    from app.services import calibration as K
+
+    block = K._raster(200, 8)
+    roh = base64.b64decode(block["d"])
+    row_bytes = (block["w"] + 7) // 8
+    assert len(roh) == row_bytes * block["h"]
+    assert all(byte == 0xFF for byte in roh)      # 200 ist durch 8 teilbar
+
+    krumm = K._raster(daten_breite := 100, 8)     # 100 = 12 Bytes + 4 Bit
+    roh = base64.b64decode(krumm["d"])
+    assert len(roh) == ((daten_breite + 7) // 8) * 8
+    assert roh[12] == 0xF0                        # nur die ersten vier Bit
