@@ -5,7 +5,9 @@ deshalb in einer Datei.
 
 Wie die uebrigen Testdateien laeuft das im selben Prozess wie test_flow.py -
 Settings ist ein Singleton, das beim ersten Modulimport fixiert wird. Das
-Firmware-Verzeichnis wird deshalb hier gesetzt, bevor `app` importiert wird.
+Firmware-Verzeichnis kommt deshalb aus tests/conftest.py und nicht mehr von
+hier: es hier zu setzen half nur, solange diese Datei zufaellig die erste war,
+die `app` importiert. Genau das hat eine neue Testdatei spaeter umgestossen.
 """
 
 from __future__ import annotations
@@ -19,7 +21,6 @@ import pytest
 os.environ.setdefault("DEVICE_TOKEN", "test-token")
 _tmpdir = tempfile.mkdtemp()
 os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{_tmpdir}/test_fw.db")
-os.environ.setdefault("FIRMWARE_DIR", f"{_tmpdir}/firmware")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -117,3 +118,19 @@ def test_download_verlangt_das_geraetetoken():
         # Eine Variante ohne hinterlegtes Abbild darf keinen Serverfehler geben.
         fehlt = client.get(f"/firmware/35x.bin?token={os.environ['DEVICE_TOKEN']}")
         assert fehlt.status_code == 404
+
+
+def test_abbilder_landen_nicht_unter_data():
+    """Sonst scheitert der Lauf, sobald er ohne Schreibrechte auf / laeuft.
+
+    Das war kein theoretischer Fall: die CI laeuft ohne diese Rechte, und eine
+    neu hinzugekommene Testdatei, die sich alphabetisch vor diese hier
+    einsortierte, hat `app.config` zuerst importiert und damit
+    `/data/firmware` festgeschrieben. Lokal als root faellt das nicht auf.
+    """
+    from app.config import settings
+
+    assert not settings.firmware_dir.startswith("/data"), (
+        "FIRMWARE_DIR zeigt auf /data - tests/conftest.py wird nicht "
+        "geladen oder wurde uebersteuert"
+    )

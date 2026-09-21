@@ -149,6 +149,7 @@ cd firmware && pio run --target upload # flashen
 | SD-Karte wird nicht erkannt, wenn sie spaeter kommt | `SdStore::ensureMounted()` versucht es weiter, solange keine sitzt |
 | Etikett kommt doppelt aus dem Drucker | Ein Auftrag in `sent` wird nur beim Reconnect erneut geschickt, sonst nie |
 | Druckauftrag steht ewig auf `sent` | Nach `PRINT_STALE_SECONDS` zurueck in die Schlange |
+| Test scheitert mit `Permission denied: '/data'` | `Settings` friert beim **ersten** Import von `app.config` ein. Umgebungsvariablen fuer Tests gehoeren deshalb in `tests/conftest.py` - pytest laedt die vor jedem Testmodul. In einer Testdatei gesetzt gilt es nur, solange die zufaellig die alphabetisch erste ist |
 | SQLite-PRAGMA wirkt nicht | `foreign_keys`/`synchronous` gelten je Verbindung - gehoeren in den `connect`-Listener in `db.py`, nicht in `init_db()` |
 | Ein haengender Browser friert das Terminal ein | Jeder Sendevorgang hat eine Zeitgrenze (`hub.SEND_TIMEOUT_S`) |
 
