@@ -127,13 +127,21 @@ def test_formularvorschub_ersetzt_den_berechneten_rest():
     """
     payload = L.render_label(ITEM, _cfg(label_end="formfeed"))
     letzter = payload["blocks"][-1]
-    assert letzter["t"] == "form"
+
+    # Bleibt ein feed-Block mit Merkmal, statt ein eigener Typ zu werden:
+    # eine Firmware, die `form` nicht kennt, wuerde einen eigenen Typ
+    # stillschweigend fallen lassen und gar nicht vorschieben - die Etiketten
+    # liefen uebereinander. Mit `dots` daneben macht auch sie das Richtige.
+    assert letzter["t"] == "feed"
+    assert letzter["form"] is True
     assert letzter["dots"] > 0
     assert L.total_dots(payload["blocks"]) == int(payload["stack_mm"] * L.DOTS_PER_MM)
 
-    # Ohne die Einstellung bleibt es beim berechneten Vorschub.
+    # Ohne die Einstellung bleibt es beim berechneten Vorschub - und ohne
+    # jedes Merkmal, damit sich nichts aendert, was sich nicht aendern soll.
     ohne = L.render_label(ITEM, _cfg())
     assert ohne["blocks"][-1]["t"] == "feed"
+    assert "form" not in ohne["blocks"][-1]
 
 
 # ----------------------------------------------------------- Kalibrierdruck
@@ -168,7 +176,7 @@ def test_kalibrierstreifen_stellt_alle_fragen():
     arten = {b["t"] for b in job["blocks"]}
     assert "raster" in arten     # Zeilenabstand-Marken und Quadrat
     assert "back" in arten       # Rueckzug (ESC j)
-    assert "form" in arten       # Lueckensensor (GS FF)
+    assert any(b.get("form") for b in job["blocks"])   # Lueckensensor (GS FF)
 
     # Das Quadrat muss quadratisch angefordert werden - sonst misst man
     # nicht die Verzerrung des Druckers, sondern die eigene.

@@ -135,9 +135,11 @@ cd firmware && pio run --target upload # flashen
 | QR-Code wird nicht gelesen | Module muessen quadratisch sein und eine Ruhezone haben; die Reservierung ist ein Vielfaches von 8, weil `ESC *` in Baendern druckt |
 | Einstellung wirkt nicht | Erst pruefen, ob sie ueberhaupt gelesen wird - `post_feed_dots`, `printer.qr` und `printer.code128` standen jahrelang in der Oberflaeche, ohne dass sie jemand auswertete |
 | Etikett laeuft trotzdem ueber | `render_label()` meldet es in `overflow`; kleinerer Code oder kuerzerer Zuschnitt |
+| Neuer Blocktyp im Druckprotokoll | Lieber ein Merkmal an einem vorhandenen Block als ein neuer Typ - eine aeltere Firmware laesst unbekannte Typen stillschweigend fallen (siehe `feed` mit `form`) |
 | Versatz summiert sich ueber die Rolle | Bei gestanzten Etiketten `label_end: "formfeed"` - der Drucker sucht die Luecke mit seinem Sensor (`GS FF`) und registriert bei jedem Etikett neu, statt unserer Rechnung zu vertrauen |
 | Welche Fassung laeuft hier? | System-Panel, "Fassung" - aus `APP_VERSION`/`APP_COMMIT`/`APP_BUILT`, gesetzt beim Bau des Abbilds. Version **nirgends** ein zweites Mal eintragen, sonst widersprechen sich die Angaben |
 | Update-Knopf meldet Fehler, obwohl es lief | Watchtower beendet genau den Container, der die Anfrage gestellt hat - die Antwort kann nicht ankommen. Ein Abriss gilt in `deploy.trigger()` deshalb als Erfolg |
+| Abbild-Tags | `:latest` folgt den **Releases**, nicht main - wer den Kopf von main will, nimmt `:main`. Ein Release entsteht durch einen Tag `v*`; der Workflow baut dann Firmware, Release und Installer-Seite in einem Zug |
 | Der Server soll sich selbst aktualisieren | Er laedt und startet **keinen** Code aus dem Netz. `services/deploy.py` schickt nur eine Anfrage an einen Dienst, der den Container ersetzen darf; das Abbild bleibt das, was in der Registry steht |
 | GitHub-Vergleich meldet immer "aktuell" | `/compare/base...head` liefert `ahead_by` fuer das, was head voraus ist - `behind_by` ist die Gegenrichtung und bleibt dabei 0 |
 | Namenloser Drucker, kein Datenblatt | Nicht raten: `POST /api/labels/calibrate` druckt einen Messstreifen, der Zeilenabstand, Rastergeometrie, Rueckzug und Lueckensensor mit dem Lineal ablesbar macht (`services/calibration.py`) |

@@ -278,6 +278,12 @@ $('#update-check').addEventListener('click', async () => {
       teile.push('<b>Aktuell.</b>');
     }
     if (r.hinweis) teile.push(`<span class="muted">${esc(r.hinweis)}</span>`);
+    // Was zu tun ist, in Klicks - nicht "das Abbild neu ziehen".
+    if (r.anleitung?.length) {
+      teile.push(`<ol style="margin:6px 0 0;padding-left:20px">${
+        r.anleitung.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>`);
+    }
+    if (r.abbild) teile.push(`<code class="mono">${esc(r.abbild)}</code>`);
     teile.push(`<a href="${esc(r.url)}" target="_blank" rel="noopener">Änderungen ansehen</a>`);
 
     // Den Knopf nur zeigen, wenn es etwas zu tun gibt *und* jemand da ist,

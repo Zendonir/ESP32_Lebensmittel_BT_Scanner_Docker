@@ -109,7 +109,7 @@ def build(line_mm: float = 48.0, chars: int = 32) -> dict:
         # --- 4: hat er einen Lueckensensor? ------------------------------
         zeile("4) Lueckensensor", bold=True),
         zeile("Jetzt GS FF:"),
-        {"t": "form", "dots": 0},
+        {"t": "feed", "dots": 0, "form": True},
         zeile("<<< oben am Etikett?", bold=True),
         zeile(""),
         zeile("Ende."),
