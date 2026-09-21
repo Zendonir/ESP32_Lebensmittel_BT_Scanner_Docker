@@ -103,6 +103,18 @@ class Settings:
             "APP_REPO", "Zendonir/ESP32_Lebensmittel_BT_Scanner_Docker"
         )
     )
+    # Dienst, der den Container ersetzen darf (Watchtower o.ae.). Leer = der
+    # Update-Knopf in der Oberflaeche erklaert nur, was einzurichten waere.
+    # Bewusst aus der Umgebung und nicht aus den Einstellungen: wer die Adresse
+    # zur Laufzeit setzen koennte, koennte den Server auf einen beliebigen
+    # Dienst zeigen lassen.
+    update_hook_url: str = field(
+        default_factory=lambda: os.getenv("UPDATE_HOOK_URL", "")
+    )
+    update_hook_token: str = field(
+        default_factory=lambda: os.getenv("UPDATE_HOOK_TOKEN", "")
+    )
+
     app_image: str = field(
         default_factory=lambda: os.getenv(
             "APP_IMAGE", "ghcr.io/zendonir/esp32_lebensmittel_bt_scanner_docker:latest"

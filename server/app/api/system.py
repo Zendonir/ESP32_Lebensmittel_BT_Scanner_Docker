@@ -36,7 +36,7 @@ from ..schemas import (
 )
 from ..services import importer as importer_service
 from ..services import inventory as inv
-from ..services import notify, settings_store, updates
+from ..services import deploy, notify, settings_store, updates
 from ..services.dates import to_display
 
 log = logging.getLogger(__name__)
@@ -254,7 +254,25 @@ async def update_check(force: bool = False):
     Fragt beim Ursprung nach und vergleicht. Aktualisiert nichts - siehe
     services/updates.py.
     """
-    return await updates.check(force=force)
+    ergebnis = await updates.check(force=force)
+    # Was die Oberflaeche wissen muss, um den Knopf anzubieten oder zu
+    # erklaeren, warum es ihn nicht gibt.
+    ergebnis["anstoss"] = deploy.status()
+    return ergebnis
+
+
+@router.post("/system/update/apply")
+async def update_apply():
+    """Das Update anstossen.
+
+    Dieser Server laedt dabei nichts und fuehrt nichts aus - er bittet den
+    eingerichteten Dienst, das neue Abbild zu ziehen und den Container zu
+    ersetzen. Siehe services/deploy.py.
+    """
+    try:
+        return await deploy.trigger()
+    except ValueError as fehler:
+        raise HTTPException(400, str(fehler)) from fehler
 
 
 @router.post("/notify/test")

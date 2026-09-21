@@ -279,11 +279,68 @@ $('#update-check').addEventListener('click', async () => {
     }
     if (r.hinweis) teile.push(`<span class="muted">${esc(r.hinweis)}</span>`);
     teile.push(`<a href="${esc(r.url)}" target="_blank" rel="noopener">Änderungen ansehen</a>`);
+
+    // Den Knopf nur zeigen, wenn es etwas zu tun gibt *und* jemand da ist,
+    // der den Container ersetzen darf. Sonst statt eines toten Knopfes die
+    // Erklärung, was dafür fehlt.
+    const anstoss = r.anstoss || {};
+    $('#update-apply').hidden = !(r.update_verfuegbar && anstoss.moeglich);
+    if (r.update_verfuegbar && !anstoss.moeglich) {
+      teile.push(`<span class="muted">${esc(anstoss.hinweis || '')}</span>`);
+    }
     box.innerHTML = teile.join('<br>');
   } catch (e) {
     box.innerHTML = `<span style="color:var(--danger,#f04640)">${esc(e.message)}</span>`;
   }
 });
+// Aktualisieren. Der Server lädt dabei nichts und führt nichts aus - er
+// bittet den eingerichteten Dienst, das neue Abbild zu ziehen und diesen
+// Container zu ersetzen. Wir verlieren dabei die Verbindung; statt auf eine
+// Antwort zu warten, warten wir auf das Wiederkommen.
+$('#update-apply').addEventListener('click', async () => {
+  if (!confirm('Server aktualisieren?\n\nDer Container wird dabei ersetzt. '
+      + 'Das Terminal verliert kurz die Verbindung und verbindet sich von '
+      + 'selbst wieder. Die Daten im Volume bleiben unberührt.')) return;
+
+  const box = $('#update-state');
+  const knopf = $('#update-apply');
+  knopf.disabled = true;
+  try {
+    const r = await post('/api/system/update/apply');
+    box.innerHTML = `<b>${esc(r.hinweis)}</b><br>`
+      + '<span class="muted">Warte auf den Neustart …</span>';
+    await warteAufServer(box);
+  } catch (e) {
+    box.innerHTML = `<span style="color:var(--danger,#f04640)">${esc(e.message)}</span>`;
+    knopf.disabled = false;
+  }
+});
+
+// Nach dem Ersetzen antwortet der Server erst nicht und dann wieder. Genau
+// das ist das Signal - eine Rückmeldung vom alten Container kann es nicht
+// geben, der ist ja weg.
+async function warteAufServer(box) {
+  const bis = Date.now() + 180000;
+  let warWeg = false;
+  while (Date.now() < bis) {
+    await new Promise((r) => setTimeout(r, 2000));
+    try {
+      const h = await fetch('/api/health', { cache: 'no-store' });
+      if (!h.ok) throw new Error('nicht bereit');
+      if (warWeg) {
+        box.innerHTML = '<b>Fertig.</b> <span class="muted">Der Server ist '
+          + 'wieder da. Die Seite wird neu geladen …</span>';
+        setTimeout(() => location.reload(), 1500);
+        return;
+      }
+    } catch {
+      warWeg = true;   // jetzt wird ersetzt
+      box.innerHTML = '<b>Der Server wird ersetzt …</b>';
+    }
+  }
+  box.innerHTML = '<span class="muted">Der Server ist nach drei Minuten nicht '
+    + 'zurückgekommen. Im TrueNAS nachsehen, ob die App läuft.</span>';
+}
 $('#queue-reload').addEventListener('click', () => loadLabels());
 $('#queue-clear').addEventListener('click', async () => {
   await del('/api/labels/queue');
