@@ -255,6 +255,35 @@ $('#calibrate').addEventListener('click', async () => {
     toast('Kalibrierdruck gesendet', 'success');
   } catch (e) { toast(e.message, 'error'); }
 });
+// Update-Pruefung. Fragt beim Ursprung nach und sagt, wie weit dieser Server
+// zurueck ist - aktualisiert aber nichts: ein Dienst, der sich selbst
+// ersetzt, braucht einen Rueckweg, und den gibt es noch nicht.
+$('#update-check').addEventListener('click', async () => {
+  const box = $('#update-state');
+  box.textContent = 'Wird geprüft …';
+  try {
+    const r = await get('/api/system/update?force=true');
+    if (r.fehler) {
+      box.innerHTML = `<span style="color:var(--warn,#cc9218)">${esc(r.fehler)}</span>`;
+      return;
+    }
+    const teile = [];
+    if (r.update_verfuegbar) {
+      const n = r.neueste || {};
+      teile.push(`<b>Update verfügbar:</b> ${esc(n.version || '')}`
+        + (n.commit_kurz ? ` · ${esc(n.commit_kurz)}` : '')
+        + (r.rueckstand ? ` · ${r.rueckstand} Commit(s) zurück` : ''));
+      if (n.titel) teile.push(`<span class="muted">${esc(n.titel)}</span>`);
+    } else {
+      teile.push('<b>Aktuell.</b>');
+    }
+    if (r.hinweis) teile.push(`<span class="muted">${esc(r.hinweis)}</span>`);
+    teile.push(`<a href="${esc(r.url)}" target="_blank" rel="noopener">Änderungen ansehen</a>`);
+    box.innerHTML = teile.join('<br>');
+  } catch (e) {
+    box.innerHTML = `<span style="color:var(--danger,#f04640)">${esc(e.message)}</span>`;
+  }
+});
 $('#queue-reload').addEventListener('click', () => loadLabels());
 $('#queue-clear').addEventListener('click', async () => {
   await del('/api/labels/queue');
@@ -592,8 +621,14 @@ async function loadSystem() {
   ]);
   state.settings = settings;
 
+  // Fassung lesbar statt als 40-Zeichen-Hash: Zweig bzw. Tag, kurzer Commit,
+  // Baudatum. Ohne das war die Frage "laeuft hier der aktuelle Stand?" vom
+  // Panel aus nicht zu beantworten.
+  const stand = [esc(info.version)];
+  if (info.commit_kurz) stand.push(esc(info.commit_kurz));
+  if (info.gebaut) stand.push(fmtTime(info.gebaut));
   $('#sys-info').innerHTML = `
-    Version ${esc(info.version)}<br>Python ${esc(info.python)}<br>
+    Fassung ${stand.join(' · ')}<br>Python ${esc(info.python)}<br>
     Datenbank ${esc(info.database)}<br>Zeitzone ${esc(info.timezone)}<br>
     Laufzeit ${Math.floor(info.uptime / 3600)} h ${Math.floor((info.uptime % 3600) / 60)} min<br>
     Terminals online ${info.devices.count}<br>

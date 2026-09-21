@@ -36,7 +36,7 @@ from ..schemas import (
 )
 from ..services import importer as importer_service
 from ..services import inventory as inv
-from ..services import notify, settings_store
+from ..services import notify, settings_store, updates
 from ..services.dates import to_display
 
 log = logging.getLogger(__name__)
@@ -229,7 +229,10 @@ async def health(session: AsyncSession = Depends(get_session)):
 async def system_info(session: AsyncSession = Depends(get_session)):
     counts = await inv.stats(session)
     return {
-        "version": os.getenv("APP_VERSION", "dev"),
+        # Vorher stand hier nur APP_VERSION - beim Zweigbau eine Zeichenkette
+        # aus Zweigname und vollem Commit-Hash, die niemand lesen oder
+        # vergleichen kann. Jetzt getrennt, mit Kurzfassung und Baudatum.
+        **updates.current(),
         "python": platform.python_version(),
         "platform": platform.platform(),
         "uptime": int(time.time() - _STARTED),
@@ -242,6 +245,16 @@ async def system_info(session: AsyncSession = Depends(get_session)):
         "inventory": counts,
         "notify": notify.configured_channels(),
     }
+
+
+@router.get("/system/update")
+async def update_check(force: bool = False):
+    """Laeuft hier der aktuelle Stand?
+
+    Fragt beim Ursprung nach und vergleicht. Aktualisiert nichts - siehe
+    services/updates.py.
+    """
+    return await updates.check(force=force)
 
 
 @router.post("/notify/test")

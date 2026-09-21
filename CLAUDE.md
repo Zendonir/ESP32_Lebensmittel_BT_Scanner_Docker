@@ -22,7 +22,7 @@ server/app/
   device/        protocol · hub · workflow · routes
   services/      inventory · labels · calibration · categories · openfoodfacts ·
                  notify · scheduler · dates · settings_store · seed · importer ·
-                 firmware
+                 firmware · updates
 server/web/      index.html · mobile.html · js/ · css/ (kein Build-Schritt)
                  js/vendor/  ZXing – Barcodes aus der Handykamera, siehe
                              das README dort
@@ -136,6 +136,8 @@ cd firmware && pio run --target upload # flashen
 | Einstellung wirkt nicht | Erst pruefen, ob sie ueberhaupt gelesen wird - `post_feed_dots`, `printer.qr` und `printer.code128` standen jahrelang in der Oberflaeche, ohne dass sie jemand auswertete |
 | Etikett laeuft trotzdem ueber | `render_label()` meldet es in `overflow`; kleinerer Code oder kuerzerer Zuschnitt |
 | Versatz summiert sich ueber die Rolle | Bei gestanzten Etiketten `label_end: "formfeed"` - der Drucker sucht die Luecke mit seinem Sensor (`GS FF`) und registriert bei jedem Etikett neu, statt unserer Rechnung zu vertrauen |
+| Welche Fassung laeuft hier? | System-Panel, "Fassung" - aus `APP_VERSION`/`APP_COMMIT`/`APP_BUILT`, gesetzt beim Bau des Abbilds. Version **nirgends** ein zweites Mal eintragen, sonst widersprechen sich die Angaben |
+| GitHub-Vergleich meldet immer "aktuell" | `/compare/base...head` liefert `ahead_by` fuer das, was head voraus ist - `behind_by` ist die Gegenrichtung und bleibt dabei 0 |
 | Namenloser Drucker, kein Datenblatt | Nicht raten: `POST /api/labels/calibrate` druckt einen Messstreifen, der Zeilenabstand, Rastergeometrie, Rueckzug und Lueckensensor mit dem Lineal ablesbar macht (`services/calibration.py`) |
 | Umlaute tanzen in der Zeile | Hinting staucht Zeichen mit Aufsatz; `gen_gfx_font.py` zieht die Grundlinie nach |
 | Kamera-Scan geht am iPhone nicht | Safari hat kein `BarcodeDetector` (ZXing springt ein) **und** braucht HTTPS |
