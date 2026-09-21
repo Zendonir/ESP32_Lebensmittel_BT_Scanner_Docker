@@ -4,7 +4,16 @@
 # Ein Container kann sein eigenes Abbild nicht ersetzen. Watchtower kann es,
 # und der Lebensmittel-Scanner schickt ihm auf Knopfdruck eine Anfrage.
 #
-# Einspielen:  Apps -> Discover Apps -> Custom App -> "Install via YAML"
+# Am einfachsten *nicht* als eigene App einspielen, sondern beide Dienste in
+# EINE Custom App legen: die untenstehende watchtower-Sektion einfach in die
+# vorhandene docker-compose.yaml des Scanners mit hineinschreiben. Dann liegen
+# beide im selben Docker-Netz, "watchtower" loest als Name auf, und es muss
+# gar kein Port veroeffentlicht werden.
+#
+# Als getrennte App geht es auch - dann aber den Port unten veroeffentlichen
+# und beim Scanner statt "http://watchtower:8080/..." die IP des NAS und
+# diesen Port eintragen. Zwei Custom Apps liegen in getrennten Netzen und
+# sehen sich ueber den Dienstnamen nicht.
 #
 # Vorher zwei Dinge:
 #   1. Ein Token erzeugen:   openssl rand -hex 24
@@ -31,9 +40,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
-    ports:
-      # Nur noetig, wenn der Scanner nicht im selben Docker-Netz laeuft.
-      - "8081:8080"
+    # Nur noetig, wenn der Scanner als getrennte App laeuft. In derselben
+    # Custom App ist es ueberfluessig - und ein unnoetig offener Port, ueber
+    # den jeder mit dem Token Container austauschen koennte.
+    # ports:
+    #   - "8081:8080"
 
     environment:
       # Auf Anfrage aktualisieren, nicht nach Zeitplan. Ein Haushaltsserver
