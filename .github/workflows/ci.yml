@@ -64,12 +64,20 @@ jobs:
       - name: PlatformIO
         run: pip install platformio
 
-      - uses: actions/cache@v4
+      # Wiederherstellen und Sichern getrennt: mit dem kombinierten Schritt
+      # laeuft "Post Run cache" bei einem fehlgeschlagenen Job gar nicht erst.
+      # Dann wird nach einem Fehlschlag nichts gesichert, der naechste Lauf
+      # faengt wieder bei null an und haengt wieder am Netz - ein Kreis, aus
+      # dem der Job von allein nicht mehr herausfindet.
+      - name: Toolchain aus dem Zwischenspeicher
+        id: pio-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.platformio/.cache
             ~/.platformio/packages
             ~/.platformio/platforms
+            ~/.platformio/penv
           key: pio-${{ hashFiles('firmware/platformio.ini') }}
 
       # Die Toolchain vorab holen, mit Wiederholung. Sie richtet sich eine
@@ -89,12 +97,39 @@ jobs:
           echo "Toolchain liess sich nach drei Anlaeufen nicht einrichten" >&2
           exit 1
 
+      # Ab hier ohne Netz, und das ist der Kern der Sache.
+      #
+      # Die Plattform prueft ihre Python-Umgebung bei *jeder* Umgebung neu
+      # (builder/penv_setup.py). Dabei steht der Kern in ihrer Liste unter
+      # "platformio", installiert wird er aber als "pioarduino-core" - die
+      # Namen treffen sich nie. Die Pruefung kommt also immer zu dem Schluss,
+      # das Paket fehle, und laedt das Zip von GitHub erneut. Bei zwei
+      # Umgebungen sind das drei Ladevorgaenge desselben Archivs in vier
+      # Minuten; einer davon geht irgendwann daneben, und der Lauf bricht mit
+      # "Failed to install Python dependencies into penv" ab - mitten im
+      # Bauen, nachdem die erste Firmware schon fertig war.
+      #
+      # Genau so ist es nach dem Merge passiert: terminal-35 fertig, 113 s,
+      # dann terminal-35b tot nach 23 s. Am Code lag es nicht, der Baum auf
+      # main war Zeichen fuer Zeichen derselbe wie auf dem Zweig.
+      #
+      # PLATFORMIO_OFFLINE=1 laesst die Pruefung aus. Alles, was gebraucht
+      # wird, hat der Schritt davor geholt - der darf und soll ans Netz.
+      # Damit ist der Bauschritt von der Netzlage unabhaengig, und ein Fehler
+      # dort ist wieder das, wonach er aussieht: ein Fehler am Code.
+      #
+      # Deshalb steht hier auch *keine* Wiederholung. Eine Wiederholung um
+      # einen Uebersetzungsfehler herum verdeckt ihn nur dreimal.
       - name: Bauen
         working-directory: firmware
+        env:
+          PLATFORMIO_OFFLINE: "1"
         run: pio run
 
       - name: Groesse der Firmware
         working-directory: firmware
+        env:
+          PLATFORMIO_OFFLINE: "1"
         run: pio run --target size | tail -25
 
       - uses: actions/upload-artifact@v4
@@ -104,3 +139,15 @@ jobs:
             firmware/.pio/build/terminal-35/firmware.bin
             firmware/.pio/build/terminal-35b/firmware.bin
           if-no-files-found: error
+
+      # Auch nach einem Fehlschlag sichern, sonst siehe oben.
+      - name: Toolchain in den Zwischenspeicher
+        if: always() && steps.pio-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+            ~/.platformio/penv
+          key: pio-${{ hashFiles('firmware/platformio.ini') }}

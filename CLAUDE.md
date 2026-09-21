@@ -157,6 +157,7 @@ cd firmware && pio run --target upload # flashen
 | SQLite-PRAGMA wirkt nicht | `foreign_keys`/`synchronous` gelten je Verbindung - gehoeren in den `connect`-Listener in `db.py`, nicht in `init_db()` |
 | Nach einem Update fehlen halbe Masken, ohne Fehlermeldung | Der Browser hat das neue `index.html`, aber noch das alte `app.js`. Felder werden deshalb ueber `setzen()` gefuellt - ein entferntes Feld darf nie den Rest mitreissen |
 | Browser holt die neue Datei trotzdem nicht | `no-cache` wirkt nur auf kuenftige Antworten; wer die alte Datei schon hat, fragt gar nicht erst. Die Kennung steht deshalb im **Pfad** (`/static/v/<kennung>/…`) und nicht als `?v=` - `app.js` importiert `./api.js` relativ, ein Abfrageteil an `app.js` liesse `api.js` alt |
+| Firmware-Bau in der Werkstatt bricht mitten drin ab (`Failed to install Python dependencies into penv`) | Kein Fehler am Code. Die Plattform sucht ihren eigenen Kern als `platformio`, installiert ist er als `pioarduino-core` - sie laedt ihn deshalb einmal pro Bauumgebung neu, und einer der Ladevorgaenge faellt um. Gebaut wird darum mit `PLATFORMIO_OFFLINE=1`; ans Netz darf nur `pio pkg install` davor |
 | Ein haengender Browser friert das Terminal ein | Jeder Sendevorgang hat eine Zeitgrenze (`hub.SEND_TIMEOUT_S`) |
 
 ## Entwicklungsregeln

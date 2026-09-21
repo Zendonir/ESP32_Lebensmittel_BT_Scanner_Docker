@@ -54,6 +54,7 @@ jobs:
             ~/.platformio/.cache
             ~/.platformio/packages
             ~/.platformio/platforms
+            ~/.platformio/penv
           key: pio-${{ hashFiles('firmware/platformio.ini') }}
 
       - name: Version bestimmen
@@ -80,8 +81,15 @@ jobs:
           echo "Toolchain liess sich nach drei Anlaeufen nicht einrichten" >&2
           exit 1
 
+      # Ohne Netz bauen, siehe die ausfuehrliche Begruendung in ci.yml: die
+      # Plattform laedt ihren eigenen Kern sonst einmal pro Umgebung neu, weil
+      # sie ihn unter einem Namen sucht, unter dem er nicht installiert ist.
+      # Beim Release waere ein Abbruch daran besonders aergerlich - er kaeme
+      # mitten im Bauen und liesse ein halbes Ergebnis zurueck.
       - name: Firmware bauen
         working-directory: firmware
+        env:
+          PLATFORMIO_OFFLINE: "1"
         run: pio run
 
       - name: Dateien einsammeln
