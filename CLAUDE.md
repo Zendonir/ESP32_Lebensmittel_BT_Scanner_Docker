@@ -135,6 +135,7 @@ cd firmware && pio run --target upload # flashen
 | QR-Code wird nicht gelesen | Module muessen quadratisch sein und eine Ruhezone haben; die Reservierung ist ein Vielfaches von 8, weil `ESC *` in Baendern druckt |
 | Einstellung wirkt nicht | Erst pruefen, ob sie ueberhaupt gelesen wird - `post_feed_dots`, `printer.qr` und `printer.code128` standen jahrelang in der Oberflaeche, ohne dass sie jemand auswertete |
 | Etikett laeuft trotzdem ueber | `render_label()` meldet es in `overflow`; kleinerer Code oder kuerzerer Zuschnitt |
+| Neuer Blocktyp im Druckprotokoll | Lieber ein Merkmal an einem vorhandenen Block als ein neuer Typ - eine aeltere Firmware laesst unbekannte Typen stillschweigend fallen (siehe `feed` mit `form`) |
 | Versatz summiert sich ueber die Rolle | Bei gestanzten Etiketten `label_end: "formfeed"` - der Drucker sucht die Luecke mit seinem Sensor (`GS FF`) und registriert bei jedem Etikett neu, statt unserer Rechnung zu vertrauen |
 | Welche Fassung laeuft hier? | System-Panel, "Fassung" - aus `APP_VERSION`/`APP_COMMIT`/`APP_BUILT`, gesetzt beim Bau des Abbilds. Version **nirgends** ein zweites Mal eintragen, sonst widersprechen sich die Angaben |
 | Update-Knopf meldet Fehler, obwohl es lief | Watchtower beendet genau den Container, der die Anfrage gestellt hat - die Antwort kann nicht ankommen. Ein Abriss gilt in `deploy.trigger()` deshalb als Erfolg |

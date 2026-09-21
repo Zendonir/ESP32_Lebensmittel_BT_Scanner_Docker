@@ -108,7 +108,7 @@ ESC/POS-Bytes um und kennt kein Layout.
 ```
 
 Blockarten: `text` (`align` 0/1/2, `bold`, `large`), `row` (zweispaltig,
-`underline`), `sep`, `qr`, `code128`, `raster`, `feed`, `form`, `back`.
+`underline`), `sep`, `qr`, `code128`, `raster`, `feed`, `back`.
 
 `raster` druckt ein fertig gerechnetes Schwarzweißbild: `w`/`h` in Punkten,
 `d` die Bilddaten als Base64 – zeilenweise, ein Bit je Punkt, jede Zeile auf
@@ -126,13 +126,20 @@ Loop-Durchläufe verteilt werden. Bis dahin lehnt die Firmware zu große Blöcke
 ab (`MAX_RASTER_TRAFFIC`) und schiebt stattdessen den Platz leer vor, damit
 wenigstens die Teilung stimmt.
 
-`form` schließt ein Etikett mit `GS FF` ab, statt den ausgerechneten Rest
-vorzuschieben: der Drucker sucht die Trennlücke mit seinem eigenen Sensor. Bei
-gestanzten Etiketten ist das der robustere Abschluss, weil die Registrierung
-dann bei jedem Etikett neu stimmt und ein Rest von ein paar Punkten sich nicht
-über die Rolle aufsummieren kann. Drucker ohne Lücken- oder Markensensor
-kennen den Befehl nicht, deshalb schickt ihn der Server nur auf ausdrückliche
-Einstellung (`printer.label_end`). Der Block trägt weiterhin `dots`, damit
+`feed` mit `form: true` schließt ein Etikett mit `GS FF` ab, statt den
+ausgerechneten Rest vorzuschieben: der Drucker sucht die Trennlücke mit seinem
+eigenen Sensor. Bei gestanzten Etiketten ist das der robustere Abschluss, weil
+die Registrierung dann bei jedem Etikett neu stimmt und ein Rest von ein paar
+Punkten sich nicht über die Rolle aufsummieren kann. Drucker ohne Lücken- oder
+Markensensor kennen den Befehl nicht, deshalb schickt ihn der Server nur auf
+ausdrückliche Einstellung (`printer.label_end`).
+
+**Ein Merkmal, kein eigener Blocktyp** – und das ist Absicht. Als eigener Typ
+wäre er eine Falle: eine Firmware, die ihn nicht kennt, lässt den Block
+stillschweigend fallen und schiebt dann *gar nicht* vor. Die Etiketten liefen
+übereinander, und schuld wäre scheinbar der Drucker. So herum versteht jede
+Firmware wenigstens `dots` und macht das Richtige; wer `form` kennt, sucht
+stattdessen die Lücke. Der Block trägt `dots` ohnehin weiter, damit
 `total_dots()` und die Vorschau eine volle Teilung sehen.
 
 ### `h` – die Höhe ist verbindlich

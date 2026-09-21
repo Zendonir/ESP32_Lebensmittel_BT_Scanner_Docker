@@ -161,9 +161,13 @@ void Printer::writeBlocks(JsonArray blocks) {
             const char *daten = block["d"] | "";
             raster(daten, strlen(daten), block["w"] | 0, block["h"] | 0);
         } else if (type == "feed") {
-            feedDots(block["dots"] | 0);
-        } else if (type == "form") {
-            formFeed();
+            // `form` ist ein Merkmal des Vorschubs, kein eigener Blocktyp:
+            // eine aeltere Firmware kennt das Merkmal nicht, sieht aber
+            // `dots` und schiebt wenigstens richtig vor. Als eigener Typ
+            // waere der Block bei ihr stillschweigend unter den Tisch
+            // gefallen - und die Etiketten liefen uebereinander.
+            if (block["form"] | false) formFeed();
+            else                       feedDots(block["dots"] | 0);
         } else if (type == "back") {
             backfeedDots(block["dots"] | 0);
         }

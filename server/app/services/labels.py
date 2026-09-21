@@ -521,13 +521,19 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     # Vorgabe.
     remaining = pitch - total_dots(blocks)
     if remaining > 0:
+        # Der Formularvorschub ist ein *Merkmal* des Vorschubs, kein eigener
+        # Blocktyp.
+        #
+        # Als eigener Typ war er eine Falle: eine Firmware, die ihn nicht
+        # kennt, laesst den Block stillschweigend fallen - und schiebt dann
+        # gar nicht vor. Die Etiketten liefen uebereinander, und schuld waere
+        # scheinbar der Drucker gewesen. So herum versteht jede Firmware
+        # wenigstens `dots` und macht das Richtige; wer `form` kennt, sucht
+        # stattdessen die Luecke.
+        vorschub = {"t": "feed", "dots": remaining}
         if printer_cfg.get("label_end") == "formfeed":
-            # `dots` bleibt drin, damit total_dots() und die Vorschau
-            # weiterhin eine volle Teilung sehen - die Firmware schiebt
-            # stattdessen bis zur Luecke.
-            blocks.append({"t": "form", "dots": remaining})
-        else:
-            blocks.append({"t": "feed", "dots": remaining})
+            vorschub["form"] = True
+        blocks.append(vorschub)
 
     # Jedem Block seine Hoehe mitgeben.
     #
