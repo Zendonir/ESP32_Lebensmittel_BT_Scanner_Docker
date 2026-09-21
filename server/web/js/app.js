@@ -584,9 +584,6 @@ async function loadSystem() {
   $('#set-beep').checked = settings.device_ui?.beep ?? true;
   $('#set-print-enabled').checked = settings.printer?.enabled ?? true;
   $('#set-paper').value = settings.printer?.paper_chars ?? 32;
-  $('#set-feed').value = settings.printer?.post_feed_dots ?? 86;
-  $('#set-qr').checked = settings.printer?.qr ?? true;
-  $('#set-c128').checked = settings.printer?.code128 ?? true;
   $('#set-lw').value = settings.printer?.label_width_mm ?? 50;
   $('#set-lh').value = settings.printer?.label_height_mm ?? 30;
   $('#set-feededge').value = settings.printer?.label_feed_edge ?? 'hoehe';
@@ -615,9 +612,6 @@ $('#set-device-save').addEventListener('click', () => saveSetting('device_ui', {
 $('#set-printer-save').addEventListener('click', () => saveSetting('printer', {
   enabled: $('#set-print-enabled').checked,
   paper_chars: parseInt($('#set-paper').value, 10) || 32,
-  post_feed_dots: parseInt($('#set-feed').value, 10) || 0,
-  qr: $('#set-qr').checked,
-  code128: $('#set-c128').checked,
 }));
 
 async function saveSetting(key, body) {

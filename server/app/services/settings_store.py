@@ -28,9 +28,12 @@ DEFAULTS: dict[str, Any] = {
         "enabled": True,
         "baud": 9600,
         "paper_chars": 32,
-        "post_feed_dots": 86,
-        "qr": True,
-        "code128": True,
+        # "post_feed_dots", "qr" und "code128" standen hier und in der
+        # Oberflaeche, wurden gespeichert - und von niemandem gelesen. Der
+        # Nachschub wird seit der Umstellung auf Etikettenmasse aus der
+        # Teilung gerechnet (services/labels.render_label), und welcher Code
+        # gedruckt wird, entscheidet "label_code". Wer an den drei Reglern
+        # drehte, um das Wandern der Etiketten loszuwerden, drehte ins Leere.
         "household": "",
         # Etikettenmasse in Millimetern. Der Drucker rechnet in Punkten
         # (203 dpi = 8 je mm); daraus ergibt sich, wie viel ueberhaupt

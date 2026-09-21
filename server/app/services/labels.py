@@ -9,6 +9,7 @@ Etiketten, die physisch noch im Schrank klebten.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +17,8 @@ from ..config import settings
 from . import settings_store
 from . import categories
 from .dates import to_display
+
+log = logging.getLogger(__name__)
 
 _lock = asyncio.Lock()
 
@@ -99,10 +102,43 @@ def _wrap(text: str, width: int) -> list[str]:
 # Layout wurde einfach ausgegeben und lief ueber drei Etiketten.
 DOTS_PER_MM = 8
 
+# Zeilenhoehen in Punkten.
+#
+# Diese Zahlen waren bisher eine Hoffnung: der Server rechnete mit ihnen, der
+# Drucker nahm aber seinen eigenen Zeilenabstand. `ESC @` (Printer::reset)
+# stellt den Standard ein - laut Spezifikation 1/6 Zoll, bei 203 dpi also rund
+# 34 Punkte. 24 ist exakt die Schrifthoehe von Font A, also die Annahme, der
+# Drucker setze voellig ohne Durchschuss. Das tut keiner.
+#
+# Beim klassischen Zuschnitt auf 50x30 mm ergab das 314 statt 240 Punkten -
+# 9,2 mm Ueberlauf je Etikett, nach drei Stueck ein ganzes Etikett Versatz.
+# Genau das war "Folgeetiketten wandern", und Totbereich, Rueckzug und
+# SAFETY_DOTS waren allesamt Gegenmittel gegen ein Symptom, dessen Ursache
+# diese Rechnung selbst war.
+#
+# Jetzt sind sie verbindlich: render_label() schreibt die hier berechnete
+# Hoehe in jeden Block, und die Firmware stellt den Zeilenabstand vor jeder
+# Zeile ausdruecklich darauf ein (`ESC 3 n`). Damit stimmt total_dots() nicht
+# mehr ungefaehr, sondern per Konstruktion.
 LINE_DOTS = 24        # Schrift A, 12x24 Punkte
 LINE_DOTS_LARGE = 48  # doppelte Hoehe
 SEP_DOTS = 24
-CODE128_FEED = 10     # Vorschub, den der Drucker nach dem Strichcode einfuegt
+
+# Der Strichcode-Vorschub stand auf 10 und war geraten - tatsaechlich kam die
+# volle Zeilenhoehe des `\r\n` dazu. Die Firmware setzt den Abstand jetzt fuer
+# die Dauer des Strichcodes auf 0; `GS k` schiebt selbst genau seine Hoehe
+# vor, mehr nicht.
+CODE128_FEED = 0
+
+# QR: Ruhezone je Seite in Modulen, und die Bandhoehe von `ESC *`.
+#
+# Die Firmware druckte je Modulzeile fest 4 Punkte (0xF0/0x0F), waagerecht
+# aber `scale` Punkte. Quadratisch war der Code damit nur bei Skalierung 4;
+# bei der Vorgabe "mittel" war er 3:4 gestaucht, bei "klein" 2:4. Eine
+# Ruhezone wurde gar nicht gedruckt - die "+4" in der alten Rechnung tat nur
+# so. Beides zusammen erklaert Codes, die kein Scanner liest.
+QR_QUIET = 2
+QR_BAND = 8
 
 # Der Etikettenspender trifft die Perforation nicht auf den Punkt genau.
 # Ohne Reserve rutscht die letzte Zeile auf das naechste Etikett.
@@ -132,9 +168,11 @@ def block_dots(block: dict) -> int:
     if kind == "code128":
         return int(block.get("height", 40)) + CODE128_FEED
     if kind == "qr":
-        # Version 1 fasst 9 Zeichen alphanumerisch - fuer "LEB000123" reicht
-        # das. 21 Module plus zwei Module Rand je Seite.
-        return (21 + 4) * int(block.get("scale", 3))
+        # Version 1 (21 Module) fasst eine Etikettennummer bequem. Dazu die
+        # Ruhezone, und aufgerundet auf ganze Baender - `ESC *` druckt immer
+        # acht Punktzeilen auf einmal, weniger geht nicht.
+        side = (21 + 2 * QR_QUIET) * int(block.get("scale", 3))
+        return -(-side // QR_BAND) * QR_BAND
     if kind == "feed":
         return int(block.get("dots", 0))
     if kind == "back":
@@ -448,6 +486,20 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
 
     budget = pitch + backfeed - dead - SAFETY_DOTS
     blocks = _fit(_build(layout, item, printer_cfg, chars), budget)
+
+    # Passt es immer noch nicht, muss das jemand erfahren.
+    #
+    # `_fit` wirft von hinten weg, aber Code und geschuetzte Zeilen bleiben
+    # stehen - auf einem sehr kleinen Etikett oder mit einem grossen QR kann
+    # das Ergebnis trotzdem zu hoch sein. Bisher lief es dann stillschweigend
+    # aufs Folgeetikett; ab hier steht die Zahl im Auftrag und im Log.
+    overflow = max(0, total_dots(blocks) - budget)
+    if overflow:
+        log.warning(
+            "Etikett %s passt nicht: %d Punkte zu viel (Zuschnitt %s, "
+            "Teilung %d Punkte). Kleinerer Code oder kuerzerer Zuschnitt noetig.",
+            item.get("label", "?"), overflow, layout, pitch,
+        )
     if backfeed:
         blocks.insert(0, {"t": "back", "dots": backfeed})
 
@@ -457,6 +509,21 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     remaining = pitch - total_dots(blocks)
     if remaining > 0:
         blocks.append({"t": "feed", "dots": remaining})
+
+    # Jedem Block seine Hoehe mitgeben.
+    #
+    # Das ist der Kern der Sache: die Firmware raet den Zeilenabstand nicht
+    # mehr und der Drucker nimmt auch nicht mehr seinen eigenen, sondern
+    # beide halten sich an genau die Zahl, mit der hier gerechnet wurde.
+    # `total_dots()` beschreibt damit wirklich den Papiervorschub und nicht
+    # nur eine Hoffnung.
+    #
+    # `feed` und `back` bekommen nichts: sie tragen ihre Laenge schon in
+    # `dots` und laufen ueber `ESC J` / `ESC j`, die vom Zeilenabstand
+    # unabhaengig sind.
+    for block in blocks:
+        if block.get("t") not in ("feed", "back"):
+            block["h"] = block_dots(block)
 
     return {
         "chars": chars,
@@ -472,6 +539,9 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
         # davon zurueckholt.
         "height_dots": pitch - verloren,
         "dead_dots": dead,
+        # Wie viele Punkte ueber die bedruckbare Hoehe hinausgehen. 0 heisst:
+        # das Etikett endet genau an der Perforation.
+        "overflow": overflow,
         "blocks": blocks,
     }
 

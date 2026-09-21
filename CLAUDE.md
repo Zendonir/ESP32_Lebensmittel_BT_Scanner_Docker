@@ -130,7 +130,10 @@ cd firmware && pio run --target upload # flashen
 | Terminal zeigt „Kein Server" | Token in `.env` und im WLAN-Portal vergleichen |
 | Etikett läuft auf das nächste über | Totbereich in den Einstellungen eintragen; der Druckkopf erreicht den Anfang nicht |
 | Strichcode steht quer zur Schrift | `ESC V` dreht nur Zeichen – gedreht geht nur der QR-Code |
-| Folgeetiketten wandern | Ein Etikett muss **genau** eine Teilung Papier verbrauchen, siehe `total_dots()` |
+| Folgeetiketten wandern | Ein Etikett muss **genau** eine Teilung Papier verbrauchen, siehe `total_dots()`. Damit das keine Hoffnung bleibt, traegt jeder Block seine Hoehe in `h`, und die Firmware setzt `ESC 3` ausdruecklich darauf - `ESC @` stellt sonst den Standardabstand des Druckers ein (~34 statt 24 Punkte) |
+| QR-Code wird nicht gelesen | Module muessen quadratisch sein und eine Ruhezone haben; die Reservierung ist ein Vielfaches von 8, weil `ESC *` in Baendern druckt |
+| Einstellung wirkt nicht | Erst pruefen, ob sie ueberhaupt gelesen wird - `post_feed_dots`, `printer.qr` und `printer.code128` standen jahrelang in der Oberflaeche, ohne dass sie jemand auswertete |
+| Etikett laeuft trotzdem ueber | `render_label()` meldet es in `overflow`; kleinerer Code oder kuerzerer Zuschnitt |
 | Umlaute tanzen in der Zeile | Hinting staucht Zeichen mit Aufsatz; `gen_gfx_font.py` zieht die Grundlinie nach |
 | Kamera-Scan geht am iPhone nicht | Safari hat kein `BarcodeDetector` (ZXing springt ein) **und** braucht HTTPS |
 | Terminal steht nach einem Netzausfall dauerhaft in der Einrichtung | Das selbsttaetig geoeffnete Portal schliesst sich wieder (`Net::stopPortal`); von Hand geoeffnet bleibt es offen |
