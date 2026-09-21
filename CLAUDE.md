@@ -155,6 +155,8 @@ cd firmware && pio run --target upload # flashen
 | Druckauftrag steht ewig auf `sent` | Nach `PRINT_STALE_SECONDS` zurueck in die Schlange |
 | Test scheitert mit `Permission denied: '/data'` | `Settings` friert beim **ersten** Import von `app.config` ein. Umgebungsvariablen fuer Tests gehoeren deshalb in `tests/conftest.py` - pytest laedt die vor jedem Testmodul. In einer Testdatei gesetzt gilt es nur, solange die zufaellig die alphabetisch erste ist |
 | SQLite-PRAGMA wirkt nicht | `foreign_keys`/`synchronous` gelten je Verbindung - gehoeren in den `connect`-Listener in `db.py`, nicht in `init_db()` |
+| Nach einem Update fehlen halbe Masken, ohne Fehlermeldung | Der Browser hat das neue `index.html`, aber noch das alte `app.js`. Felder werden deshalb ueber `setzen()` gefuellt - ein entferntes Feld darf nie den Rest mitreissen |
+| Browser holt die neue Datei trotzdem nicht | `no-cache` wirkt nur auf kuenftige Antworten; wer die alte Datei schon hat, fragt gar nicht erst. Die Kennung steht deshalb im **Pfad** (`/static/v/<kennung>/…`) und nicht als `?v=` - `app.js` importiert `./api.js` relativ, ein Abfrageteil an `app.js` liesse `api.js` alt |
 | Ein haengender Browser friert das Terminal ein | Jeder Sendevorgang hat eine Zeitgrenze (`hub.SEND_TIMEOUT_S`) |
 
 ## Entwicklungsregeln
