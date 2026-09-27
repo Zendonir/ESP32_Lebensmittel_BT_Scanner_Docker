@@ -1245,8 +1245,8 @@ PRINT_BATCH = 4
 
 # So lange darf ein Auftrag beim Geraet liegen, bevor er als verloren gilt.
 # Ein Hochformat-Etikett ist ein Bild und braucht bei 9600 Baud rund zehn
-# Sekunden; mit vier Auftraegen beim Geraet kommt die Rueckmeldung zum
-# letzten also erst nach gut 40 s. Mit 60 s lag das zu knapp an der Grenze -
+# Sekunden (bei 115200 unter einer); mit vier Auftraegen beim Geraet kommt
+# die Rueckmeldung zum letzten also erst nach gut 40 s. Mit 60 s lag das zu knapp an der Grenze -
 # ein Auftrag, der nur langsam war, waere erneut gesendet und doppelt
 # gedruckt worden.
 PRINT_STALE_SECONDS = 180
@@ -1332,6 +1332,11 @@ async def flush_print_queue(
     # hello noch aussteht, bleibt so ein Auftrag einfach liegen - der
     # Aufruf nach dem hello schickt ihn dann los oder sagt, woran es liegt.
     kann = session_for(device_id).caps
+    # Eine andere Baudrate als 9600 versteht nur eine Firmware, die "baud"
+    # meldet. Eine aeltere liesse die Angabe fallen und sendete mit 9600 an
+    # einen Drucker, der auf etwas anderes wartet - Zeichensalat statt
+    # Etikett, und dem Server gegenueber "gedruckt".
+    baud = labels.baudrate(await settings_store.get(session, "printer", {}) or {})
 
     sent = 0
     for job in jobs:
@@ -1339,17 +1344,23 @@ async def flush_print_queue(
             job.status = "failed"
             job.error = job.error or "zu viele Versuche"
             continue
-        braucht = (job.payload or {}).get("braucht")
-        if braucht and kann is None:
+        noetig = [n for n in ((job.payload or {}).get("braucht"),) if n]
+        if baud != labels.BAUD_STANDARD:
+            noetig.append(labels.BAUD_FAEHIGKEIT)
+        if noetig and kann is None:
             continue
-        if braucht and braucht not in kann:
+        fehlt = [n for n in noetig if n not in kann]
+        if fehlt:
             job.status = "failed"
             job.error = (
+                f"Firmware des Terminals kann nur mit 9600 Baud drucken, eingestellt "
+                f"sind {baud} - unter Terminals ein Firmware-Update einspielen"
+                if labels.BAUD_FAEHIGKEIT in fehlt else
                 "Firmware des Terminals kann kein Hochformat - "
                 "unter Terminals ein Firmware-Update einspielen"
             )
             continue
-        if await conn.send(proto.print_job(job.id, job.payload)):
+        if await conn.send(proto.print_job(job.id, job.payload, baud)):
             job.status = "sent"
             job.attempts += 1
             sent += 1

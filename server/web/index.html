@@ -248,6 +248,17 @@
         <label class="field">Zeichen je Zeile
           <input data-setting="printer.paper_chars" data-art="int" type="number" min="24" max="64">
           <span class="hint">Breite des Druckkopfs: 58-mm-Drucker 32, 80-mm-Drucker 48</span></label>
+        <label class="field">Baudrate
+          <select data-setting="printer.baud" data-art="int">
+            <option value="9600">9600 (Werkseinstellung)</option>
+            <option value="19200">19200</option>
+            <option value="38400">38400</option>
+            <option value="57600">57600</option>
+            <option value="115200">115200</option>
+          </select>
+          <span class="hint">Muss zum Drucker passen – steht auf seiner Selbsttestseite
+            (beim Einschalten FEED gedrückt halten). Falscher Wert = Zeichensalat.
+            Höher heißt schneller, vor allem im Hochformat.</span></label>
       </div>
     </div>
   </section>

@@ -230,7 +230,7 @@ LAYOUTS: dict[str, str] = {
     "standard": "Name groß, dazu MHD, Menge und Ort. Der Allrounder.",
     "vollstaendig": "Alle Angaben in normaler Schrift.",
     "hochformat": "Um 90° gedreht: hochkant gelesen, Name und MHD groß, QR unten. "
-                  "Als Bild gedruckt – dauert rund 10 s.",
+                  "Als Bild gedruckt – bei 9600 Baud rund 10 s.",
 }
 
 # Anzeigename fuer die Oberflaeche - der Schluessel bleibt umlautfrei, damit
@@ -251,6 +251,23 @@ TITLES: dict[str, str] = {
 BILD_LAYOUTS = ("hochformat",)
 BILD_FAEHIGKEIT = "raster2"
 DEFAULT_LAYOUT = "klassisch"
+
+# Geschwindigkeit der Leitung zum Drucker. 9600 ist der Werkszustand der
+# meisten Bondrucker und alles, was eine Firmware ohne die Faehigkeit "baud"
+# kann. Die Zahl muss zu der passen, auf die der Drucker selbst eingestellt
+# ist (steht auf seiner Selbsttestseite) - sonst kommt nur Zeichensalat.
+BAUDRATEN = (9600, 19200, 38400, 57600, 115200)
+BAUD_STANDARD = 9600
+BAUD_FAEHIGKEIT = "baud"
+
+
+def baudrate(printer_cfg: dict) -> int:
+    """Die eingestellte Baudrate - oder 9600, wenn dort Unbrauchbares steht."""
+    try:
+        baud = int(printer_cfg.get("baud", BAUD_STANDARD))
+    except (TypeError, ValueError):
+        return BAUD_STANDARD
+    return baud if baud in BAUDRATEN else BAUD_STANDARD
 
 
 def is_rotated(cfg: dict) -> bool:

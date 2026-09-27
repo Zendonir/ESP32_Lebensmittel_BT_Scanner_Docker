@@ -5,6 +5,7 @@
 
 #include "mbedtls/base64.h"
 #include <esp_heap_caps.h>
+#include <driver/uart.h>
 
 Printer printer;
 
@@ -40,8 +41,18 @@ void Printer::begin(uint32_t baud) {
     // wieder auf die 9600-Baud-Leitung und der Loop stand.
     uart.setTxBufferSize(TX_BUFFER);
     uart.begin(baud, SERIAL_8N1, PRINTER_RX, PRINTER_TX);
+    _baud = baud;
     _ready = true;
     reset();
+}
+
+// Nur, was der Server anbietet (labels.BAUDRATEN). Ein Tippfehler in einer
+// Nachricht soll die Leitung nicht auf 12 Baud stellen.
+bool Printer::baudErlaubt(uint32_t baud) {
+    switch (baud) {
+        case 9600: case 19200: case 38400: case 57600: case 115200: return true;
+        default: return false;
+    }
 }
 
 void Printer::reset() {
@@ -119,6 +130,18 @@ int Printer::process(bool &ok, String &error) {
         // Block fuer Block weiter, jeweils sobald der Sendepuffer genug frei
         // hat - und bis dahin kehrt der Aufruf sofort zurueck.
         if ((size_t)uart.availableForWrite() < MIN_FREE) return 0;
+
+        // Baudrate des Auftrags. Umgeschaltet wird erst, wenn der vorige
+        // Auftrag ganz auf der Leitung ist - sonst kaemen seine letzten Bytes
+        // mit der neuen Geschwindigkeit heraus. uart_wait_tx_done() mit 0
+        // Ticks fragt nur nach und wartet nicht.
+        const uint32_t baud = job.doc["baud"] | (uint32_t)PRINTER_BAUD;
+        if (baud != _baud && baudErlaubt(baud)) {
+            if (uart_wait_tx_done(UART_NUM_1, 0) != ESP_OK) return 0;
+            uart.updateBaudRate(baud);
+            _baud = baud;
+        }
+
         _chars = job.doc["chars"] | 32;
         _rotate = job.doc["rotate"] | false;
         reset();

@@ -267,8 +267,10 @@ void Net::sendHello() {
     // ohne "raster2" wuerde als leeres Papier herauskommen.
     //   raster2: Bildstreifen gepackt (z: rle), GS v 0 / ESC * 33, und
     //            ueber mehrere Loop-Durchlaeufe verteilt gesendet
+    //   baud:    Baudrate zum Drucker je Auftrag ("baud" im print)
     JsonArray caps = doc["caps"].to<JsonArray>();
     caps.add("raster2");
+    caps.add("baud");
 
     // Statische Geraetedaten fuers System-Panel - aendern sich nicht waehrend
     // der Verbindung, deshalb hier statt in der periodischen Telemetrie.

@@ -64,6 +64,8 @@
 // ---- Drucker (ESC/POS ueber UART) ------------------------------------------
 #define PRINTER_TX   44
 #define PRINTER_RX   43
+// Nur der Startwert: die eingestellte Baudrate (Etiketten -> Einrichten)
+// kommt mit jedem Druckauftrag, Printer::process() stellt danach um.
 #define PRINTER_BAUD 9600
 
 // ---- Ton (ES8311-Codec ueber I2S) ------------------------------------------

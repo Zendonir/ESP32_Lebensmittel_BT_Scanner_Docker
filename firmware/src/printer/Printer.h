@@ -48,6 +48,7 @@ private:
     void formFeed();
     void backfeedDots(uint8_t dots);
     void reset();
+    static bool baudErlaubt(uint32_t baud);
     String toCp1252(const String &utf8) const;
 
     static constexpr size_t MAX_QUEUE = 8;
@@ -92,6 +93,9 @@ private:
     uint8_t _chars = 32;
     bool    _rotate = false;   // Hochkant: Text um 90 Grad gedreht
     bool    _ready = false;
+    // Aktuelle Geschwindigkeit der Leitung. Der Server schickt sie mit jedem
+    // Auftrag ("baud"), process() stellt vor dem Auftrag um.
+    uint32_t _baud = PRINTER_BAUD;
 
     // Der Auftrag an der Spitze der Warteschlange ist angefangen, bis Block
     // `_nextBlock` ist er auf der Leitung.

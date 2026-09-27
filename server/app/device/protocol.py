@@ -91,11 +91,15 @@ def beep(pattern: str = "ok") -> dict:
     return {"t": "beep", "pattern": pattern}
 
 
-def print_job(job_id: int, rendered: dict) -> dict:
+def print_job(job_id: int, rendered: dict, baud: int = 9600) -> dict:
+    # Die Baudrate reist mit jedem Auftrag und nicht mit dem gespeicherten
+    # Etikett: sie gehoert zur Leitung, nicht zum Inhalt. Ein Auftrag, der
+    # vor dem Umstellen eingereiht wurde, geht so mit der neuen hinaus.
     return {
         "t": "print",
         "job": job_id,
         "chars": rendered.get("chars", 32),
+        "baud": baud,
         "blocks": rendered.get("blocks", []),
     }
 

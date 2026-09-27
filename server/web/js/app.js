@@ -871,6 +871,7 @@ document.addEventListener('change', async (ev) => {
   const ok = await saveSetting(el, bereich, { [schluessel]: wert });
   if (ok && bereich === 'printer') {
     await loadLayouts().catch((e) => toast(e.message, 'error'));
+    hochformatHinweise().catch(() => {});
   }
 });
 
@@ -918,24 +919,35 @@ async function chooseLayout(el) {
 // aelterer Firmware kann es gar nicht. Das soll man sehen, bevor die ersten
 // Auftraege mit "Firmware zu alt" in der Warteschlange stehen.
 async function hochformatHinweise() {
-  const hoch = state.settings?.printer?.label_layout === 'hochformat';
+  const drucker = state.settings?.printer || {};
+  const hoch = drucker.label_layout === 'hochformat';
   $$('[data-nur-hochformat]').forEach((el) => { el.hidden = !hoch; });
+
+  // Was die eingestellten Etiketten vom Terminal verlangen - genau das, was
+  // der Server vor dem Senden prueft (workflow.flush_print_queue).
+  const baud = Number(drucker.baud || 9600);
+  const noetig = [];
+  if (hoch) noetig.push('raster2');
+  if (baud !== 9600) noetig.push('baud');
 
   const box = $('#hochformat-firmware');
   if (!box) return;
   let alte = [];
-  if (hoch) {
+  if (noetig.length) {
     try {
       const geraete = await get('/api/devices');
-      alte = geraete.filter((d) => d.online && !((d.telemetry || {}).caps || []).includes('raster2'));
+      alte = geraete.filter((d) => d.online
+        && noetig.some((n) => !((d.telemetry || {}).caps || []).includes(n)));
     } catch { /* Hinweis ist Beiwerk */ }
   }
   box.hidden = !alte.length;
   if (alte.length) {
+    const was = [hoch && 'kein Hochformat', baud !== 9600 && `nicht mit ${baud} Baud`]
+      .filter(Boolean).join(' und ');
     $('#hochformat-firmware-text').textContent =
-      `${alte.map((d) => d.name || d.device_id).join(', ')}: Firmware kann noch kein Hochformat. `
+      `${alte.map((d) => d.name || d.device_id).join(', ')}: Firmware kann noch ${was} drucken. `
       + 'Unter Terminals zuerst „Aus GitHub-Release holen“ und „Firmware-Update“ – '
-      + 'bis dahin bleiben Hochformat-Etiketten mit einer Meldung in der Warteschlange stehen.';
+      + 'bis dahin scheitern solche Etiketten mit einer Meldung in der Warteschlange.';
   }
 }
 $('#layout-picker')?.addEventListener('click', (ev) => {
