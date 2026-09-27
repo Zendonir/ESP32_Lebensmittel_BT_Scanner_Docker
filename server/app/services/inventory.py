@@ -226,6 +226,54 @@ async def restore_by_label(
     return item
 
 
+async def rename_category(session: AsyncSession, old: str, new: str) -> int:
+    """Einen Kategorienamen ueberall nachziehen, wo er als Text steht.
+
+    Kategorie und Lagerort haengen an Artikeln, Vorlagen und Produkten nicht
+    als Verweis, sondern als Name. Die Stammdatenzeile allein umzubenennen
+    riss die Artikel deshalb still davon ab: sie fielen aus dem Filter und
+    standen in der Uebersicht als eigene Gruppe. Das Protokoll bleibt, wie es
+    war - `events` ist Geschichte, kein Zustand.
+
+    Gibt die Zahl der umgehaengten Artikel zurueck.
+    """
+    from sqlalchemy import update
+
+    from ..models import Template
+
+    if not old or old == new:
+        return 0
+    moved = (
+        await session.execute(
+            update(InventoryItem).where(InventoryItem.category == old).values(category=new)
+        )
+    ).rowcount or 0
+    await session.execute(update(Template).where(Template.category == old).values(category=new))
+    await session.execute(update(Product).where(Product.category == old).values(category=new))
+    await log_event(session, "rename_category", name=new, payload={"von": old, "artikel": moved})
+    return moved
+
+
+async def rename_location(session: AsyncSession, old: str, new: str) -> int:
+    """Wie `rename_category`, fuer Lagerorte - samt der Terminals, die dort stehen."""
+    from sqlalchemy import update
+
+    from ..models import Device
+
+    if not old or old == new:
+        return 0
+    moved = (
+        await session.execute(
+            update(InventoryItem).where(InventoryItem.location == old).values(location=new)
+        )
+    ).rowcount or 0
+    await session.execute(
+        update(Device).where(Device.active_location == old).values(active_location=new)
+    )
+    await log_event(session, "rename_location", location=new, payload={"von": old, "artikel": moved})
+    return moved
+
+
 def with_days_left(item: InventoryItem) -> dict:
     data = {
         column.name: getattr(item, column.name) for column in item.__table__.columns

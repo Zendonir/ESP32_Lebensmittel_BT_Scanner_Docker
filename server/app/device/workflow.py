@@ -176,6 +176,13 @@ def drop_session(device_id: str) -> None:
     _sessions.pop(device_id, None)
 
 
+def rename_location(old: str, new: str) -> None:
+    """Laufende Sitzungen auf einen umbenannten Lagerort umhaengen."""
+    for sess in _sessions.values():
+        if sess.location == old:
+            sess.location = new
+
+
 # ---------------------------------------------------------------------------
 # Rendern
 # ---------------------------------------------------------------------------
