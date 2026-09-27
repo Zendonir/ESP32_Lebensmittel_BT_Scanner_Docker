@@ -6,6 +6,25 @@
   <title>Lebensmittel-Scanner</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/static/css/app.css">
+  <script>
+    // Am Telefon gleich die Handyansicht. Die volle Verwaltung laesst sich
+    // dort mit einer Tabelle von neun Spalten nur quer scrollend bedienen, und
+    // der Knopf "Mobil" oben rechts war auf dem kleinen Bildschirm der
+    // letzte, den man fand. Wer von dort bewusst hierher wechselt
+    // (?desktop=1), bleibt hier, bis er die Handyansicht wieder oeffnet.
+    (function () {
+      try {
+        if (new URLSearchParams(location.search).has('desktop')) {
+          localStorage.setItem('ls-desktop', '1');
+          return;
+        }
+        if (localStorage.getItem('ls-desktop') === '1') return;
+      } catch (e) { return; }
+      if (window.matchMedia && matchMedia('(max-width: 700px) and (pointer: coarse)').matches) {
+        location.replace('/mobile');
+      }
+    })();
+  </script>
 </head>
 <body>
 

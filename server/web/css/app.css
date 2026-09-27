@@ -196,7 +196,11 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
   box-shadow: var(--shadow);
   min-width: 220px;
   animation: slide-in .18s ease-out;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
+.toast span { flex: 1; }
 
 .toast.success { border-left-color: var(--success); }
 .toast.error { border-left-color: var(--danger); }

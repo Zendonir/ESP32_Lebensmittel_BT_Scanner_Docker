@@ -60,6 +60,19 @@
     nav.bottom button .ico { font-size: 19px; line-height: 1; }
     nav.bottom button.active { color: var(--primary); }
 
+    /* Suche oben in der Liste - am Telefon ist "Hab ich noch Hackfleisch?"
+       die haeufigste Frage, und bei hundert Artikeln hilft Scrollen nicht. */
+    .msearch { position: sticky; top: 49px; z-index: 15; padding: 10px 12px 0; background: var(--bg); }
+    .msearch input { width: 100%; padding: 11px 12px; font-size: 16px; }
+    .list .hint { text-align: center; }
+    .swipe-inner .acts { display: flex; gap: 8px; margin-top: 10px; }
+    .swipe-inner .acts[hidden] { display: none; }
+    .swipe-inner .acts button { flex: 1; padding: 9px; font-size: 14px; }
+
+    /* Meldungen ueber der unteren Leiste, nicht dahinter - sonst liegt der
+       Rueckgaengig-Knopf genau unter den Reitern. */
+    #toasts { left: 12px; right: 12px; bottom: calc(70px + env(safe-area-inset-bottom)); }
+
     #scanview { padding: 12px; }
     #cam { width: 100%; border-radius: var(--radius); background: #000; aspect-ratio: 4/3; object-fit: cover; }
 
@@ -75,7 +88,7 @@
 <header class="m">
   <h1 id="m-title">Inventar</h1>
   <span class="pill" id="m-count">–</span>
-  <a class="linkbtn" href="/" title="Zur vollen Verwaltung">🖥️ Verwaltung</a>
+  <a class="linkbtn" href="/?desktop=1" title="Zur vollen Verwaltung">🖥️ Verwaltung</a>
 </header>
 
 <div id="m-view"></div>
@@ -90,7 +103,11 @@
 
 <div id="toasts"></div>
 <script type="module">
-import { get, post, del, put, toast, fmtDate, daysPill, esc, liveConnect, tagEditor } from '/static/js/api.js';
+import { get, post, del, put, toast, auslagern, fmtDate, daysPill, esc, liveConnect, tagEditor } from '/static/js/api.js';
+
+// Wer die Handyansicht oeffnet, hat sich fuer sie entschieden - die
+// Weiterleitung auf der grossen Seite gilt dann wieder (siehe index.html).
+try { localStorage.removeItem('ls-desktop'); } catch { /* privates Fenster */ }
 
 const view = document.getElementById('m-view');
 const title = document.getElementById('m-title');
@@ -119,20 +136,82 @@ async function render() {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+// Die Suche bleibt beim Wechsel zwischen Inventar und Ablaufend erhalten.
+let suche = '';
+let listUrl = '';
+
 async function renderList(url) {
-  const rows = await get(url);
+  listUrl = url;
+  view.innerHTML = `
+    <div class="msearch"><input id="m-q" type="search" placeholder="Suchen: Name, Marke, Etikett"
+      value="${esc(suche)}" autocomplete="off" enterkeyhint="search" aria-label="Suchen"></div>
+    <div class="list" id="m-list"></div>`;
+  let timer;
+  document.getElementById('m-q').addEventListener('input', (ev) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { suche = ev.target.value.trim(); fillList().catch((e) => toast(e.message, 'error')); }, 250);
+  });
+  await fillList();
+}
+
+// Nur die Liste neu fuellen, nicht die Suche: sonst verliert das Feld bei
+// jedem Buchstaben den Fokus und die Tastatur klappt zu.
+async function fillList() {
+  const box = document.getElementById('m-list');
+  if (!box) return;
+  const rows = await get(listUrl + (suche ? `&q=${encodeURIComponent(suche)}` : ''));
   count.textContent = rows.length;
-  view.innerHTML = `<div class="list">${rows.map((i) => `
+  const leer = suche ? `Nichts gefunden für „${esc(suche)}“.` : 'Nichts vorhanden.';
+  box.innerHTML = rows.length ? `
+    <div class="hint">Antippen für Aktionen · nach links wischen lagert aus</div>
+    ${rows.map((i) => `
     <div class="swipe" data-label="${esc(i.label)}">
       <div class="swipe-action">auslagern</div>
-      <div class="swipe-inner">
-        <div class="t">${esc(i.name)}</div>
-        <div class="s">${esc(i.brand || i.subcategory || '')}</div>
+      <div class="swipe-inner" role="button" tabindex="0" aria-expanded="false">
+        <div class="t">${esc(i.display_name || i.name)}</div>
+        <div class="s">${esc(i.brand || '')}</div>
         <div class="s">${fmtDate(i.expiry_date)} ${daysPill(i.days_left)} · ${esc(i.location)}</div>
         <div class="s mono">${esc(i.label)}</div>
+        <div class="acts" hidden>
+          <button class="primary" data-act="remove">Auslagern</button>
+          <button data-act="reprint">Etikett nachdrucken</button>
+        </div>
       </div>
-    </div>`).join('') || '<div class="empty">Nichts vorhanden.</div>'}</div>`;
+    </div>`).join('')}` : `<div class="empty">${leer}</div>`;
   attachSwipe();
+  attachTap();
+}
+
+// Antippen klappt die Aktionen auf. Wischen allein war nicht zu entdecken -
+// nichts an der Karte verriet, dass sie sich bewegen laesst.
+function attachTap() {
+  view.querySelectorAll('.swipe').forEach((card) => {
+    const inner = card.querySelector('.swipe-inner');
+    const acts = card.querySelector('.acts');
+    inner.addEventListener('click', async (ev) => {
+      if (card._swiped) { card._swiped = false; return; }
+      const btn = ev.target.closest('button[data-act]');
+      if (!btn) {
+        const offen = acts.hidden;
+        view.querySelectorAll('.acts').forEach((a) => { a.hidden = true; a.closest('.swipe-inner').setAttribute('aria-expanded', 'false'); });
+        acts.hidden = !offen;
+        inner.setAttribute('aria-expanded', String(offen));
+        return;
+      }
+      btn.disabled = true;
+      try {
+        if (btn.dataset.act === 'remove') {
+          await auslagern(card.dataset.label, 'mobile', fillList);
+          card.remove();
+          count.textContent = view.querySelectorAll('.swipe').length;
+        } else {
+          const r = await post(`/api/labels/reprint/${encodeURIComponent(card.dataset.label)}`);
+          toast(r.sent ? 'Druckauftrag gesendet' : 'Eingereiht – kein Terminal online', r.sent ? 'success' : 'warn');
+          btn.disabled = false;
+        }
+      } catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+    });
+  });
 }
 
 // Wischgeste: nur horizontal, ab 90 px wird ausgelagert. Vertikales Scrollen
@@ -158,11 +237,11 @@ function attachSwipe() {
 
     inner.addEventListener('touchend', async () => {
       inner.style.transition = '';
+      card._swiped = Math.abs(dx) > 10;
       if (dx < -90) {
         inner.style.transform = 'translateX(-100%)';
         try {
-          await post('/api/inventory/remove', { label: card.dataset.label, reason: 'mobile' });
-          toast('Ausgelagert', 'success');
+          await auslagern(card.dataset.label, 'mobile', fillList);
           card.remove();
           count.textContent = view.querySelectorAll('.swipe').length;
         } catch (e) { toast(e.message, 'error'); inner.style.transform = ''; }
@@ -473,8 +552,10 @@ async function templateForm(tpl) {
 }
 
 liveConnect((msg) => {
-  if ((msg.event === 'inventory' && (current === 'inv' || current === 'exp')) ||
-      (msg.event === 'shopping' && current === 'shop')) render();
+  // Bei der Liste nur die Eintraege auffrischen - ein kompletter Neuaufbau
+  // naehme dem Suchfeld mitten im Tippen den Fokus.
+  if (msg.event === 'inventory' && (current === 'inv' || current === 'exp')) fillList().catch(() => {});
+  else if (msg.event === 'shopping' && current === 'shop') render();
 }, () => {});
 
 render();

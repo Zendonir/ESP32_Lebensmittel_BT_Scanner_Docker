@@ -1,7 +1,7 @@
 // Admin-Oberflaeche. Bewusst ohne Framework und ohne Build-Schritt: das Image
 // bleibt klein und die Dateien sind das, was ausgeliefert wird.
 
-import { get, post, patch, put, del, toast, fmtDate, fmtTime, daysPill, esc, liveConnect, tagEditor } from './api.js';
+import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, esc, liveConnect, tagEditor } from './api.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -137,7 +137,7 @@ async function loadInventory() {
       <button class="sm" data-edit="${esc(i.label)}">Ändern</button>
       <button class="sm" data-reprint="${esc(i.label)}">Druck</button>
       ${i.status === 'active'
-        ? `<button class="sm danger" data-remove="${esc(i.label)}">Auslagern</button>`
+        ? `<button class="sm" data-remove="${esc(i.label)}">Auslagern</button>`
         : `<button class="sm" data-restore="${esc(i.label)}">Zurück</button>`}
     </td></tr>`).join('');
 }
@@ -160,8 +160,8 @@ document.addEventListener('click', async (ev) => {
   if (!btn) return;
   try {
     if (btn.dataset.remove) {
-      await post('/api/inventory/remove', { label: btn.dataset.remove, reason: 'web' });
-      toast('Ausgelagert', 'success');
+      btn.disabled = true;
+      await auslagern(btn.dataset.remove, 'web', refreshActive);
     } else if (btn.dataset.restore) {
       await post('/api/inventory/restore', { label: btn.dataset.restore });
       toast('Zurückgebucht', 'success');
@@ -355,6 +355,8 @@ async function warteAufServer(box) {
 }
 $('#queue-reload').addEventListener('click', () => loadLabels());
 $('#queue-clear').addEventListener('click', async () => {
+  if (!confirm('Alle wartenden Druckaufträge verwerfen?\n\nDie Artikel bleiben im Bestand; '
+    + 'ihre Etiketten lassen sich im Inventar einzeln nachdrucken.')) return;
   await del('/api/labels/queue');
   toast('Warteschlange geleert');
   await loadLabels();

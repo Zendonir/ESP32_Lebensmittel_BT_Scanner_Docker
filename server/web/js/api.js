@@ -27,14 +27,50 @@ export const put = (p, body) => api(p, { method: 'PUT', body });
 export const del = (p) => api(p, { method: 'DELETE' });
 
 // ---------------------------------------------------------------- Hilfsmittel
-export function toast(text, level = 'info') {
+// `aktion` haengt einen Knopf an die Meldung, etwa "Rueckgaengig". Solche
+// Meldungen bleiben laenger stehen - wer den Knopf braucht, muss ihn noch
+// erreichen koennen, nachdem er begriffen hat, was gerade passiert ist.
+export function toast(text, level = 'info', aktion = null) {
   const host = document.getElementById('toasts');
   if (!host) return;
+  host.setAttribute('aria-live', 'polite');
   const node = document.createElement('div');
   node.className = `toast ${level}`;
-  node.textContent = text;
+  const span = document.createElement('span');
+  span.textContent = text;
+  node.appendChild(span);
+  if (aktion) {
+    const btn = document.createElement('button');
+    btn.className = 'sm';
+    btn.textContent = aktion.label;
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try { await aktion.run(); } finally { node.remove(); }
+    });
+    node.appendChild(btn);
+  }
   host.appendChild(node);
-  setTimeout(() => node.remove(), 4200);
+  setTimeout(() => node.remove(), aktion ? 9000 : 4200);
+}
+
+// Auslagern mit Rueckweg. Im Web und am Handy war das ein Klick bzw. ein
+// Wischer ohne Rueckfrage und ohne Rueckweg: der Artikel verschwand aus der
+// Liste, und zurueckholen liess er sich nur, wenn man wusste, dass es unter
+// "Ausgelagert" einen Knopf dafuer gibt. Am Terminal bucht ein zweiter Scan
+// desselben Etiketts zurueck - hier uebernimmt das der Knopf in der Meldung.
+export async function auslagern(label, reason, nachher = () => {}) {
+  const item = await post('/api/inventory/remove', { label, reason });
+  toast(`„${item.display_name || item.name}“ ausgelagert`, 'success', {
+    label: 'Rückgängig',
+    run: async () => {
+      try {
+        await post('/api/inventory/restore', { label });
+        toast('Zurückgebucht', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+      await nachher();
+    },
+  });
+  return item;
 }
 
 export function fmtDate(iso) {
