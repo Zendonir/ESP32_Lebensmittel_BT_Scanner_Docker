@@ -95,7 +95,7 @@
   <section class="page" id="page-labels">
     <div class="grid cols2">
       <div class="card">
-        <h2>Etikett anlegen</h2>
+        <h2>Etikett von Hand anlegen</h2>
         <form id="label-form">
           <div class="form-grid">
             <label class="field">Name*<input name="name" required></label>
@@ -119,25 +119,107 @@
       </div>
 
       <div class="card">
-        <h2>Etikettenrolle</h2>
-        <div id="roll-state" class="muted">…</div>
-        <div class="row" style="margin-top:10px">
-          <input id="roll-size" type="number" min="0" placeholder="Etiketten pro Rolle" style="width:180px">
-          <button id="roll-set">Neue Rolle</button>
-          <button id="test-print" class="ghost">Testdruck</button>
-          <button id="calibrate" class="ghost">Kalibrierdruck</button>
-        </div>
-        <div id="calibration-guide" hidden style="margin-top:12px"></div>
-
-        <h3>Druckwarteschlange</h3>
+        <h2>Druckwarteschlange</h2>
         <div class="table-wrap"><table>
           <thead><tr><th>#</th><th>Etikett</th><th>Status</th><th>Versuche</th></tr></thead>
           <tbody id="print-queue"></tbody>
         </table></div>
         <div class="row" style="margin-top:10px">
           <button id="queue-reload" class="sm ghost">Aktualisieren</button>
-          <button id="queue-clear" class="sm danger">Leeren</button>
+          <button id="queue-clear" class="sm ghost">Warteschlange leeren</button>
         </div>
+
+        <h3>Etikettenrolle</h3>
+        <div id="roll-state" class="muted">…</div>
+        <p class="hint">Wer beim Einlegen einer neuen Rolle die Zahl der Etiketten
+          einträgt, sieht hier und am Terminal, wann die Rolle zur Neige geht.</p>
+        <div class="row">
+          <input id="roll-size" type="number" min="0" placeholder="Etiketten auf der Rolle" style="width:200px">
+          <button id="roll-set">Neue Rolle eingelegt</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px" id="label-setup">
+      <div class="row">
+        <h2 style="margin:0;flex:1">Einrichten</h2>
+        <span class="save-state" data-save-state></span>
+      </div>
+      <p class="muted" style="margin:6px 0 0">Einmal für jede neue Etikettensorte oder
+        einen neuen Drucker. Jede Änderung wird sofort gespeichert.</p>
+
+      <h3><span class="step">1</span> Größe und Aussehen</h3>
+      <div class="settings-grid">
+        <label class="field">Breite (mm)
+          <input data-setting="printer.label_width_mm" data-art="float" type="number" min="20" max="110">
+          <span class="hint">von Kante zu Kante, ohne Trägerpapier</span></label>
+        <label class="field">Höhe (mm)
+          <input data-setting="printer.label_height_mm" data-art="float" type="number" min="15" max="110">
+          <span class="hint">vom Anfang eines Etiketts bis zum nächsten, ohne Lücke</span></label>
+        <label class="field">Vorschubkante
+          <select data-setting="printer.label_feed_edge">
+            <option value="hoehe">Höhe läuft durch den Drucker</option>
+            <option value="breite">Breite läuft durch den Drucker</option>
+          </select>
+          <span class="hint">welche Kante zuerst herauskommt – gibt die Rolle vor</span></label>
+        <label class="field">Code
+          <select data-setting="printer.label_code">
+            <option value="auto">automatisch</option>
+            <option value="code128">Strichcode (flach)</option>
+            <option value="qr">QR-Code (quadratisch)</option>
+          </select>
+          <span class="hint">Strichcode spart Höhe, QR geht auch gedreht</span></label>
+        <label class="field">Codegröße
+          <select data-setting="printer.label_code_size">
+            <option value="klein">klein</option>
+            <option value="mittel">mittel</option>
+            <option value="gross">groß</option>
+          </select>
+          <span class="hint">kleiner lässt mehr Platz für Text</span></label>
+        <label class="field check">
+          <span class="row tight"><input data-setting="printer.label_rotate" type="checkbox"> Text um 90° drehen</span>
+          <span class="hint">für schmale Etiketten, die längs gelesen werden</span></label>
+      </div>
+      <div class="notice warn" id="rotate-warning" hidden>
+        <span>Gedrehter Text mit flachem Strichcode: der Code steht dann quer zur Schrift.
+          Ein QR-Code lässt sich mitdrehen.</span>
+        <button class="sm" id="rotate-fix">Code auf „automatisch“ stellen</button>
+      </div>
+      <p class="muted" style="margin:14px 0 0">Aufteilung wählen – die Vorschau zeigt, was
+        auf dein Etikett passt:</p>
+      <div id="layout-picker" class="layouts"></div>
+
+      <h3><span class="step">2</span> Drucker einmessen</h3>
+      <p class="muted" style="margin:0 0 10px">Der Messstreifen zeigt, wo dein Drucker wirklich
+        druckt. Mit dem Lineal nachmessen und die Werte hier eintragen.</p>
+      <div class="row">
+        <button id="calibrate" class="primary">Messstreifen drucken</button>
+        <button id="test-print" class="ghost">Testetikett drucken</button>
+      </div>
+      <div id="calibration-guide" hidden style="margin-top:12px"></div>
+      <div class="settings-grid" style="margin-top:14px">
+        <label class="field">Totbereich (mm)
+          <input data-setting="printer.label_dead_zone_mm" data-art="float" type="number" min="0" max="20" step="0.5">
+          <span class="hint">Messstreifen Punkt 5: unbedruckter Streifen am Etikettenanfang</span></label>
+        <label class="field">Rückzug (Punkte)
+          <input data-setting="printer.backfeed_dots" data-art="int" type="number" min="0" max="100" step="8">
+          <span class="hint">Messstreifen Punkt 3: nur bei <i>einem</i> Balken, sonst 0 lassen. 8 Punkte = 1 mm</span></label>
+        <label class="field">Etikettenende
+          <select data-setting="printer.label_end">
+            <option value="feed">berechneter Vorschub</option>
+            <option value="formfeed">Drucker sucht die Lücke</option>
+          </select>
+          <span class="hint">Messstreifen Punkt 4: steht die Pfeilzeile oben auf einem neuen Etikett, „Drucker sucht die Lücke“ wählen</span></label>
+      </div>
+
+      <h3><span class="step">3</span> Drucker</h3>
+      <div class="settings-grid">
+        <label class="field check">
+          <span class="row tight"><input data-setting="printer.enabled" type="checkbox"> beim Einlagern drucken</span>
+          <span class="hint">aus: Artikel werden erfasst, aber kein Etikett gedruckt</span></label>
+        <label class="field">Zeichen je Zeile
+          <input data-setting="printer.paper_chars" data-art="int" type="number" min="24" max="64">
+          <span class="hint">Breite des Druckkopfs: 58-mm-Drucker 32, 80-mm-Drucker 48</span></label>
       </div>
     </div>
   </section>
@@ -244,77 +326,30 @@
         <div id="update-state" class="muted" style="margin-top:8px;font-size:13px"></div>
       </div>
       <div class="card">
-        <h2>Einstellungen</h2>
-        <h3>Oberfläche</h3>
         <div class="row">
-          <label class="field">Ablaufwarnung (Tage)<input id="set-expiring-days" type="number" min="1" max="90" style="width:110px"></label>
-          <button class="sm" id="set-ui-save">Speichern</button>
+          <h2 style="margin:0;flex:1">Einstellungen</h2>
+          <span class="save-state" data-save-state></span>
+        </div>
+        <p class="muted" style="margin:6px 0 0">Jede Änderung wird sofort gespeichert.
+          Größe, Aussehen und Einmessen der Etiketten stehen unter
+          <a href="#labels" data-goto="labels">Etiketten</a>.</p>
+        <h3>Übersicht</h3>
+        <div class="settings-grid">
+          <label class="field">Ablaufwarnung (Tage)
+            <input data-setting="ui.expiring_days" data-art="int" type="number" min="1" max="90">
+            <span class="hint">ab so vielen Tagen vor dem MHD gilt ein Artikel als „läuft ab“</span></label>
         </div>
         <h3>Terminal</h3>
-        <div class="row">
-          <label class="field">Helligkeit %<input id="set-brightness" type="number" min="5" max="100" style="width:110px"></label>
-          <label class="field">Ruhe nach (s)<input id="set-idle" type="number" min="0" max="3600" style="width:110px"></label>
-          <label class="row tight" style="align-self:end"><input id="set-beep" type="checkbox"> Ton</label>
-          <button class="sm" id="set-device-save">Speichern</button>
+        <div class="settings-grid">
+          <label class="field">Helligkeit (%)
+            <input data-setting="device_ui.brightness" data-art="int" type="number" min="5" max="100">
+            <span class="hint">wirkt sofort auf alle verbundenen Terminals</span></label>
+          <label class="field">Bildschirm dunkel nach (s)
+            <input data-setting="device_ui.idle_seconds" data-art="int" type="number" min="0" max="3600">
+            <span class="hint">0 = bleibt immer an</span></label>
+          <label class="field check">
+            <span class="row tight"><input data-setting="device_ui.beep" type="checkbox"> Ton beim Scannen</span></label>
         </div>
-        <h3>Drucker</h3>
-        <div class="row">
-          <label class="row tight"><input id="set-print-enabled" type="checkbox"> aktiv</label>
-          <label class="field">Zeichen/Zeile<input id="set-paper" type="number" min="24" max="64" style="width:110px"></label>
-          <button class="sm" id="set-printer-save">Speichern</button>
-        </div>
-
-        <h3>Etikett</h3>
-        <div class="row">
-          <label class="field">Breite (mm)<input id="set-lw" type="number" min="20" max="110" style="width:100px"></label>
-          <label class="field">Höhe (mm)<input id="set-lh" type="number" min="15" max="110" style="width:100px"></label>
-          <label class="field">Vorschubkante
-            <select id="set-feededge" style="width:200px">
-              <option value="hoehe">Höhe läuft durch den Drucker</option>
-              <option value="breite">Breite läuft durch den Drucker</option>
-            </select></label>
-          <label class="row tight" style="align-self:end">
-            <input id="set-rotate" type="checkbox"> Text um 90° drehen</label>
-          <label class="field">Code
-            <select id="set-code" style="width:170px">
-              <option value="auto">automatisch</option>
-              <option value="code128">Strichcode (flach)</option>
-              <option value="qr">QR-Code (quadratisch)</option>
-            </select></label>
-          <label class="field">Codegröße
-            <select id="set-codesize" style="width:120px">
-              <option value="klein">klein</option>
-              <option value="mittel">mittel</option>
-              <option value="gross">groß</option>
-            </select></label>
-          <label class="field">Etikettenende
-            <select id="set-labelend" style="width:230px">
-              <option value="feed">berechneter Vorschub</option>
-              <option value="formfeed">Drucker sucht die Lücke (GS FF)</option>
-            </select></label>
-          <label class="field">Totbereich (mm)
-            <input id="set-dead" type="number" min="0" max="20" step="0.5" style="width:120px"></label>
-          <label class="field">Rückzug (Punkte)
-            <input id="set-backfeed" type="number" min="0" max="100" step="8" style="width:120px"></label>
-          <span class="muted" id="label-budget" style="align-self:end"></span>
-        </div>
-        <p class="muted" style="margin:6px 0 0;font-size:12px">
-          <b>Totbereich:</b> der unbedruckte Streifen oben auf dem Etikett – zwischen
-          Druckkopf und Abrisskante liegt Papier, das schon durch ist. Einmal am
-          Ausdruck messen und eintragen; das Layout wird dann so weit gekürzt, dass
-          alles auf <i>ein</i> Etikett passt.<br>
-          <b>Rückzug:</b> holt diesen Streifen zurück (8 Punkte = 1 mm), dann passt
-          wieder mehr drauf. Nicht jeder Drucker kann rückwärts fahren – klein
-          anfangen und testen; verschluckt sich der Vorschub, wieder auf 0.<br>
-          <b>Code:</b> der größte Hebel für die Etikettenhöhe. Ein QR ist quadratisch
-          und kostet so viel Höhe wie Breite (6–12 mm), ein Strichcode ist flach und
-          kostet nur seine Höhe (4–6 mm). Bei gedrehtem Text steht ein Strichcode
-          allerdings quer zur Schrift – lesbar bleibt er, schön ist es nicht.
-          <i>automatisch</i> heißt: gedreht ein QR, sonst ein Strichcode.<br>
-          <b>Vorschubkante:</b> welche Etikettenkante in Papierrichtung läuft. Sie
-          begrenzt, wie viel Inhalt draufpasst – gibt die Rolle vor, nicht der
-          Geschmack. Das Drehen des Textes ist davon unabhängig.</p>
-        <div id="layout-picker" class="layouts"></div>
       </div>
     </div>
 

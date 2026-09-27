@@ -212,7 +212,13 @@ $('#label-form').addEventListener('submit', async (ev) => {
 });
 
 async function loadLabels() {
-  const [roll, queue] = await Promise.all([get('/api/labels/roll'), get('/api/labels/queue?limit=25')]);
+  const [roll, queue, settings] = await Promise.all([
+    get('/api/labels/roll'), get('/api/labels/queue?limit=25'), get('/api/settings'),
+  ]);
+  state.settings = settings;
+  fillSettings(settings);
+  updateRotateWarning();
+  loadLayouts().catch((e) => toast(e.message, 'error'));
   $('#roll-state').textContent = roll.size
     ? `${roll.remaining} von ${roll.size} Etiketten übrig (${roll.used} verbraucht)`
     : 'Keine Rollengröße hinterlegt.';
@@ -720,22 +726,7 @@ async function loadSystem() {
     Terminals online ${info.devices.count}<br>
     Kanäle ${Object.entries(info.notify).filter(([, v]) => v).map(([k]) => k).join(', ') || 'keine'}`;
 
-  setzen('#set-expiring-days', settings.ui?.expiring_days ?? 7);
-  setzen('#set-brightness', settings.device_ui?.brightness ?? 80);
-  setzen('#set-idle', settings.device_ui?.idle_seconds ?? 60);
-  setzen('#set-beep', settings.device_ui?.beep ?? true);
-  setzen('#set-print-enabled', settings.printer?.enabled ?? true);
-  setzen('#set-paper', settings.printer?.paper_chars ?? 32);
-  setzen('#set-lw', settings.printer?.label_width_mm ?? 50);
-  setzen('#set-lh', settings.printer?.label_height_mm ?? 30);
-  setzen('#set-feededge', settings.printer?.label_feed_edge ?? 'hoehe');
-  setzen('#set-rotate', settings.printer?.label_rotate ?? true);
-  setzen('#set-code', settings.printer?.label_code ?? 'auto');
-  setzen('#set-codesize', settings.printer?.label_code_size ?? 'mittel');
-  setzen('#set-labelend', settings.printer?.label_end ?? 'feed');
-  setzen('#set-backfeed', settings.printer?.backfeed_dots ?? 0);
-  setzen('#set-dead', settings.printer?.label_dead_zone_mm ?? 0);
-  await loadLayouts();
+  fillSettings(settings);
 
   $('#sys-events').innerHTML = events.map((e) => `<tr>
     <td class="mono">${fmtTime(e.ts)}</td><td>${esc(e.type)}</td>
@@ -744,23 +735,105 @@ async function loadSystem() {
     <td class="mono muted">${esc(JSON.stringify(e.payload || {}).slice(0, 60))}</td></tr>`).join('');
 }
 
-$('#set-ui-save').addEventListener('click', () => saveSetting('ui', {
-  expiring_days: parseInt($('#set-expiring-days').value, 10) || 7,
-}));
-$('#set-device-save').addEventListener('click', () => saveSetting('device_ui', {
-  brightness: parseInt($('#set-brightness').value, 10) || 80,
-  idle_seconds: parseInt($('#set-idle').value, 10) || 0,
-  beep: $('#set-beep').checked,
-}));
-$('#set-printer-save').addEventListener('click', () => saveSetting('printer', {
-  enabled: $('#set-print-enabled').checked,
-  paper_chars: parseInt($('#set-paper').value, 10) || 32,
-}));
-
-async function saveSetting(key, body) {
-  try { await patch(`/api/settings/${key}`, body); toast('Gespeichert', 'success'); }
-  catch (e) { toast(e.message, 'error'); }
+// ---------------------------------------------------------------- Einstellungen
+//
+// Jedes Feld mit data-setting="bereich.schluessel" speichert sich beim Aendern
+// selbst, und die Karte sagt, ob es geklappt hat.
+//
+// Vorher gab es auf derselben Seite zwei Arten: Oberflaeche, Terminal und
+// Drucker brauchten "Speichern", der Etikettenteil speicherte von allein. Wer
+// das nicht wusste, verlor Aenderungen still beim Wechsel des Reiters - oder
+// suchte beim Etikett einen Knopf, den es nicht gab.
+function settingValue(el) {
+  if (el.type === 'checkbox') return el.checked;
+  if (el.dataset.art === 'int') return parseInt(el.value, 10);
+  if (el.dataset.art === 'float') return parseFloat(String(el.value).replace(',', '.'));
+  return el.value;
 }
+
+function fillSettings(settings) {
+  $$('[data-setting]').forEach((el) => {
+    // Ein Feld, in dem gerade jemand tippt, nicht unter den Fingern
+    // wegziehen - die Live-Aktualisierung eines anderen Browsers kaeme sonst
+    // mitten in die Eingabe.
+    if (el === document.activeElement) return;
+    const [bereich, schluessel] = el.dataset.setting.split('.');
+    const wert = settings?.[bereich]?.[schluessel];
+    if (wert === undefined || wert === null) return;
+    if (el.type === 'checkbox') el.checked = Boolean(wert);
+    else el.value = wert;
+  });
+}
+
+function saveState(el, text, level = '') {
+  const box = el?.closest('.card')?.querySelector('[data-save-state]');
+  if (!box) { if (level === 'error') toast(text, 'error'); return; }
+  box.textContent = text;
+  box.className = `save-state ${level}`;
+  clearTimeout(box._timer);
+  if (level === 'ok') box._timer = setTimeout(() => { box.textContent = ''; }, 2500);
+}
+
+async function saveSetting(el, bereich, body) {
+  saveState(el, 'Speichert …');
+  try {
+    state.settings[bereich] = await patch(`/api/settings/${bereich}`, body);
+    saveState(el, 'Gespeichert ✓', 'ok');
+    return true;
+  } catch (e) {
+    saveState(el, `Nicht gespeichert: ${e.message}`, 'error');
+    return false;
+  }
+}
+
+document.addEventListener('change', async (ev) => {
+  const el = ev.target.closest('[data-setting]');
+  if (!el) return;
+  const [bereich, schluessel] = el.dataset.setting.split('.');
+  const wert = settingValue(el);
+
+  // Ausserhalb der Grenzen nicht still irgendetwas speichern, sondern sagen,
+  // was erlaubt ist. Die Schrittweite zaehlt nicht - sie ist nur fuer die
+  // Pfeiltasten da.
+  const v = el.validity;
+  if (typeof wert === 'number' && (!Number.isFinite(wert) || v.rangeUnderflow || v.rangeOverflow || v.badInput)) {
+    const grenzen = el.min !== '' && el.max !== '' ? ` zwischen ${el.min} und ${el.max}` : '';
+    saveState(el, `Bitte eine Zahl${grenzen} eingeben`, 'error');
+    return;
+  }
+
+  const ok = await saveSetting(el, bereich, { [schluessel]: wert });
+  if (ok && bereich === 'printer') {
+    updateRotateWarning();
+    await loadLayouts().catch((e) => toast(e.message, 'error'));
+  }
+});
+
+// Gedrehter Text mit flachem Strichcode ist erlaubt, aber selten gewollt: der
+// Code steht dann quer zur Schrift. Frueher stand das nur im Hilfetext unter
+// den Feldern - also dort, wo es niemand liest, nachdem er die beiden
+// Einstellungen schon getroffen hat.
+function updateRotateWarning() {
+  const p = state.settings?.printer || {};
+  const box = $('#rotate-warning');
+  if (box) box.hidden = !(p.label_rotate && p.label_code === 'code128');
+}
+
+$('#rotate-fix')?.addEventListener('click', () => {
+  const sel = $('[data-setting="printer.label_code"]');
+  if (!sel) return;
+  sel.value = 'auto';
+  sel.dispatchEvent(new Event('change', { bubbles: true }));
+});
+
+// Verweise zwischen den Reitern ("steht unter Etiketten").
+document.addEventListener('click', (ev) => {
+  const a = ev.target.closest('a[data-goto]');
+  if (!a) return;
+  ev.preventDefault();
+  showPage(a.dataset.goto);
+  window.scrollTo(0, 0);
+});
 
 // -------------------------------------------------------- Etikettenlayouts
 // Die Vorschauen kommen fertig vom Server und entstehen aus genau dem
@@ -772,44 +845,33 @@ async function loadLayouts() {
   const rows = await get('/api/labels/layouts');
   const chosen = state.settings?.printer?.label_layout || 'standard';
 
-  box.innerHTML = rows.map((l) => `<div class="layout ${l.name === chosen ? 'active' : ''}"
-      data-layout="${esc(l.name)}" role="button" tabindex="0">
+  box.innerHTML = rows.map((l) => `<div class="layout ${l.name === chosen ? 'active' : ''} ${l.passt ? '' : 'zu-gross'}"
+      data-layout="${esc(l.name)}" role="button" tabindex="0" aria-pressed="${l.name === chosen}">
     <div class="paper">${l.svg}</div>
-    <div class="who">${esc(l.title || l.name)}</div>
+    <div class="who">${esc(l.title || l.name)}${l.name === chosen ? ' <span class="pill ok">gewählt</span>' : ''}</div>
     <div class="why">${esc(l.description)}</div>
-    <div class="fill">${esc(l.code)} (${l.code_mm} mm) · braucht ${l.mm} mm${l.passt ? '' : ' <b>– passt nicht!</b>'}</div>
+    <div class="fill">${l.passt
+      ? `passt · braucht ${fmtMm(l.mm)} mm`
+      : `<b>passt nicht</b> · braucht ${fmtMm(l.mm)} mm`}${l.rotate
+      ? '<br>Vorschau ungedreht – der Drucker dreht die Schrift' : ''}</div>
   </div>`).join('');
-
-  box.querySelectorAll('[data-layout]').forEach((el) => el.addEventListener('click', async () => {
-    await saveSetting('printer', { label_layout: el.dataset.layout });
-    state.settings.printer = { ...state.settings.printer, label_layout: el.dataset.layout };
-    box.querySelectorAll('[data-layout]').forEach((o) => o.classList.toggle('active', o === el));
-  }));
 }
 
-// Masse und Ausrichtung aendern jede Vorschau - deshalb neu zeichnen, nicht
-// nur speichern.
-async function saveLabelGeometry() {
-  const body = {
-    label_width_mm: parseFloat($('#set-lw').value) || 50,
-    label_height_mm: parseFloat($('#set-lh').value) || 30,
-    label_feed_edge: $('#set-feededge').value,
-    label_rotate: $('#set-rotate').checked,
-    label_code: $('#set-code').value,
-    label_code_size: $('#set-codesize').value,
-    label_end: $('#set-labelend').value,
-    backfeed_dots: parseInt($('#set-backfeed').value, 10) || 0,
-    label_dead_zone_mm: parseFloat($('#set-dead').value) || 0,
-  };
-  await saveSetting('printer', body);
-  state.settings.printer = { ...state.settings.printer, ...body };
-  await loadLayouts();
+function fmtMm(mm) {
+  return Number(mm).toLocaleString('de-DE', { maximumFractionDigits: 1 });
 }
 
-['#set-lw', '#set-lh', '#set-feededge', '#set-rotate', '#set-code',
- '#set-codesize', '#set-labelend', '#set-backfeed', '#set-dead'].forEach((sel) => {
-  const el = $(sel);
-  if (el) el.addEventListener('change', () => saveLabelGeometry().catch((e) => toast(e.message, 'error')));
+async function chooseLayout(el) {
+  const ok = await saveSetting(el, 'printer', { label_layout: el.dataset.layout });
+  if (ok) await loadLayouts();
+}
+$('#layout-picker')?.addEventListener('click', (ev) => {
+  const el = ev.target.closest('[data-layout]');
+  if (el) chooseLayout(el);
+});
+$('#layout-picker')?.addEventListener('keydown', (ev) => {
+  const el = ev.target.closest('[data-layout]');
+  if (el && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); chooseLayout(el); }
 });
 
 $('#notify-test').addEventListener('click', async () => {
@@ -930,7 +992,7 @@ liveConnect(
       catalog: ['catalog', 'templates', 'labels'],
       devices: ['devices', 'dashboard'],
       shopping: ['shopping'],
-      settings: ['system'],
+      settings: ['system', 'labels'],
     }[msg.event] || [];
     if (relevant.includes(activePage())) refreshActive().catch(() => {});
   },
