@@ -93,15 +93,16 @@ den Flash ohne Grund neu zu beschreiben.
 
 ### Ein Release erzeugen
 
-Die Dateien entstehen, sobald ein Tag geschoben wird:
+Von selbst: sobald ein Stand auf `main` die Tests besteht, vergibt
+`release.yml` die nächste Nummer (v1.0.0, v1.0.1, …), setzt den Tag, baut das
+Docker-Abbild als `:latest` und ruft `firmware-release.yml` auf. Das baut die
+Firmware mit genau dieser Nummer, hängt die Dateien an das GitHub-Release und
+veröffentlicht die Installer-Seite. Ändert ein Stand nur Doku oder Abläufe
+(nichts unter `server/` oder `firmware/`), entsteht kein Release.
 
-```bash
-git tag v2.0.0
-git push origin v2.0.0
-```
-
-Der Workflow `firmware-release.yml` baut, hängt die Dateien an ein
-GitHub-Release und veröffentlicht die Installer-Seite. Für einen Testlauf ohne
+Größere Sprünge (v1.1.0, v2.0.0): Actions → *Release anlegen* → *Run
+workflow* → Stufe wählen. Ein von Hand geschobener Tag `v*` funktioniert
+weiterhin. Für einen Testlauf ohne
 Tag: Actions → *Firmware veröffentlichen* → *Run workflow* (baut und
 aktualisiert die Seite, legt aber kein Release an).
 

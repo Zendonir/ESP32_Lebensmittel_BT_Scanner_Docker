@@ -1,0 +1,132 @@
+name: Release anlegen
+
+# Jede gruene Fassung auf main wird ein Release - ohne dass jemand einen Tag
+# schieben muss.
+#
+# Bisher entstand ein Release nur durch einen von Hand geschobenen Tag v*.
+# Das ist nie passiert, und damit stand ":latest" still: der NAS zog brav,
+# was ":latest" sagte, und das war wochenlang dieselbe alte Fassung. Der
+# Update-Knopf hatte nichts, womit er vergleichen konnte.
+#
+# Ablauf: CI laeuft auf main durch -> dieser Ablauf vergibt die naechste
+# Nummer (v1.0.0, v1.0.1, ...), setzt den Tag, baut das Abbild als ":latest"
+# und ":<nummer>" und die Firmware als Release mit Installer-Seite.
+#
+# Warum ueber `workflow_run` und nicht einfach `push` auf main: so entsteht
+# ein Release nur aus einem Stand, dessen Tests gruen waren - und die Tests
+# laufen nicht ein zweites Mal.
+#
+# Warum Abbild und Firmware hier aufgerufen werden, statt dass der Tag sie
+# ausloest: ein Tag, den ein Ablauf mit dem eingebauten GITHUB_TOKEN setzt,
+# stoesst absichtlich keine weiteren Ablaeufe an (GitHub verhindert so
+# Endlosschleifen). Von Hand geschobene Tags loesen image.yml und
+# firmware-release.yml weiterhin selbst aus - dieser Ablauf erkennt einen
+# schon getaggten Stand und tut dann nichts.
+#
+# Groessere Spruenge (v1.1.0, v2.0.0): unter Actions -> "Release anlegen" ->
+# "Run workflow" die Stufe waehlen. Das gilt dann fuer den aktuellen Stand
+# von main, ohne erneute Pruefung - also nur, wenn dessen CI gruen ist.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stufe:
+        description: "Welche Stelle der Versionsnummer steigt"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write    # Tag und Release
+  packages: write    # Abbild nach GHCR
+  pages: write       # Installer-Seite
+  id-token: write    # von deploy-pages verlangt
+
+# Nie zwei Releases gleichzeitig: beide saehen denselben letzten Tag und
+# wollten dieselbe Nummer vergeben.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Nummer vergeben
+    # Nur nach einem gruenen CI-Lauf aus einem Push auf main - nicht nach
+    # einem Pull Request, der zufaellig von einem Zweig namens main kommt.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.nummer.outputs.tag }}
+      sha: ${{ steps.nummer.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Genau der Stand, dessen Tests gruen waren - nicht, was inzwischen
+          # auf main liegt.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Naechste Nummer bestimmen
+        id: nummer
+        env:
+          STUFE: ${{ inputs.stufe || 'patch' }}
+          ANLASS: ${{ github.event_name }}
+        run: |
+          sha="$(git rev-parse HEAD)"
+
+          # Schon getaggt (von Hand, oder ein wiederholter Lauf): nichts tun.
+          if git tag --points-at "$sha" | grep -qE '^v[0-9]'; then
+            echo "Stand $sha ist bereits getaggt: $(git tag --points-at "$sha" | tr '\n' ' ')"
+            exit 0
+          fi
+
+          # Hat sich seit dem letzten Release an Server oder Firmware nichts
+          # geaendert (nur Doku, nur CI), gibt es auch nichts zu veroeffentlichen.
+          # Von Hand gestartet wird immer veroeffentlicht.
+          letzter="$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)"
+          if [ -n "$letzter" ] && [ "$ANLASS" != "workflow_dispatch" ]; then
+            if git diff --quiet "$letzter" "$sha" -- server firmware; then
+              echo "Seit $letzter keine Aenderung an server/ oder firmware/ - kein Release."
+              exit 0
+            fi
+          fi
+
+          tag="$(.github/scripts/naechste-version.sh "$STUFE")"
+          echo "Neues Release: $tag auf $sha"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Tag setzen
+        if: steps.nummer.outputs.tag != ''
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.nummer.outputs.tag }}" -m "Fassung ${{ steps.nummer.outputs.tag }}" "${{ steps.nummer.outputs.sha }}"
+          git push origin "${{ steps.nummer.outputs.tag }}"
+
+  abbild:
+    name: Abbild
+    needs: version
+    if: needs.version.outputs.tag != ''
+    uses: ./.github/workflows/image.yml
+    with:
+      version: ${{ needs.version.outputs.tag }}
+      ref: ${{ needs.version.outputs.sha }}
+    secrets: inherit
+
+  firmware:
+    name: Firmware
+    needs: version
+    if: needs.version.outputs.tag != ''
+    uses: ./.github/workflows/firmware-release.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      ref: ${{ needs.version.outputs.sha }}
+    secrets: inherit

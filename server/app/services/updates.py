@@ -123,9 +123,9 @@ async def _github(client: httpx.AsyncClient, pfad: str) -> Any:
                 "nichts mehr, womit sich vergleichen ließe."
             )
         raise ValueError(
-            f"In {settings.app_repo} gibt es noch kein Release. Eines "
-            "entsteht erst, wenn ein Tag geschoben wird "
-            "(git tag v2.1.0 && git push origin v2.1.0)."
+            f"In {settings.app_repo} gibt es noch kein Release. Releases "
+            "entstehen von selbst, sobald ein Stand auf main die Tests "
+            "besteht – das ist hier noch nicht passiert."
         )
     if antwort.status_code == 401:
         raise ValueError(

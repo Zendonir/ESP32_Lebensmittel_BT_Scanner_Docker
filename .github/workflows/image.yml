@@ -11,6 +11,19 @@ on:
       - "claude/**"       # jeder Arbeitszweig bekommt ein Abbild zum Ausprobieren
     tags: ["v*"]
   workflow_dispatch:
+  # Aufgerufen von release.yml mit der frisch vergebenen Nummer. Der Tag, den
+  # release.yml setzt, loest diesen Ablauf nicht selbst aus (GITHUB_TOKEN) -
+  # deshalb kommt Nummer und Stand hier als Eingabe herein.
+  workflow_call:
+    inputs:
+      version:
+        description: "Release-Tag, z. B. v1.0.3"
+        type: string
+        required: true
+      ref:
+        description: "Commit, aus dem gebaut wird"
+        type: string
+        required: true
 
 env:
   REGISTRY: ghcr.io
@@ -25,6 +38,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || '' }}
 
       - uses: docker/setup-qemu-action@v3
 
@@ -49,12 +64,16 @@ jobs:
           # ":latest" einsetzt, meint aber "die neueste fertige Fassung",
           # und genau die soll er bekommen. Der Kopf von main bleibt als
           # ":main" erreichbar, fuer alle, die ihn wirklich wollen.
+          #
+          # Aus release.yml kommt die Nummer als Eingabe; ein von Hand
+          # geschobener Tag bringt sie in github.ref mit. Beides ergibt
+          # dieselben Kennzeichen.
           tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=ref,event=branch,enable=${{ inputs.version == '' }}
+            type=semver,pattern={{version}},value=${{ inputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }}
+            type=semver,pattern={{major}},value=${{ inputs.version }}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' || inputs.version != '' }}
 
       - name: Bauen und schieben
         uses: docker/build-push-action@v6
@@ -67,8 +86,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            APP_VERSION=${{ github.ref_name }}
-            APP_COMMIT=${{ github.sha }}
+            APP_VERSION=${{ inputs.version || github.ref_name }}
+            APP_COMMIT=${{ inputs.ref || github.sha }}
             APP_BUILT=${{ github.event.repository.updated_at }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
