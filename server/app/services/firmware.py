@@ -115,13 +115,13 @@ async def fetch_from_github(tag: str = "") -> list[dict]:
         if response.status_code == 404:
             # Der haeufigste Fall, und ohne Erklaerung ratlos machend: die CI
             # baut die Abbilder bei jedem Lauf, ein *Release* entsteht aber
-            # nur, wenn ein Tag geschoben wird.
+            # erst, wenn ein Stand auf main die Tests besteht (release.yml).
             raise ValueError(
                 f"Es gibt noch kein Release in {settings.firmware_repo}"
                 + (f" mit dem Tag {tag}." if tag else ".")
-                + " Ein Release entsteht erst, wenn ein Tag geschoben wird"
-                  " (git tag v2.0.0 && git push origin v2.0.0). Bis dahin die"
-                  " firmware-<variante>.bin von der Installer-Seite laden und"
+                + " Releases entstehen von selbst, sobald ein Stand auf main"
+                  " die Tests besteht. Bis dahin die firmware-<variante>.bin"
+                  " aus dem letzten CI-Lauf (Actions → Artefakt „firmware“)"
                   " hier hochladen."
             )
         response.raise_for_status()
@@ -135,12 +135,12 @@ async def fetch_from_github(tag: str = "") -> list[dict]:
             name = f"firmware-{board}.bin"
             link = assets.get(name)
             if not link:
-                log.warning("Release %s enthaelt %s nicht", version, name)
+                log.warning("Release %s enthält %s nicht", version, name)
                 continue
             binary = await client.get(link)
             binary.raise_for_status()
             stored.append(store(board, binary.content, version, f"github:{version}"))
 
     if not stored:
-        raise ValueError(f"Release {version} enthaelt keine passenden Abbilder")
+        raise ValueError(f"Release {version} enthält keine passenden Abbilder")
     return stored

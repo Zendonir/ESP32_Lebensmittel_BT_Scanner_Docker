@@ -77,19 +77,19 @@ async def push_firmware(device_id: str):
             await session.execute(select(Device).where(Device.device_id == device_id))
         ).scalar_one_or_none()
         if device is None:
-            raise HTTPException(404, "Geraet unbekannt")
+            raise HTTPException(404, "Terminal unbekannt")
         board = str((device.telemetry or {}).get("board") or "")
 
     if board not in fw.BOARDS:
         raise HTTPException(
             409,
-            "Boardvariante des Geraets unbekannt - bitte einmal neu verbinden "
+            "Boardvariante des Terminals unbekannt – bitte einmal neu verbinden "
             "lassen, damit es sich neu anmeldet",
         )
 
     meta = fw.meta(board)
     if meta is None:
-        raise HTTPException(404, f"Kein Abbild fuer Variante {board} hinterlegt")
+        raise HTTPException(404, f"Kein Abbild für Variante {board} hinterlegt")
 
     message = proto.ota(
         path=f"/firmware/{board}.bin",
@@ -98,7 +98,7 @@ async def push_firmware(device_id: str):
         sha256=meta["sha256"],
     )
     if not await hub.send_to(device_id, message):
-        raise HTTPException(503, "Geraet nicht erreichbar")
+        raise HTTPException(503, "Terminal nicht erreichbar")
     return {"ok": True, **meta}
 
 
@@ -107,7 +107,7 @@ async def download_firmware(board: str, token: str = Query("")):
     # compare_digest statt == : verhindert, dass sich das Token ueber die
     # Antwortzeit erraten laesst.
     if not hmac.compare_digest(token, settings.device_token):
-        raise HTTPException(401, "Ungueltiges Token")
+        raise HTTPException(401, "Ungültiges Token")
 
     path = fw.path_for(board)
     if path is None:

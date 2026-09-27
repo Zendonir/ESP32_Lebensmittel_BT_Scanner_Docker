@@ -196,7 +196,11 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
   box-shadow: var(--shadow);
   min-width: 220px;
   animation: slide-in .18s ease-out;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
+.toast span { flex: 1; }
 
 .toast.success { border-left-color: var(--success); }
 .toast.error { border-left-color: var(--danger); }
@@ -279,3 +283,62 @@ dialog h2 { margin-top: 0; }
 .layout .who { font-weight: 600; font-size: 13px; }
 .layout .why { font-size: 12px; color: var(--muted); text-align: center; }
 .layout .fill { font-size: 11px; color: var(--muted); }
+
+/* ------------------------------------------------------------ Einstellungen */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px 18px;
+}
+.settings-grid label.field input:not([type="checkbox"]),
+.settings-grid label.field select { width: 100%; }
+/* Haekchen stehen in der Zeile der Eingabefelder, nicht darueber - sonst
+   springt der Text unter das Kaestchen und das Kaestchen wird feldbreit. */
+label.field.check { justify-content: flex-start; padding-top: 22px; }
+label.field.check .row { color: var(--text); font-size: 14px; flex-wrap: nowrap; }
+label.field.check input[type="checkbox"] { width: 18px; height: 18px; margin: 0; flex: none; }
+.hint { font-size: 12px; color: var(--muted); line-height: 1.35; margin: 2px 0 0; }
+p.hint { margin: 4px 0 8px; }
+
+.save-state { font-size: 13px; color: var(--muted); min-height: 1em; }
+.save-state.ok { color: var(--success); }
+.save-state.error { color: var(--danger); }
+
+.step {
+  display: inline-grid; place-items: center;
+  width: 20px; height: 20px; margin-right: 6px;
+  border-radius: 50%; background: var(--primary); color: #fff;
+  font-size: 12px; letter-spacing: 0; vertical-align: 1px;
+}
+
+.notice {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  margin-top: 12px; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface-2); font-size: 14px;
+}
+.notice[hidden] { display: none; }
+.notice span { flex: 1; min-width: 220px; }
+.notice.warn { border-color: var(--warn); background: rgba(251, 140, 0, .10); }
+
+.layout.zu-gross { opacity: .62; }
+.layout.zu-gross .fill b { color: var(--danger); }
+.layout:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+a { color: var(--primary); }
+a:has(> button) { color: inherit; }
+
+/* ------------------------------------------------------- Kurzangaben (dl) */
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px; }
+dl.facts dt { color: var(--muted); }
+dl.facts dd { margin: 0; }
+
+details.card > summary { cursor: pointer; list-style: none; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::before { content: "▸ "; color: var(--muted); }
+details.card[open] > summary::before { content: "▾ "; }
+details.card[open] > summary { margin-bottom: 12px; }
+
+ol.steps { margin: 8px 0 0; padding-left: 22px; line-height: 1.55; }
+ol.steps li { margin-bottom: 6px; }
+ol.steps code { background: var(--surface-2); padding: 1px 6px; border-radius: 4px; }
+#sys-warnings .notice { margin: 0 0 14px; }

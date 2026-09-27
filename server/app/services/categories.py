@@ -19,14 +19,16 @@ import re
 # beiden Listen zusammen, der Kommentar allein tat es nicht.
 #
 # Aenderungen hier wirken nur auf neue Installationen; bestehende Kategorien
-# in der Datenbank bleiben, wie sie sind.
+# in der Datenbank bleiben, wie sie sind - mit einer Ausnahme: die frueheren
+# Umschriften "Getraenke" und "Tiefkuehl" zieht seed.run() einmal nach, solange
+# niemand sie angefasst hat. resolve() findet beide Schreibweisen ohnehin.
 FIXED = (
-    "Getraenke",
+    "Getränke",
     "Milchprodukte",
     "Fleisch & Fisch",
     "Obst & Gemüse",
     "Backwaren",
-    "Tiefkuehl",
+    "Tiefkühl",
     "Konserven",
     "Trockenware",
     "Süßes & Snacks",
@@ -52,12 +54,12 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
          "veal", "kalb", "hackfleisch", "steak", "filet", "speck", "bacon"),
     ),
     (
-        "Tiefkuehl",
+        "Tiefkühl",
         ("frozen", "tiefkuhl", "tiefkuehl", "gefroren", "ice-cream",
          "ice cream", "eiscreme", "speiseeis"),
     ),
     (
-        "Getraenke",
+        "Getränke",
         ("beverage", "getrank", "getraenk", "drink", "water", "wasser",
          "juice", "saft", "soda", "limonade", "tea", "tee", "iced-tea",
          "coffee", "kaffee", "beer", "bier", "wine", "wein", "spirits",

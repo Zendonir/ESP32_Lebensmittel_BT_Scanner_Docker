@@ -28,3 +28,10 @@ _TESTDIR = tempfile.mkdtemp(prefix="lebensmittel-tests-")
 
 os.environ.setdefault("DEVICE_TOKEN", "test-token")
 os.environ.setdefault("FIRMWARE_DIR", os.path.join(_TESTDIR, "firmware"))
+
+# Dasselbe fuer die Datenbank: bisher setzte jede Testdatei ihre eigene, und es
+# galt die der zufaellig ersten. Lief eine Datei ohne eigene Angabe allein
+# (`pytest tests/test_stammdaten.py`), zeigte der Server auf /data.
+os.environ.setdefault(
+    "DATABASE_URL", f"sqlite+aiosqlite:///{os.path.join(_TESTDIR, 'tests.db')}"
+)

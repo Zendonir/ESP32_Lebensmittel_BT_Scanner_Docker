@@ -5,7 +5,8 @@ name: Firmware veroeffentlichen
 #   * GitHub Release mit je einem Abbild fuer 3.5 und 3.5B
 #   * Browser-Installer auf GitHub Pages (ESP Web Tools, WebSerial)
 #
-# Auslesen: ein Tag "v2.0.0" pushen, oder den Workflow von Hand starten.
+# Ausgeloest von release.yml nach jedem gruenen Stand auf main, oder durch
+# einen von Hand geschobenen Tag "v2.0.0", oder von Hand als Testlauf.
 #
 # Einmalige Voraussetzung: Settings -> Pages -> Source auf "GitHub Actions"
 # stellen. Ohne das schlaegt der Pages-Auftrag fehl.
@@ -19,6 +20,17 @@ on:
         description: "Versionsbezeichnung fuer einen Testlauf ohne Tag"
         required: false
         default: "dev"
+  # Von release.yml: der Tag, den es gerade gesetzt hat, und der Commit dazu.
+  # Den Tag selbst bekommt dieser Ablauf nicht mit - ein mit GITHUB_TOKEN
+  # gesetzter Tag stoesst keine weiteren Ablaeufe an.
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      ref:
+        type: string
+        required: true
 
 permissions:
   contents: write   # Release anlegen
@@ -39,6 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || '' }}
           fetch-depth: 0   # scripts/version.py liest den Git-Stand
 
       - uses: actions/setup-python@v5
@@ -59,8 +72,12 @@ jobs:
 
       - name: Version bestimmen
         id: version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || '' }}
         run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+          if [ -n "$RELEASE_TAG" ]; then
+            echo "value=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           else
             echo "value=${{ inputs.version }}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
@@ -86,10 +103,16 @@ jobs:
       # sie ihn unter einem Namen sucht, unter dem er nicht installiert ist.
       # Beim Release waere ein Abbruch daran besonders aergerlich - er kaeme
       # mitten im Bauen und liesse ein halbes Ergebnis zurueck.
+      # FIRMWARE_VERSION ist genau der Name des Releases (v1.0.3). Unter
+      # diesem Namen legt der Server die Firmware ab, wenn er sie aus dem
+      # Release holt, und das Terminal meldet ihn zurueck. Vorher meldete es
+      # "2.0-<commit>" - die beiden trafen sich nie, und "Update" stand bei
+      # jedem Terminal fuer immer bereit, auch mit der neuesten Firmware drauf.
       - name: Firmware bauen
         working-directory: firmware
         env:
           PLATFORMIO_OFFLINE: "1"
+          FIRMWARE_VERSION: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
         run: pio run
 
       - name: Dateien einsammeln
@@ -166,7 +189,7 @@ jobs:
   release:
     name: Release anlegen
     needs: build
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || inputs.tag != ''
     runs-on: ubuntu-latest
 
     steps:
@@ -178,10 +201,23 @@ jobs:
       - name: Release veroeffentlichen
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: Fassung ${{ inputs.tag || github.ref_name }}
           files: dist/*
           generate_release_notes: true
           body: |
-            ## Firmware ${{ needs.build.outputs.version }}
+            ## Fassung ${{ inputs.tag || github.ref_name }}
+
+            ### Server
+
+            Das Docker-Abbild zu diesem Stand liegt als `:latest` und
+            `:${{ needs.build.outputs.version }}` in der Registry. Im System-Panel
+            meldet "Nach Updates suchen" es als neue Fassung.
+
+            ### Firmware
+
+            Im Web-Interface unter Terminals -> "Aus GitHub-Release holen",
+            dann beim Terminal "Firmware-Update".
 
             ### Im Browser installieren
 
@@ -217,6 +253,10 @@ jobs:
     name: Installer-Seite veroeffentlichen
     needs: build
     runs-on: ubuntu-latest
+    # Ist Pages im Repository nicht auf "GitHub Actions" gestellt, scheitert
+    # nur die Installer-Seite - Release und Abbild sind davon unabhaengig und
+    # sollen deswegen nicht als fehlgeschlagen dastehen.
+    continue-on-error: true
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}

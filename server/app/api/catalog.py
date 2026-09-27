@@ -20,6 +20,8 @@ from ..schemas import (
     TemplateIn,
     TemplateOut,
 )
+from ..device import workflow
+from ..services import inventory as inv
 from ..services import openfoodfacts
 
 router = APIRouter(prefix="/api", tags=["stammdaten"])
@@ -53,10 +55,19 @@ async def update_category(
     row = await session.get(Category, cat_id)
     if row is None:
         raise HTTPException(404, "Kategorie unbekannt")
+    old_name = row.name
     for key, value in body.model_dump().items():
         setattr(row, key, value)
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(409, f"Eine Kategorie „{body.name}“ existiert bereits")
+    moved = await inv.rename_category(session, old_name, row.name)
     await session.commit()
     await hub.notify_ui("catalog")
+    if moved:
+        await hub.notify_ui("inventory")
     return row
 
 
@@ -102,12 +113,25 @@ async def update_location(
     row = await session.get(Location, loc_id)
     if row is None:
         raise HTTPException(404, "Lagerort unbekannt")
+    old_name = row.name
     for key, value in body.model_dump().items():
         setattr(row, key, value)
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(409, f"Ein Lagerort „{body.name}“ existiert bereits")
     if row.is_default:
         await _clear_other_defaults(session, row.id)
+    moved = await inv.rename_location(session, old_name, row.name)
     await session.commit()
+    # Ein Terminal, das gerade dort steht, soll nicht auf einen Namen
+    # einlagern, den es nicht mehr gibt.
+    if old_name != row.name:
+        workflow.rename_location(old_name, row.name)
     await hub.notify_ui("catalog")
+    if moved:
+        await hub.notify_ui("inventory")
     return row
 
 

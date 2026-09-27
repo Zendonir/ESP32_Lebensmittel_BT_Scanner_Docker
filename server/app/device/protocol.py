@@ -30,6 +30,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from ..services.zeichen import latin1, latin1_tief
+
 PROTOCOL_VERSION = 1
 
 ScreenKind = Literal[
@@ -64,7 +66,8 @@ def screen(
                 Bei `cards` : {cards:[{title,title_color,status,status_color,
                                lines:[...], button:{id,label,color}}]}
     """
-    return {
+    # Die Terminal-Schrift kennt nur Latin-1 - siehe services/zeichen.py.
+    return latin1_tief({
         "t": "screen",
         "id": screen_id,
         "kind": kind,
@@ -76,11 +79,11 @@ def screen(
         "value": value,
         "meta": meta or {},
         "status": status or {},
-    }
+    })
 
 
 def toast(text: str, level: str = "info") -> dict:
-    return {"t": "toast", "text": text, "level": level}
+    return {"t": "toast", "text": latin1(text), "level": level}
 
 
 def beep(pattern: str = "ok") -> dict:

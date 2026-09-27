@@ -18,11 +18,11 @@ from app.services import categories as cat
         (["en:meats", "en:pork"], "Fleisch & Fisch"),
         (["en:plant-based-foods", "en:fruits"], "Obst & Gemüse"),
         (["en:breads"], "Backwaren"),
-        (["en:frozen-foods", "en:ice-cream"], "Tiefkuehl"),
+        (["en:frozen-foods", "en:ice-cream"], "Tiefkühl"),
         (["en:canned-foods"], "Konserven"),
         (["en:pastas"], "Trockenware"),
         (["en:snacks", "en:sweet-snacks", "en:chocolates"], "Süßes & Snacks"),
-        (["en:beverages", "en:iced-teas"], "Getraenke"),
+        (["en:beverages", "en:iced-teas"], "Getränke"),
         (["de:milchprodukte"], "Milchprodukte"),
     ],
 )

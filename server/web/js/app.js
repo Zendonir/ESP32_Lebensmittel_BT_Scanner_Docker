@@ -1,7 +1,7 @@
 // Admin-Oberflaeche. Bewusst ohne Framework und ohne Build-Schritt: das Image
 // bleibt klein und die Dateien sind das, was ausgeliefert wird.
 
-import { get, post, patch, put, del, toast, fmtDate, fmtTime, daysPill, esc, liveConnect, tagEditor } from './api.js';
+import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, liveConnect, tagEditor } from './api.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -39,7 +39,7 @@ $('#theme-toggle').addEventListener('click', () => {
   const order = ['auto', 'light', 'dark'];
   const next = order[(order.indexOf(localStorage.getItem(THEME_KEY) || 'auto') + 1) % 3];
   applyTheme(next);
-  toast(`Design: ${next}`);
+  toast(`Design: ${{ auto: 'wie das System', light: 'hell', dark: 'dunkel' }[next]}`);
 });
 applyTheme(localStorage.getItem(THEME_KEY) || 'auto');
 
@@ -75,15 +75,15 @@ async function loadDashboard() {
     ['Im Bestand', stats.total, 'ok'],
     ['Läuft ab', stats.expiring, 'warn'],
     ['Abgelaufen', stats.expired, 'danger'],
-    ['Eingelagert 30 T', stats.added_30d, ''],
-    ['Verbraucht 30 T', stats.removed_30d, ''],
+    ['Eingelagert (30 Tage)', stats.added_30d, ''],
+    ['Ausgelagert (30 Tage)', stats.removed_30d, ''],
   ].map(([label, value, cls]) =>
     `<div class="card stat ${cls}"><div class="value">${value}</div><div class="label">${label}</div></div>`
   ).join('');
 
   $('#dash-expiring').innerHTML = expiring.length
     ? expiring.map((i) => `<tr>
-        <td class="name">${esc(i.name)}</td>
+        <td class="name">${esc(i.display_name || i.name)}</td>
         <td>${fmtDate(i.expiry_date)} ${daysPill(i.days_left)}</td>
         <td>${esc(i.location)}</td>
         <td class="right"><button class="sm" data-remove="${esc(i.label)}">Auslagern</button></td>
@@ -91,8 +91,9 @@ async function loadDashboard() {
     : '<tr><td colspan="4" class="muted">Nichts läuft demnächst ab.</td></tr>';
 
   $('#dash-events').innerHTML = events.map((e) => `<tr>
-      <td class="mono">${fmtTime(e.ts)}</td><td>${esc(e.type)}</td>
-      <td class="name">${esc(e.name || e.label || e.barcode)}</td></tr>`).join('');
+      <td class="muted">${fmtTime(e.ts)}</td><td>${esc(eventName(e.type))}</td>
+      <td class="name">${esc(e.name || e.label || e.barcode)}</td></tr>`).join('')
+    || '<tr><td colspan="3" class="muted">Noch nichts passiert.</td></tr>';
 
   $('#dash-cat').innerHTML = barList(stats.by_category, state.categories);
   $('#dash-loc').innerHTML = barList(stats.by_location, []);
@@ -137,7 +138,7 @@ async function loadInventory() {
       <button class="sm" data-edit="${esc(i.label)}">Ändern</button>
       <button class="sm" data-reprint="${esc(i.label)}">Druck</button>
       ${i.status === 'active'
-        ? `<button class="sm danger" data-remove="${esc(i.label)}">Auslagern</button>`
+        ? `<button class="sm" data-remove="${esc(i.label)}">Auslagern</button>`
         : `<button class="sm" data-restore="${esc(i.label)}">Zurück</button>`}
     </td></tr>`).join('');
 }
@@ -160,8 +161,8 @@ document.addEventListener('click', async (ev) => {
   if (!btn) return;
   try {
     if (btn.dataset.remove) {
-      await post('/api/inventory/remove', { label: btn.dataset.remove, reason: 'web' });
-      toast('Ausgelagert', 'success');
+      btn.disabled = true;
+      await auslagern(btn.dataset.remove, 'web', refreshActive);
     } else if (btn.dataset.restore) {
       await post('/api/inventory/restore', { label: btn.dataset.restore });
       toast('Zurückgebucht', 'success');
@@ -212,7 +213,13 @@ $('#label-form').addEventListener('submit', async (ev) => {
 });
 
 async function loadLabels() {
-  const [roll, queue] = await Promise.all([get('/api/labels/roll'), get('/api/labels/queue?limit=25')]);
+  const [roll, queue, settings] = await Promise.all([
+    get('/api/labels/roll'), get('/api/labels/queue?limit=25'), get('/api/settings'),
+  ]);
+  state.settings = settings;
+  fillSettings(settings);
+  updateRotateWarning();
+  loadLayouts().catch((e) => toast(e.message, 'error'));
   $('#roll-state').textContent = roll.size
     ? `${roll.remaining} von ${roll.size} Etiketten übrig (${roll.used} verbraucht)`
     : 'Keine Rollengröße hinterlegt.';
@@ -349,6 +356,8 @@ async function warteAufServer(box) {
 }
 $('#queue-reload').addEventListener('click', () => loadLabels());
 $('#queue-clear').addEventListener('click', async () => {
+  if (!confirm('Alle wartenden Druckaufträge verwerfen?\n\nDie Artikel bleiben im Bestand; '
+    + 'ihre Etiketten lassen sich im Inventar einzeln nachdrucken.')) return;
   await del('/api/labels/queue');
   toast('Warteschlange geleert');
   await loadLabels();
@@ -544,6 +553,31 @@ document.addEventListener('click', async (ev) => {
 
 // ------------------------------------------------------------------- Terminals
 
+// Noch kein Terminal: statt einer leeren Zeile die Schritte, mit denen eins
+// dazukommt - samt der Adresse, die es braucht. Die steht sonst nirgends in
+// der Oberflaeche, und das Portal am Terminal fragt genau danach.
+function terminalEinrichten(eingebettet = false) {
+  const sicher = location.protocol === 'https:';
+  const port = location.port || (sicher ? '443' : '80');
+  return `<div class="${eingebettet ? '' : 'card'}" style="grid-column:1/-1">
+    ${eingebettet ? '' : '<h2>Noch kein Terminal verbunden</h2>'}
+    <p class="muted" style="margin:0">So kommt eins dazu:</p>
+    <ol class="steps">
+      <li>Terminal einschalten. Findet es kein bekanntes WLAN, öffnet es ein eigenes:
+        <code>Lebensmittel-Terminal</code>, Passwort <code>12345678</code>.</li>
+      <li>Mit dem Handy in dieses WLAN gehen und <code>192.168.4.1</code> öffnen
+        (meist öffnet sich die Seite von selbst).</li>
+      <li>Heim-WLAN auswählen und dazu eintragen:
+        Server <code>${esc(location.hostname)}</code>,
+        Port <code>${esc(port)}</code>${sicher ? ', Verschlüsselung <code>HTTPS / WSS</code>' : ''},
+        Geräte-Token = der Wert von <code>DEVICE_TOKEN</code> aus der Container-Konfiguration.</li>
+      <li>Speichern. Das Terminal startet neu und erscheint hier nach wenigen Sekunden.</li>
+    </ol>
+    <p class="hint">Zeigt das Terminal „Kein Server“, stimmt meist das Token nicht –
+      es muss Zeichen für Zeichen gleich sein.</p>
+  </div>`;
+}
+
 // Der Update-Knopf bleibt sichtbar, sagt aber beim Darueberfahren, warum er
 // gerade nichts bringt - ein verschwindender Knopf laesst einen nur raten.
 function updateHint(d) {
@@ -570,43 +604,77 @@ async function loadFirmware() {
     : '<span class="muted">Noch kein Abbild hinterlegt.</span>';
 }
 
-async function loadDevices() {
-  state.devices = await get('/api/devices');
-  $('#devices-list').innerHTML = state.devices.length ? state.devices.map((d) => {
-    const t = d.telemetry || {};
-    const scanner = t.scanner || {};
-    return `<div class="card">
-      <div class="row"><h2 style="margin:0;flex:1">
+// WLAN-Empfang in Worten; -67 dBm sagt nur jemandem etwas, der es schon weiss.
+function wlanText(rssi) {
+  if (rssi === undefined || rssi === null) return '–';
+  const wort = rssi >= -60 ? 'gut' : rssi >= -72 ? 'mittel' : 'schwach';
+  return `${wort} <span class="muted">(${rssi} dBm)</span>`;
+}
+
+function deviceCard(d) {
+  const t = d.telemetry || {};
+  const scanner = t.scanner || {};
+  const kopf = `<div class="row"><h2 style="margin:0;flex:1">
         <span class="dot ${d.online ? 'on' : ''}"></span>${esc(d.name || d.device_id)}</h2>
-        <span class="pill">${esc(d.firmware || '?')}</span></div>
-      <div class="muted mono">${esc(d.device_id)} · ${esc(d.ip)} · zuletzt ${fmtTime(d.last_seen)}</div>
-      <div class="telemetry">
-        <div><b>${t.heap ? Math.round(t.heap / 1024) + ' K' : '–'}</b><span>Heap frei</span></div>
-        <div><b>${t.min_heap ? Math.round(t.min_heap / 1024) + ' K' : '–'}</b><span>Heap min</span></div>
-        <div><b>${t.rssi ?? '–'}</b><span>WLAN dBm</span></div>
-        <div><b>${t.uptime ? Math.floor(t.uptime / 3600) + ' h' : '–'}</b><span>Laufzeit</span></div>
-        <div><b>${scanner.connected ? 'ja' : 'nein'}</b><span>Scanner</span></div>
-        <div><b>${scanner.battery >= 0 ? scanner.battery + ' %' : '–'}</b><span>Scanner-Akku</span></div>
-      </div>
+        ${d.firmware ? `<span class="pill">Firmware ${esc(d.firmware)}</span>` : ''}</div>
+      <div class="muted">${esc(d.device_id)}${d.ip ? ` · ${esc(d.ip)}` : ''}</div>`;
+
+  // Ein getrenntes Terminal zeigte dieselbe Karte wie ein verbundenes, nur mit
+  // Strichen in jedem Feld - und Knoepfen, die ins Leere liefen.
+  if (!d.online) {
+    return `<div class="card">${kopf}
+      <div class="notice" style="margin-top:12px"><span><b>Nicht verbunden</b> – zuletzt gesehen
+        ${fmtTime(d.last_seen) || 'nie'}. Meist ist das Terminal aus oder hat kein WLAN.
+        Zeigt es „Kein Server“, stimmt das Geräte-Token nicht.</span></div>
       <div class="row" style="margin-top:12px">
+        <button class="sm ghost" data-dev-forget="${esc(d.device_id)}">Aus der Liste entfernen</button>
+      </div></div>`;
+  }
+  return `<div class="card">${kopf}
+      <div class="telemetry">
+        <div><b>${scanner.connected ? 'verbunden' : 'nicht verbunden'}</b><span>Handscanner</span></div>
+        <div><b>${scanner.battery >= 0 ? scanner.battery + ' %' : '–'}</b><span>Scanner-Akku</span></div>
+        <div><b>${wlanText(t.rssi)}</b><span>WLAN</span></div>
+        <div><b>${t.uptime ? Math.floor(t.uptime / 3600) + ' h' : '–'}</b><span>Läuft seit</span></div>
+        <div><b>${t.heap ? Math.round(t.heap / 1024) + ' K' : '–'}</b><span>Speicher frei</span></div>
+        <div><b>${t.min_heap ? Math.round(t.min_heap / 1024) + ' K' : '–'}</b><span>Speicher min.</span></div>
+      </div>
+      <label class="field" style="margin-top:12px">Lagert ein in
         <select data-dev-loc="${esc(d.device_id)}">
           ${state.locations.map((l) => `<option ${l.name === d.active_location ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
-        </select>
+        </select></label>
+      <div class="row" style="margin-top:10px">
         <button class="sm" data-dev-beep="${esc(d.device_id)}">Ton</button>
-        <button class="sm" data-dev-update="${esc(d.device_id)}"${updateHint(d)}>Update</button>
-        <button class="sm danger" data-dev-reboot="${esc(d.device_id)}">Neustart</button>
+        <button class="sm" data-dev-update="${esc(d.device_id)}"${updateHint(d)}>Firmware-Update</button>
+        <button class="sm" data-dev-reboot="${esc(d.device_id)}">Neustart</button>
       </div></div>`;
-  }).join('') : '<div class="card empty">Noch kein Terminal verbunden.</div>';
+}
 
-  $('#sim-device').innerHTML = state.devices.map((d) =>
+async function loadDevices() {
+  state.devices = await get('/api/devices');
+  // Die Anleitung bleibt erreichbar, wenn schon Terminals da sind - fuer das
+  // zweite oder ein ersetztes Geraet.
+  $('#devices-list').innerHTML = state.devices.length
+    ? state.devices.map(deviceCard).join('')
+      + `<details class="card" style="grid-column:1/-1"><summary><h2 style="display:inline">Weiteres Terminal einrichten</h2></summary>
+          ${terminalEinrichten(true)}</details>`
+    : terminalEinrichten();
+
+  const sim = $('#sim-card');
+  if (sim) sim.hidden = !state.devices.some((d) => d.online);
+  $('#sim-device').innerHTML = state.devices.filter((d) => d.online).map((d) =>
     `<option value="${esc(d.device_id)}">${esc(d.name || d.device_id)}</option>`).join('');
 }
 
 document.addEventListener('click', async (ev) => {
-  const b = ev.target.closest('button[data-dev-beep],button[data-dev-reboot],button[data-dev-update]');
+  const b = ev.target.closest('button[data-dev-beep],button[data-dev-reboot],button[data-dev-update],button[data-dev-forget]');
   if (!b) return;
   try {
-    if (b.dataset.devBeep) {
+    if (b.dataset.devForget) {
+      if (!confirm('Terminal aus der Liste entfernen?\n\nMeldet es sich wieder, erscheint es von selbst neu.')) return;
+      await del(`/api/devices/${encodeURIComponent(b.dataset.devForget)}`);
+      await loadDevices();
+    } else if (b.dataset.devBeep) {
       await post(`/api/devices/${b.dataset.devBeep}/beep`); toast('Ton gesendet');
     } else if (b.dataset.devUpdate) {
       if (!confirm('Firmware jetzt aufspielen? Das Terminal startet danach neu.')) return;
@@ -679,28 +747,6 @@ $('#sim-form').addEventListener('submit', async (ev) => {
 
 // ---------------------------------------------------------------------- System
 
-// Ein Feld fuellen, ohne dass ein fehlendes den Rest mitreisst.
-//
-// `$('#weg').value = x` wirft, wenn es das Element nicht gibt - und riss damit
-// alles mit, was danach kam. Genau das ist passiert, als das Feld "Nachschub"
-// entfernt wurde: ein Browser mit noch altem Skript und schon neuem Aufbau
-// brach mitten im Fuellen ab, und die halbe Etikettenmaske blieb leer. Ohne
-// Fehlermeldung, ohne Hinweis - man sah nur leere Felder und hielt das
-// Update fuer kaputt.
-//
-// Aufbau und Skript werden hier nie gleichzeitig ausgetauscht (der Browser
-// hat das eine schon und das andere noch nicht), also darf ein Unterschied
-// zwischen beiden nicht mehr kosten als das eine Feld.
-function setzen(auswahl, wert) {
-  const el = $(auswahl);
-  if (!el) {
-    console.warn(`Feld ${auswahl} gibt es nicht mehr - uebersprungen`);
-    return;
-  }
-  if (el.type === 'checkbox') el.checked = Boolean(wert);
-  else el.value = wert;
-}
-
 async function loadSystem() {
   const [info, settings, events] = await Promise.all([
     get('/api/system'), get('/api/settings'), get('/api/events?limit=60'),
@@ -710,57 +756,149 @@ async function loadSystem() {
   // Fassung lesbar statt als 40-Zeichen-Hash: Zweig bzw. Tag, kurzer Commit,
   // Baudatum. Ohne das war die Frage "laeuft hier der aktuelle Stand?" vom
   // Panel aus nicht zu beantworten.
-  const stand = [esc(info.version)];
-  if (info.commit_kurz) stand.push(esc(info.commit_kurz));
-  if (info.gebaut) stand.push(fmtTime(info.gebaut));
-  $('#sys-info').innerHTML = `
-    Fassung ${stand.join(' · ')}<br>Python ${esc(info.python)}<br>
-    Datenbank ${esc(info.database)}<br>Zeitzone ${esc(info.timezone)}<br>
-    Laufzeit ${Math.floor(info.uptime / 3600)} h ${Math.floor((info.uptime % 3600) / 60)} min<br>
-    Terminals online ${info.devices.count}<br>
-    Kanäle ${Object.entries(info.notify).filter(([, v]) => v).map(([k]) => k).join(', ') || 'keine'}`;
+  const stand = info.aus_abbild ? [esc(info.version)] : ['Entwicklungsstand (nicht aus einem Abbild)'];
+  if (info.commit_kurz) stand.push(`<span class="mono">${esc(info.commit_kurz)}</span>`);
+  if (info.gebaut) stand.push(`gebaut ${fmtTime(info.gebaut)}`);
+  const kanaele = Object.entries(info.notify || {}).filter(([, v]) => v).map(([k]) => (
+    { ntfy: 'ntfy', telegram: 'Telegram', mqtt: 'MQTT' }[k] || k));
+  const laufzeit = info.uptime >= 86400
+    ? `${Math.floor(info.uptime / 86400)} Tage ${Math.floor((info.uptime % 86400) / 3600)} h`
+    : `${Math.floor(info.uptime / 3600)} h ${Math.floor((info.uptime % 3600) / 60)} min`;
+  $('#sys-info').innerHTML = [
+    ['Fassung', stand.join(' · ')],
+    ['Terminals verbunden', String(info.devices.count)],
+    ['Benachrichtigungen', kanaele.length ? esc(kanaele.join(', ')) : 'keine eingerichtet'],
+    ['Passwortschutz', info.passwortschutz ? 'an' : 'aus'],
+    ['Datenbank', esc(info.database.startsWith('sqlite') ? 'SQLite' : info.database)],
+    ['Zeitzone', esc(info.timezone)],
+    ['Läuft seit', laufzeit],
+  ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
 
-  setzen('#set-expiring-days', settings.ui?.expiring_days ?? 7);
-  setzen('#set-brightness', settings.device_ui?.brightness ?? 80);
-  setzen('#set-idle', settings.device_ui?.idle_seconds ?? 60);
-  setzen('#set-beep', settings.device_ui?.beep ?? true);
-  setzen('#set-print-enabled', settings.printer?.enabled ?? true);
-  setzen('#set-paper', settings.printer?.paper_chars ?? 32);
-  setzen('#set-lw', settings.printer?.label_width_mm ?? 50);
-  setzen('#set-lh', settings.printer?.label_height_mm ?? 30);
-  setzen('#set-feededge', settings.printer?.label_feed_edge ?? 'hoehe');
-  setzen('#set-rotate', settings.printer?.label_rotate ?? true);
-  setzen('#set-code', settings.printer?.label_code ?? 'auto');
-  setzen('#set-codesize', settings.printer?.label_code_size ?? 'mittel');
-  setzen('#set-labelend', settings.printer?.label_end ?? 'feed');
-  setzen('#set-backfeed', settings.printer?.backfeed_dots ?? 0);
-  setzen('#set-dead', settings.printer?.label_dead_zone_mm ?? 0);
-  await loadLayouts();
+  // Was bisher nur im Container-Protokoll stand, wo es niemand liest.
+  const warnungen = [];
+  if (info.token_standard) {
+    warnungen.push(`<div class="notice warn"><span><b>Das Geräte-Token steht noch auf dem
+      Standardwert.</b> Jeder im Netz könnte sich als Terminal ausgeben. In der
+      Container-Konfiguration <code>DEVICE_TOKEN</code> auf einen eigenen Wert setzen
+      (z. B. <code>openssl rand -hex 24</code>) und denselben Wert im WLAN-Portal des
+      Terminals eintragen.</span></div>`);
+  }
+  $('#sys-warnings').innerHTML = warnungen.join('');
+  const hint = $('#update-knopf-hint');
+  if (hint) hint.hidden = Boolean(info.update_knopf);
+
+  fillSettings(settings);
 
   $('#sys-events').innerHTML = events.map((e) => `<tr>
-    <td class="mono">${fmtTime(e.ts)}</td><td>${esc(e.type)}</td>
-    <td class="mono">${esc(e.label)}</td><td class="name">${esc(e.name)}</td>
+    <td class="muted">${fmtTime(e.ts)}</td><td>${esc(eventName(e.type))}</td>
+    <td class="mono">${esc(e.label || e.barcode)}</td><td class="name">${esc(e.name)}</td>
     <td>${esc(e.device)}</td>
-    <td class="mono muted">${esc(JSON.stringify(e.payload || {}).slice(0, 60))}</td></tr>`).join('');
+    <td class="name muted" title="${esc(JSON.stringify(e.payload || {}))}">${esc(eventDetails(e))}</td></tr>`).join('');
 }
 
-$('#set-ui-save').addEventListener('click', () => saveSetting('ui', {
-  expiring_days: parseInt($('#set-expiring-days').value, 10) || 7,
-}));
-$('#set-device-save').addEventListener('click', () => saveSetting('device_ui', {
-  brightness: parseInt($('#set-brightness').value, 10) || 80,
-  idle_seconds: parseInt($('#set-idle').value, 10) || 0,
-  beep: $('#set-beep').checked,
-}));
-$('#set-printer-save').addEventListener('click', () => saveSetting('printer', {
-  enabled: $('#set-print-enabled').checked,
-  paper_chars: parseInt($('#set-paper').value, 10) || 32,
-}));
-
-async function saveSetting(key, body) {
-  try { await patch(`/api/settings/${key}`, body); toast('Gespeichert', 'success'); }
-  catch (e) { toast(e.message, 'error'); }
+// ---------------------------------------------------------------- Einstellungen
+//
+// Jedes Feld mit data-setting="bereich.schluessel" speichert sich beim Aendern
+// selbst, und die Karte sagt, ob es geklappt hat.
+//
+// Vorher gab es auf derselben Seite zwei Arten: Oberflaeche, Terminal und
+// Drucker brauchten "Speichern", der Etikettenteil speicherte von allein. Wer
+// das nicht wusste, verlor Aenderungen still beim Wechsel des Reiters - oder
+// suchte beim Etikett einen Knopf, den es nicht gab.
+function settingValue(el) {
+  if (el.type === 'checkbox') return el.checked;
+  if (el.dataset.art === 'int') return parseInt(el.value, 10);
+  if (el.dataset.art === 'float') return parseFloat(String(el.value).replace(',', '.'));
+  return el.value;
 }
+
+// Gefuellt wird, was im Aufbau steht - nicht, was das Skript erwartet. Aufbau
+// und Skript kommen nie gleichzeitig im Browser an; frueher riss ein einziges
+// entferntes Feld ($('#weg').value = x wirft) den Rest der Maske mit, und die
+// halbe Etikettenmaske blieb nach einem Update ohne Fehlermeldung leer.
+function fillSettings(settings) {
+  $$('[data-setting]').forEach((el) => {
+    // Ein Feld, in dem gerade jemand tippt, nicht unter den Fingern
+    // wegziehen - die Live-Aktualisierung eines anderen Browsers kaeme sonst
+    // mitten in die Eingabe.
+    if (el === document.activeElement) return;
+    const [bereich, schluessel] = el.dataset.setting.split('.');
+    const wert = settings?.[bereich]?.[schluessel];
+    if (wert === undefined || wert === null) return;
+    if (el.type === 'checkbox') el.checked = Boolean(wert);
+    else el.value = wert;
+  });
+}
+
+function saveState(el, text, level = '') {
+  const box = el?.closest('.card')?.querySelector('[data-save-state]');
+  if (!box) { if (level === 'error') toast(text, 'error'); return; }
+  box.textContent = text;
+  box.className = `save-state ${level}`;
+  clearTimeout(box._timer);
+  if (level === 'ok') box._timer = setTimeout(() => { box.textContent = ''; }, 2500);
+}
+
+async function saveSetting(el, bereich, body) {
+  saveState(el, 'Speichert …');
+  try {
+    state.settings[bereich] = await patch(`/api/settings/${bereich}`, body);
+    saveState(el, 'Gespeichert ✓', 'ok');
+    return true;
+  } catch (e) {
+    saveState(el, `Nicht gespeichert: ${e.message}`, 'error');
+    return false;
+  }
+}
+
+document.addEventListener('change', async (ev) => {
+  const el = ev.target.closest('[data-setting]');
+  if (!el) return;
+  const [bereich, schluessel] = el.dataset.setting.split('.');
+  const wert = settingValue(el);
+
+  // Ausserhalb der Grenzen nicht still irgendetwas speichern, sondern sagen,
+  // was erlaubt ist. Die Schrittweite zaehlt nicht - sie ist nur fuer die
+  // Pfeiltasten da.
+  const v = el.validity;
+  if (typeof wert === 'number' && (!Number.isFinite(wert) || v.rangeUnderflow || v.rangeOverflow || v.badInput)) {
+    const grenzen = el.min !== '' && el.max !== '' ? ` zwischen ${el.min} und ${el.max}` : '';
+    saveState(el, `Bitte eine Zahl${grenzen} eingeben`, 'error');
+    return;
+  }
+
+  const ok = await saveSetting(el, bereich, { [schluessel]: wert });
+  if (ok && bereich === 'printer') {
+    updateRotateWarning();
+    await loadLayouts().catch((e) => toast(e.message, 'error'));
+  }
+});
+
+// Gedrehter Text mit flachem Strichcode ist erlaubt, aber selten gewollt: der
+// Code steht dann quer zur Schrift. Frueher stand das nur im Hilfetext unter
+// den Feldern - also dort, wo es niemand liest, nachdem er die beiden
+// Einstellungen schon getroffen hat.
+function updateRotateWarning() {
+  const p = state.settings?.printer || {};
+  const box = $('#rotate-warning');
+  if (box) box.hidden = !(p.label_rotate && p.label_code === 'code128');
+}
+
+$('#rotate-fix')?.addEventListener('click', () => {
+  const sel = $('[data-setting="printer.label_code"]');
+  if (!sel) return;
+  sel.value = 'auto';
+  sel.dispatchEvent(new Event('change', { bubbles: true }));
+});
+
+// Verweise zwischen den Reitern ("steht unter Etiketten").
+document.addEventListener('click', (ev) => {
+  const a = ev.target.closest('a[data-goto]');
+  if (!a) return;
+  ev.preventDefault();
+  showPage(a.dataset.goto);
+  window.scrollTo(0, 0);
+});
 
 // -------------------------------------------------------- Etikettenlayouts
 // Die Vorschauen kommen fertig vom Server und entstehen aus genau dem
@@ -772,49 +910,43 @@ async function loadLayouts() {
   const rows = await get('/api/labels/layouts');
   const chosen = state.settings?.printer?.label_layout || 'standard';
 
-  box.innerHTML = rows.map((l) => `<div class="layout ${l.name === chosen ? 'active' : ''}"
-      data-layout="${esc(l.name)}" role="button" tabindex="0">
+  box.innerHTML = rows.map((l) => `<div class="layout ${l.name === chosen ? 'active' : ''} ${l.passt ? '' : 'zu-gross'}"
+      data-layout="${esc(l.name)}" role="button" tabindex="0" aria-pressed="${l.name === chosen}">
     <div class="paper">${l.svg}</div>
-    <div class="who">${esc(l.title || l.name)}</div>
+    <div class="who">${esc(l.title || l.name)}${l.name === chosen ? ' <span class="pill ok">gewählt</span>' : ''}</div>
     <div class="why">${esc(l.description)}</div>
-    <div class="fill">${esc(l.code)} (${l.code_mm} mm) · braucht ${l.mm} mm${l.passt ? '' : ' <b>– passt nicht!</b>'}</div>
+    <div class="fill">${l.passt
+      ? `passt · braucht ${fmtMm(l.mm)} mm`
+      : `<b>passt nicht</b> · braucht ${fmtMm(l.mm)} mm`}${l.rotate
+      ? '<br>Vorschau ungedreht – der Drucker dreht die Schrift' : ''}</div>
   </div>`).join('');
-
-  box.querySelectorAll('[data-layout]').forEach((el) => el.addEventListener('click', async () => {
-    await saveSetting('printer', { label_layout: el.dataset.layout });
-    state.settings.printer = { ...state.settings.printer, label_layout: el.dataset.layout };
-    box.querySelectorAll('[data-layout]').forEach((o) => o.classList.toggle('active', o === el));
-  }));
 }
 
-// Masse und Ausrichtung aendern jede Vorschau - deshalb neu zeichnen, nicht
-// nur speichern.
-async function saveLabelGeometry() {
-  const body = {
-    label_width_mm: parseFloat($('#set-lw').value) || 50,
-    label_height_mm: parseFloat($('#set-lh').value) || 30,
-    label_feed_edge: $('#set-feededge').value,
-    label_rotate: $('#set-rotate').checked,
-    label_code: $('#set-code').value,
-    label_code_size: $('#set-codesize').value,
-    label_end: $('#set-labelend').value,
-    backfeed_dots: parseInt($('#set-backfeed').value, 10) || 0,
-    label_dead_zone_mm: parseFloat($('#set-dead').value) || 0,
-  };
-  await saveSetting('printer', body);
-  state.settings.printer = { ...state.settings.printer, ...body };
-  await loadLayouts();
+function fmtMm(mm) {
+  return Number(mm).toLocaleString('de-DE', { maximumFractionDigits: 1 });
 }
 
-['#set-lw', '#set-lh', '#set-feededge', '#set-rotate', '#set-code',
- '#set-codesize', '#set-labelend', '#set-backfeed', '#set-dead'].forEach((sel) => {
-  const el = $(sel);
-  if (el) el.addEventListener('change', () => saveLabelGeometry().catch((e) => toast(e.message, 'error')));
+async function chooseLayout(el) {
+  const ok = await saveSetting(el, 'printer', { label_layout: el.dataset.layout });
+  if (ok) await loadLayouts();
+}
+$('#layout-picker')?.addEventListener('click', (ev) => {
+  const el = ev.target.closest('[data-layout]');
+  if (el) chooseLayout(el);
+});
+$('#layout-picker')?.addEventListener('keydown', (ev) => {
+  const el = ev.target.closest('[data-layout]');
+  if (el && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); chooseLayout(el); }
 });
 
 $('#notify-test').addEventListener('click', async () => {
-  try { const r = await post('/api/notify/test'); toast(JSON.stringify(r), 'success'); }
-  catch (e) { toast(e.message, 'error'); }
+  try {
+    const r = await post('/api/notify/test');
+    const ok = Object.keys(r).filter((k) => r[k]);
+    const fehl = Object.keys(r).filter((k) => !r[k]);
+    toast(`Gesendet über ${ok.join(', ')}${fehl.length ? ` – fehlgeschlagen: ${fehl.join(', ')}` : ''}`,
+      fehl.length ? 'warn' : 'success');
+  } catch (e) { toast(e.message, 'error'); }
 });
 
 $('#import-form').addEventListener('submit', async (ev) => {
@@ -930,7 +1062,7 @@ liveConnect(
       catalog: ['catalog', 'templates', 'labels'],
       devices: ['devices', 'dashboard'],
       shopping: ['shopping'],
-      settings: ['system'],
+      settings: ['system', 'labels'],
     }[msg.event] || [];
     if (relevant.includes(activePage())) refreshActive().catch(() => {});
   },

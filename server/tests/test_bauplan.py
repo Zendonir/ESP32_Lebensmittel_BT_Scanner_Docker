@@ -29,6 +29,7 @@ leicht wieder einsammelt.
 from __future__ import annotations
 
 import pathlib
+import subprocess
 
 import pytest
 
@@ -87,3 +88,74 @@ def test_toolchain_darf_ans_netz():
             "braucht deshalb eine Wiederholung"
         )
     assert gefunden >= 2
+
+
+# ------------------------------------------------------------ Release-Kette
+#
+# release.yml haengt an drei Stellen an anderen Dateien, die man beim
+# Aufraeumen leicht veraendert, ohne es zu merken: am *Namen* des CI-Ablaufs
+# (workflow_run findet ihn nur darueber), an den Eingaben der beiden
+# aufgerufenen Ablaeufe, und an der Versionsnummer in der Firmware.
+
+
+WURZEL = WORKFLOWS.parents[1]
+
+
+def _plan(name: str) -> dict:
+    return yaml.safe_load((WORKFLOWS / name).read_text("utf-8"))
+
+
+def _ausloeser(plan: dict) -> dict:
+    # PyYAML liest den Schluessel `on` als True.
+    return plan.get("on") or plan.get(True) or {}
+
+
+def test_release_wartet_auf_den_ci_ablauf_von_main():
+    ausloeser = _ausloeser(_plan("release.yml"))["workflow_run"]
+    assert ausloeser["workflows"] == [_plan("ci.yml")["name"]], (
+        "release.yml wartet auf einen Ablauf, den es unter diesem Namen nicht gibt"
+    )
+    assert ausloeser["branches"] == ["main"]
+    bedingung = _plan("release.yml")["jobs"]["version"]["if"]
+    assert "conclusion == 'success'" in bedingung, "Release nur aus gruenem Stand"
+
+
+def test_aufgerufene_ablaeufe_passen_zu_ihren_eingaben():
+    jobs = _plan("release.yml")["jobs"]
+    for job in ("abbild", "firmware"):
+        ziel = jobs[job]["uses"].rsplit("/", 1)[-1]
+        erwartet = set(_ausloeser(_plan(ziel))["workflow_call"]["inputs"])
+        assert set(jobs[job]["with"]) == erwartet, f"{job} -> {ziel}"
+
+
+def test_firmware_traegt_den_namen_des_releases():
+    """Sonst sieht der Server ein Terminal mit der neuesten Firmware nie als
+    aktuell an, und "Update" steht fuer immer bereit."""
+    bau = next(s for _, s in _schritte() if s.get("name") == "Firmware bauen")
+    assert "FIRMWARE_VERSION" in _umgebung(bau)
+    assert 'os.environ.get("FIRMWARE_VERSION"' in (
+        WURZEL / "firmware" / "scripts" / "version.py"
+    ).read_text("utf-8")
+
+
+@pytest.mark.parametrize(
+    "tags,stufe,erwartet",
+    [
+        ([], "patch", "v1.0.0"),
+        (["v1.0.0"], "patch", "v1.0.1"),
+        (["v1.0.9", "v1.0.10"], "patch", "v1.0.11"),   # Zahl, nicht Text
+        (["v1.2.3", "vquatsch", "v9.9.9-rc1"], "patch", "v1.2.4"),
+        (["v1.2.3"], "minor", "v1.3.0"),
+        (["v1.2.3"], "major", "v2.0.0"),
+    ],
+)
+def test_naechste_versionsnummer(tmp_path, tags, stufe, erwartet):
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(tmp_path)]
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "x"], check=True)
+    for tag in tags:
+        subprocess.run([*git, "tag", tag], check=True)
+    skript = WURZEL / ".github" / "scripts" / "naechste-version.sh"
+    aus = subprocess.run(["bash", str(skript), stufe], cwd=tmp_path,
+                         capture_output=True, text=True, check=True)
+    assert aus.stdout.strip() == erwartet

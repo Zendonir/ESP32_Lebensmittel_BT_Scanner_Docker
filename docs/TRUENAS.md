@@ -91,7 +91,9 @@ erst, wenn man sie braucht.
 
 ## Aktualisieren
 
-Die App zieht `:latest`. Über **Apps → lebensmittel-scanner → Update** bzw.
+Die App zieht `:latest`. Das zeigt immer auf das jüngste Release, und ein
+Release entsteht von selbst, sobald ein Stand auf `main` die Tests besteht.
+Über **Apps → lebensmittel-scanner → Update** bzw.
 in der Shell:
 
 ```bash

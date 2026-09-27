@@ -120,7 +120,7 @@ async def remove(req: RemoveRequest, session: AsyncSession = Depends(get_session
     elif req.barcode:
         row = await inv.find_removable_by_barcode(session, req.barcode)
     else:
-        raise HTTPException(400, "label oder barcode noetig")
+        raise HTTPException(400, "Etikett oder Barcode angeben")
 
     if row is None:
         raise HTTPException(404, "Kein aktiver Artikel gefunden")
@@ -133,10 +133,10 @@ async def remove(req: RemoveRequest, session: AsyncSession = Depends(get_session
 @router.post("/restore", response_model=InventoryOut)
 async def restore(req: RemoveRequest, session: AsyncSession = Depends(get_session)):
     if not req.label:
-        raise HTTPException(400, "label noetig")
+        raise HTTPException(400, "Etikett angeben")
     row = await inv.restore_by_label(session, req.label)
     if row is None:
-        raise HTTPException(404, "Nicht rueckbuchbar (Zeitfenster abgelaufen?)")
+        raise HTTPException(404, "Lässt sich nicht mehr zurückbuchen – das Zeitfenster ist abgelaufen")
     await session.commit()
     await hub.notify_ui("inventory")
     return inv.with_days_left(row)

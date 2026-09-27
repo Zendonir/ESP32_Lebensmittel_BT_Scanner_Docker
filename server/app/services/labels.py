@@ -17,6 +17,7 @@ from ..config import settings
 from . import settings_store
 from . import categories
 from .dates import to_display
+from .zeichen import latin1, latin1_tief
 
 log = logging.getLogger(__name__)
 
@@ -221,11 +222,11 @@ def _fit(blocks: list[dict], budget: int) -> list[dict]:
 # Den Code nennen die Beschreibungen bewusst nicht: welcher gedruckt wird,
 # haengt an der Ausrichtung (siehe _code_blocks) und stuende hier sonst falsch.
 LAYOUTS: dict[str, str] = {
-    "klassisch": "Wie im Vorgaengerprojekt: Name gross, feste Zeilen, Strichcode.",
-    "zeile": "Name und MHD in einer Zeile. Der kuerzeste Zuschnitt.",
+    "klassisch": "Wie im Vorgängerprojekt: Name groß, feste Zeilen, Code.",
+    "zeile": "Name und MHD in einer Zeile. Der kürzeste Zuschnitt.",
     "sparsam": "Name und MHD untereinander, sonst nichts.",
-    "kompakt": "Name und MHD gross. Aus zwei Metern lesbar.",
-    "standard": "Name gross, dazu MHD, Menge und Ort. Der Allrounder.",
+    "kompakt": "Name und MHD groß. Aus zwei Metern lesbar.",
+    "standard": "Name groß, dazu MHD, Menge und Ort. Der Allrounder.",
     "vollstaendig": "Alle Angaben in normaler Schrift.",
 }
 
@@ -394,7 +395,7 @@ def _build(layout: str, item: dict, cfg: dict, chars: int) -> list[dict]:
         blocks.append({"t": "row", "k": "MHD", "v": expiry or "-",
                        "underline": True, "keep": True})
         blocks.append({"t": "row", "k": "Menge", "v": _quantity(item) or "1 St."})
-        haushalt = cfg.get("household") or settings.household
+        haushalt = latin1(cfg.get("household") or settings.household)
         if haushalt:
             blocks.append({"t": "row", "k": "Haushalt", "v": haushalt})
         return blocks + _code_blocks(item, cfg)
@@ -462,6 +463,10 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     von Zeichenbefehlen und schiebt sie auf die UART. Layout-Aenderungen sind
     damit ein Server-Deploy statt eines OTA-Flashs.
     """
+    # Vor jeder Breitenrechnung: aus "…" werden drei Zeichen, und die muessen
+    # beim Umbrechen schon mitzaehlen. Siehe services/zeichen.py.
+    item = latin1_tief(item)
+
     layout = printer_cfg.get("label_layout", DEFAULT_LAYOUT)
     if layout not in LAYOUTS:
         layout = DEFAULT_LAYOUT

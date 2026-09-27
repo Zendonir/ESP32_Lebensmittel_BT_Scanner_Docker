@@ -75,7 +75,7 @@ async def patch_device(
         await session.execute(select(Device).where(Device.device_id == device_id))
     ).scalar_one_or_none()
     if row is None:
-        raise HTTPException(404, "Geraet unbekannt")
+        raise HTTPException(404, "Terminal unbekannt")
     for key, value in body.model_dump(exclude_unset=True, exclude_none=True).items():
         setattr(row, key, value)
     await session.commit()
@@ -90,14 +90,14 @@ async def patch_device(
 @router.post("/devices/{device_id}/reboot")
 async def reboot_device(device_id: str):
     if not await hub.send_to(device_id, proto.reboot()):
-        raise HTTPException(503, "Geraet nicht erreichbar")
+        raise HTTPException(503, "Terminal nicht erreichbar")
     return {"ok": True}
 
 
 @router.post("/devices/{device_id}/beep")
 async def beep_device(device_id: str, pattern: str = "ok"):
     if not await hub.send_to(device_id, proto.beep(pattern)):
-        raise HTTPException(503, "Geraet nicht erreichbar")
+        raise HTTPException(503, "Terminal nicht erreichbar")
     return {"ok": True}
 
 
@@ -119,9 +119,10 @@ async def forget_device(device_id: str, session: AsyncSession = Depends(get_sess
         await session.execute(select(Device).where(Device.device_id == device_id))
     ).scalar_one_or_none()
     if row is None:
-        raise HTTPException(404, "Geraet unbekannt")
+        raise HTTPException(404, "Terminal unbekannt")
     await session.delete(row)
     await session.commit()
+    await hub.notify_ui("devices")
     return {"ok": True}
 
 
@@ -189,7 +190,7 @@ async def patch_settings(
     key: str, body: dict, session: AsyncSession = Depends(get_session)
 ):
     if key not in settings_store.DEFAULTS:
-        raise HTTPException(404, f"Unbekannter Einstellungsschluessel: {key}")
+        raise HTTPException(404, f"Unbekannter Einstellungsschlüssel: {key}")
     merged = await settings_store.merge(session, key, body)
     await session.commit()
 
@@ -244,6 +245,12 @@ async def system_info(session: AsyncSession = Depends(get_session)):
         },
         "inventory": counts,
         "notify": notify.configured_channels(),
+        # Nur ja/nein - die Werte selbst gehoeren nicht in eine Antwort, die
+        # ohne Web-Passwort jeder im Netz abrufen kann. Die Oberflaeche macht
+        # daraus Hinweise, die sonst nur im Container-Protokoll standen.
+        "token_standard": settings.device_token == "change-me",
+        "update_knopf": deploy.konfiguriert(),
+        "passwortschutz": bool(settings.ui_password),
     }
 
 
@@ -332,7 +339,7 @@ class ImportResult(BaseModel):
 async def import_v1(
     file: UploadFile,
     dry_run: bool = Query(
-        False, description="Nur pruefen, nichts in die Datenbank schreiben"
+        False, description="Nur prüfen, nichts in die Datenbank schreiben"
     ),
     session: AsyncSession = Depends(get_session),
 ):
@@ -394,9 +401,9 @@ def backup_db():
     if not url.drivername.startswith("sqlite") or not url.database:
         raise HTTPException(
             409,
-            "Nur fuer die eingebaute SQLite-Datenbank. Bei einer externen "
+            "Nur für die eingebaute SQLite-Datenbank. Bei einer externen "
             "Datenbank sichert deren eigenes Werkzeug (z.B. pg_dump); die "
-            "Nutzdaten gibt es hier ueber /api/export/json.",
+            "Nutzdaten gibt es hier über /api/export/json.",
         )
     if ":memory:" in url.database:
         raise HTTPException(409, "Datenbank liegt nur im Arbeitsspeicher")

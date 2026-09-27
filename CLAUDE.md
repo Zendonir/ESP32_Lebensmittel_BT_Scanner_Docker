@@ -22,7 +22,7 @@ server/app/
   device/        protocol · hub · workflow · routes
   services/      inventory · labels · calibration · categories · openfoodfacts ·
                  notify · scheduler · dates · settings_store · seed · importer ·
-                 firmware · updates · deploy
+                 firmware · updates · deploy · zeichen
 server/web/      index.html · mobile.html · js/ · css/ (kein Build-Schritt)
                  js/vendor/  ZXing – Barcodes aus der Handykamera, siehe
                              das README dort
@@ -139,7 +139,9 @@ cd firmware && pio run --target upload # flashen
 | Versatz summiert sich ueber die Rolle | Bei gestanzten Etiketten `label_end: "formfeed"` - der Drucker sucht die Luecke mit seinem Sensor (`GS FF`) und registriert bei jedem Etikett neu, statt unserer Rechnung zu vertrauen |
 | Welche Fassung laeuft hier? | System-Panel, "Fassung" - aus `APP_VERSION`/`APP_COMMIT`/`APP_BUILT`, gesetzt beim Bau des Abbilds. Version **nirgends** ein zweites Mal eintragen, sonst widersprechen sich die Angaben |
 | Update-Knopf meldet Fehler, obwohl es lief | Watchtower beendet genau den Container, der die Anfrage gestellt hat - die Antwort kann nicht ankommen. Ein Abriss gilt in `deploy.trigger()` deshalb als Erfolg |
-| Abbild-Tags | `:latest` folgt den **Releases**, nicht main - wer den Kopf von main will, nimmt `:main`. Ein Release entsteht durch einen Tag `v*`; der Workflow baut dann Firmware, Release und Installer-Seite in einem Zug |
+| Abbild-Tags | `:latest` folgt den **Releases**, nicht jedem Commit - wer den Kopf von main will, nimmt `:main`. Releases legt `release.yml` selbst an, sobald CI auf main gruen ist (Patch-Stufe; groessere Spruenge von Hand ueber *Run workflow*) |
+| Release-Tag loest image.yml/firmware-release.yml nicht aus | Absicht von GitHub: ein mit `GITHUB_TOKEN` gesetzter Tag stoesst keine Ablaeufe an. `release.yml` ruft beide deshalb selbst auf (`workflow_call`) und reicht Nummer und Commit als Eingabe durch |
+| Terminal bietet fuer immer "Update" an | Die Firmware muss unter demselben Namen laufen, unter dem der Server sie aus dem Release ablegt: `FIRMWARE_VERSION` = Release-Tag, gesetzt im Release-Bau, gelesen von `scripts/version.py` |
 | Der Server soll sich selbst aktualisieren | Er laedt und startet **keinen** Code aus dem Netz. `services/deploy.py` schickt nur eine Anfrage an einen Dienst, der den Container ersetzen darf; das Abbild bleibt das, was in der Registry steht |
 | GitHub-Vergleich meldet immer "aktuell" | `/compare/base...head` liefert `ahead_by` fuer das, was head voraus ist - `behind_by` ist die Gegenrichtung und bleibt dabei 0 |
 | Namenloser Drucker, kein Datenblatt | Nicht raten: `POST /api/labels/calibrate` druckt einen Messstreifen, der Zeilenabstand, Rastergeometrie, Rueckzug und Lueckensensor mit dem Lineal ablesbar macht (`services/calibration.py`) |
@@ -155,9 +157,12 @@ cd firmware && pio run --target upload # flashen
 | Druckauftrag steht ewig auf `sent` | Nach `PRINT_STALE_SECONDS` zurueck in die Schlange |
 | Test scheitert mit `Permission denied: '/data'` | `Settings` friert beim **ersten** Import von `app.config` ein. Umgebungsvariablen fuer Tests gehoeren deshalb in `tests/conftest.py` - pytest laedt die vor jedem Testmodul. In einer Testdatei gesetzt gilt es nur, solange die zufaellig die alphabetisch erste ist |
 | SQLite-PRAGMA wirkt nicht | `foreign_keys`/`synchronous` gelten je Verbindung - gehoeren in den `connect`-Listener in `db.py`, nicht in `init_db()` |
-| Nach einem Update fehlen halbe Masken, ohne Fehlermeldung | Der Browser hat das neue `index.html`, aber noch das alte `app.js`. Felder werden deshalb ueber `setzen()` gefuellt - ein entferntes Feld darf nie den Rest mitreissen |
+| Nach einem Update fehlen halbe Masken, ohne Fehlermeldung | Der Browser hat das neue `index.html`, aber noch das alte `app.js`. Einstellungsfelder werden deshalb ueber `fillSettings()` gefuellt, das nur ueber vorhandene `[data-setting]`-Elemente laeuft - ein entferntes Feld darf nie den Rest mitreissen |
 | Browser holt die neue Datei trotzdem nicht | `no-cache` wirkt nur auf kuenftige Antworten; wer die alte Datei schon hat, fragt gar nicht erst. Die Kennung steht deshalb im **Pfad** (`/static/v/<kennung>/…`) und nicht als `?v=` - `app.js` importiert `./api.js` relativ, ein Abfrageteil an `app.js` liesse `api.js` alt |
 | Firmware-Bau in der Werkstatt bricht mitten drin ab (`Failed to install Python dependencies into penv`) | Kein Fehler am Code. Die Plattform sucht ihren eigenen Kern als `platformio`, installiert ist er als `pioarduino-core` - sie laedt ihn deshalb einmal pro Bauumgebung neu, und einer der Ladevorgaenge faellt um. Gebaut wird darum mit `PLATFORMIO_OFFLINE=1`; ans Netz darf nur `pio pkg install` davor |
+| Neue Einstellung in der Oberflaeche | Feld mit `data-setting="bereich.schluessel"` (und `data-art="int"`/`"float"` fuer Zahlen) - es speichert sich beim Aendern selbst. Kein eigener Speichern-Knopf; `test_oberflaeche.py` prueft, dass der Schluessel in `settings_store.DEFAULTS` steht |
+| Kategorie/Lagerort umbenannt, Artikel fallen aus dem Filter | Namen stehen an Artikeln als Text. Umbenennen nur ueber `inventory.rename_category()`/`rename_location()`, die Artikel, Vorlagen, Produkte und Terminals nachziehen |
+| `?` statt Anfuehrungszeichen oder Strich auf Etikett/Terminal | Beide kennen nur Latin-1. Text zur Hardware laeuft durch `services/zeichen.py` (in `render_label` und `protocol.screen`/`toast`) - neue Wege zur Hardware ebenso |
 | Ein haengender Browser friert das Terminal ein | Jeder Sendevorgang hat eine Zeitgrenze (`hub.SEND_TIMEOUT_S`) |
 
 ## Entwicklungsregeln
