@@ -74,29 +74,29 @@ def _anleitung(stand: dict, neueste: dict) -> list[str]:
     laeuft_auf_tag = _ist_tag(stand["version"])
     neu = str(neueste.get("version", "")).lstrip("v")
 
-    schritte = ["In TrueNAS: Apps -> lebensmittel-scanner -> Bearbeiten."]
+    schritte = ["In TrueNAS: Apps → lebensmittel-scanner → Bearbeiten."]
     if laeuft_auf_tag and neu:
         schritte.append(
             f"Beim Abbild den Tag von {stand['version'].lstrip('v')} auf {neu} "
-            "aendern, dann Speichern."
+            "ändern, dann Speichern."
         )
         schritte.append(
-            "Wer dauerhaft die jeweils neueste fertige Fassung will, traegt "
-            "statt einer Nummer 'latest' ein - dann genuegt kuenftig "
+            "Wer dauerhaft die jeweils neueste fertige Fassung will, trägt "
+            "statt einer Nummer 'latest' ein – dann genügt künftig "
             "Bearbeiten und Speichern."
         )
     else:
         schritte.append(
-            "Ohne etwas zu aendern Speichern. TrueNAS legt den Container "
+            "Ohne etwas zu ändern Speichern. TrueNAS legt den Container "
             "dabei neu an und zieht das Abbild frisch."
         )
         schritte.append(
-            "Passiert nichts, laeuft das Abbild aus einem zwischen"
-            "gespeicherten Stand - dann einmal den Tag von 'latest' auf eine "
-            "Versionsnummer setzen und wieder zurueck."
+            "Passiert nichts, läuft das Abbild aus einem zwischen"
+            "gespeicherten Stand – dann einmal den Tag von 'latest' auf eine "
+            "Versionsnummer setzen und wieder zurück."
         )
     schritte.append(
-        "Die Daten liegen im Volume unter /data und bleiben unberuehrt. Das "
+        "Die Daten liegen im Volume unter /data und bleiben unberührt. Das "
         "Terminal verbindet sich von selbst wieder."
     )
     return schritte
@@ -110,8 +110,8 @@ async def _github(client: httpx.AsyncClient, pfad: str) -> Any:
     # im Panel und sagt niemandem, was zu tun ist.
     if antwort.status_code == 403 and "rate limit" in antwort.text.lower():
         raise ValueError(
-            "GitHub laesst gerade keine weiteren Abfragen zu (Kontingent "
-            "erschoepft, 60 je Stunde ohne Anmeldung). Spaeter wieder "
+            "GitHub lässt gerade keine weiteren Abfragen zu (Kontingent "
+            "erschöpft, 60 je Stunde ohne Anmeldung). Später wieder "
             "versuchen."
         )
     if antwort.status_code == 404:
@@ -119,8 +119,8 @@ async def _github(client: httpx.AsyncClient, pfad: str) -> Any:
             raise ValueError(
                 "Der Stand dieses Abbilds ist im Ursprung nicht zu finden. "
                 "Das passiert, wenn der Zweig, aus dem es gebaut wurde, "
-                "inzwischen geloescht oder umbenannt wurde - dann gibt es "
-                "nichts mehr, womit sich vergleichen liesse."
+                "inzwischen gelöscht oder umbenannt wurde – dann gibt es "
+                "nichts mehr, womit sich vergleichen ließe."
             )
         raise ValueError(
             f"In {settings.app_repo} gibt es noch kein Release. Eines "
@@ -129,8 +129,8 @@ async def _github(client: httpx.AsyncClient, pfad: str) -> Any:
         )
     if antwort.status_code == 401:
         raise ValueError(
-            f"Kein Zugriff auf {settings.app_repo} - ist das Repository "
-            "privat, braucht die Pruefung ein Token (hier nicht vorgesehen)."
+            f"Kein Zugriff auf {settings.app_repo} – ist das Repository "
+            "privat, braucht die Prüfung ein Token (hier nicht vorgesehen)."
         )
     antwort.raise_for_status()
     return antwort.json()
@@ -156,9 +156,9 @@ async def check(force: bool = False) -> dict:
 
     if not stand["aus_abbild"]:
         ergebnis["hinweis"] = (
-            "Dieser Server laeuft nicht aus einem gebauten Abbild "
+            "Dieser Server läuft nicht aus einem gebauten Abbild "
             "(APP_VERSION ist nicht gesetzt). Ein Vergleich ist damit nicht "
-            "moeglich - beim Selberbauen sagt git bescheid."
+            "möglich – beim Selberbauen sagt git Bescheid."
         )
         return ergebnis
 
@@ -187,8 +187,8 @@ async def check(force: bool = False) -> dict:
                 zweig = stand["version"]
                 if not stand["commit"]:
                     raise ValueError(
-                        "Das Abbild nennt keinen Commit (APP_COMMIT fehlt) - "
-                        "ein aelteres Abbild. Nach dem naechsten Bau geht es."
+                        "Das Abbild nennt keinen Commit (APP_COMMIT fehlt) – "
+                        "ein älteres Abbild. Nach dem nächsten Bau geht es."
                     )
                 vergleich = await _github(
                     client, f"/compare/{stand['commit']}...{zweig}"
@@ -232,7 +232,7 @@ async def check(force: bool = False) -> dict:
         ergebnis["anleitung"] = _anleitung(stand, neueste)
         ergebnis["abbild"] = _abbild_mit_tag(str(neueste.get("version", "")))
     else:
-        ergebnis["hinweis"] = "Dieser Server laeuft auf dem neuesten Stand."
+        ergebnis["hinweis"] = "Dieser Server läuft auf dem neuesten Stand."
         ergebnis["anleitung"] = []
 
     _cache.clear()

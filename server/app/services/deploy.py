@@ -49,12 +49,12 @@ def status() -> dict:
         "ziel": settings.update_hook_url,
         "abbild": settings.app_image,
         "hinweis": (
-            "Bereit. Der Knopf laesst Watchtower das neue Abbild ziehen und "
+            "Bereit. Der Knopf lässt Watchtower das neue Abbild ziehen und "
             "den Container ersetzen."
             if konfiguriert()
             else "Nicht eingerichtet. Ohne einen Dienst, der den Container "
                  "ersetzen darf, kann sich der Server nicht selbst "
-                 "aktualisieren - siehe deploy/truenas/watchtower.yaml."
+                 "aktualisieren – siehe deploy/truenas/watchtower.yaml."
         ),
     }
 
@@ -70,7 +70,7 @@ async def trigger() -> dict:
     if not konfiguriert():
         raise ValueError(
             "Es ist kein Dienst eingerichtet, der den Container ersetzen "
-            "darf. UPDATE_HOOK_URL und UPDATE_HOOK_TOKEN setzen - die "
+            "darf. UPDATE_HOOK_URL und UPDATE_HOOK_TOKEN setzen – die "
             "fertige Vorlage steht in deploy/truenas/watchtower.yaml."
         )
 
@@ -83,14 +83,14 @@ async def trigger() -> dict:
             antwort = await client.post(settings.update_hook_url, headers=kopfzeilen)
         if antwort.status_code in (401, 403):
             raise ValueError(
-                "Der Update-Dienst hat die Anfrage abgelehnt - UPDATE_HOOK_TOKEN "
-                "stimmt nicht mit WATCHTOWER_HTTP_API_TOKEN ueberein."
+                "Der Update-Dienst hat die Anfrage abgelehnt – UPDATE_HOOK_TOKEN "
+                "stimmt nicht mit WATCHTOWER_HTTP_API_TOKEN überein."
             )
         antwort.raise_for_status()
         log.info("Update angestossen, Antwort %s", antwort.status_code)
         return {
             "ok": True,
-            "hinweis": "Update angestossen. Der Server wird gleich ersetzt und "
+            "hinweis": "Update angestoßen. Der Server wird gleich ersetzt und "
                        "ist in etwa einer Minute wieder da.",
         }
     except (httpx.TimeoutException, httpx.RemoteProtocolError, httpx.ConnectError) as fehler:
@@ -101,7 +101,7 @@ async def trigger() -> dict:
         log.info("Verbindung zum Update-Dienst abgerissen (%s) - vermutlich laeuft es", fehler)
         return {
             "ok": True,
-            "hinweis": "Update angestossen. Die Verbindung ist dabei abgerissen - "
+            "hinweis": "Update angestoßen. Die Verbindung ist dabei abgerissen – "
                        "das ist zu erwarten, wenn der Container gerade ersetzt "
                        "wird. In etwa einer Minute ist der Server wieder da.",
         }

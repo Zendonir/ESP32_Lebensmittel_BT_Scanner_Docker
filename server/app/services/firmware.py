@@ -135,12 +135,12 @@ async def fetch_from_github(tag: str = "") -> list[dict]:
             name = f"firmware-{board}.bin"
             link = assets.get(name)
             if not link:
-                log.warning("Release %s enthaelt %s nicht", version, name)
+                log.warning("Release %s enthält %s nicht", version, name)
                 continue
             binary = await client.get(link)
             binary.raise_for_status()
             stored.append(store(board, binary.content, version, f"github:{version}"))
 
     if not stored:
-        raise ValueError(f"Release {version} enthaelt keine passenden Abbilder")
+        raise ValueError(f"Release {version} enthält keine passenden Abbilder")
     return stored

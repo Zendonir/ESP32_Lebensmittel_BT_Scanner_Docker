@@ -527,7 +527,7 @@ def _screen_tmpl_amount(sess, sid, status) -> dict:
     return proto.screen(
         screen_id=sid,
         kind="number",
-        title="Fuellmenge",
+        title="Füllmenge",
         subtitle=f"{draft.name} {draft.brand}".strip(),
         value=draft.quantity,
         meta={"min": 0, "max": 5000, "step": 50 if draft.unit in ("g", "ml") else 1,

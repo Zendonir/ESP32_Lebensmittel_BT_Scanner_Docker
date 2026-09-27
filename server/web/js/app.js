@@ -1,7 +1,7 @@
 // Admin-Oberflaeche. Bewusst ohne Framework und ohne Build-Schritt: das Image
 // bleibt klein und die Dateien sind das, was ausgeliefert wird.
 
-import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, esc, liveConnect, tagEditor } from './api.js';
+import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, liveConnect, tagEditor } from './api.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -39,7 +39,7 @@ $('#theme-toggle').addEventListener('click', () => {
   const order = ['auto', 'light', 'dark'];
   const next = order[(order.indexOf(localStorage.getItem(THEME_KEY) || 'auto') + 1) % 3];
   applyTheme(next);
-  toast(`Design: ${next}`);
+  toast(`Design: ${{ auto: 'wie das System', light: 'hell', dark: 'dunkel' }[next]}`);
 });
 applyTheme(localStorage.getItem(THEME_KEY) || 'auto');
 
@@ -75,15 +75,15 @@ async function loadDashboard() {
     ['Im Bestand', stats.total, 'ok'],
     ['Läuft ab', stats.expiring, 'warn'],
     ['Abgelaufen', stats.expired, 'danger'],
-    ['Eingelagert 30 T', stats.added_30d, ''],
-    ['Verbraucht 30 T', stats.removed_30d, ''],
+    ['Eingelagert (30 Tage)', stats.added_30d, ''],
+    ['Ausgelagert (30 Tage)', stats.removed_30d, ''],
   ].map(([label, value, cls]) =>
     `<div class="card stat ${cls}"><div class="value">${value}</div><div class="label">${label}</div></div>`
   ).join('');
 
   $('#dash-expiring').innerHTML = expiring.length
     ? expiring.map((i) => `<tr>
-        <td class="name">${esc(i.name)}</td>
+        <td class="name">${esc(i.display_name || i.name)}</td>
         <td>${fmtDate(i.expiry_date)} ${daysPill(i.days_left)}</td>
         <td>${esc(i.location)}</td>
         <td class="right"><button class="sm" data-remove="${esc(i.label)}">Auslagern</button></td>
@@ -91,8 +91,9 @@ async function loadDashboard() {
     : '<tr><td colspan="4" class="muted">Nichts läuft demnächst ab.</td></tr>';
 
   $('#dash-events').innerHTML = events.map((e) => `<tr>
-      <td class="mono">${fmtTime(e.ts)}</td><td>${esc(e.type)}</td>
-      <td class="name">${esc(e.name || e.label || e.barcode)}</td></tr>`).join('');
+      <td class="muted">${fmtTime(e.ts)}</td><td>${esc(eventName(e.type))}</td>
+      <td class="name">${esc(e.name || e.label || e.barcode)}</td></tr>`).join('')
+    || '<tr><td colspan="3" class="muted">Noch nichts passiert.</td></tr>';
 
   $('#dash-cat').innerHTML = barList(stats.by_category, state.categories);
   $('#dash-loc').innerHTML = barList(stats.by_location, []);
@@ -731,10 +732,10 @@ async function loadSystem() {
   fillSettings(settings);
 
   $('#sys-events').innerHTML = events.map((e) => `<tr>
-    <td class="mono">${fmtTime(e.ts)}</td><td>${esc(e.type)}</td>
-    <td class="mono">${esc(e.label)}</td><td class="name">${esc(e.name)}</td>
+    <td class="muted">${fmtTime(e.ts)}</td><td>${esc(eventName(e.type))}</td>
+    <td class="mono">${esc(e.label || e.barcode)}</td><td class="name">${esc(e.name)}</td>
     <td>${esc(e.device)}</td>
-    <td class="mono muted">${esc(JSON.stringify(e.payload || {}).slice(0, 60))}</td></tr>`).join('');
+    <td class="name muted" title="${esc(JSON.stringify(e.payload || {}))}">${esc(eventDetails(e))}</td></tr>`).join('');
 }
 
 // ---------------------------------------------------------------- Einstellungen
@@ -877,8 +878,13 @@ $('#layout-picker')?.addEventListener('keydown', (ev) => {
 });
 
 $('#notify-test').addEventListener('click', async () => {
-  try { const r = await post('/api/notify/test'); toast(JSON.stringify(r), 'success'); }
-  catch (e) { toast(e.message, 'error'); }
+  try {
+    const r = await post('/api/notify/test');
+    const ok = Object.keys(r).filter((k) => r[k]);
+    const fehl = Object.keys(r).filter((k) => !r[k]);
+    toast(`Gesendet über ${ok.join(', ')}${fehl.length ? ` – fehlgeschlagen: ${fehl.join(', ')}` : ''}`,
+      fehl.length ? 'warn' : 'success');
+  } catch (e) { toast(e.message, 'error'); }
 });
 
 $('#import-form').addEventListener('submit', async (ev) => {

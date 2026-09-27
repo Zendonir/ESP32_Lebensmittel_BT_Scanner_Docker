@@ -173,7 +173,7 @@ async def test_print(
     await session.commit()
     target = device_id or (hub.online_ids()[0] if hub.online_ids() else None)
     if not target:
-        raise HTTPException(503, "Kein Geraet online")
+        raise HTTPException(503, "Kein Terminal online – der Drucker hängt am Terminal")
     sent = await workflow.flush_print_queue(session, target)
     return {"ok": bool(sent), "job": job.id}
 
@@ -205,7 +205,7 @@ async def calibrate(
 
     target = device_id or (hub.online_ids()[0] if hub.online_ids() else None)
     if not target:
-        raise HTTPException(503, "Kein Geraet online")
+        raise HTTPException(503, "Kein Terminal online – der Drucker hängt am Terminal")
     sent = await workflow.flush_print_queue(session, target)
     return {
         "ok": bool(sent),

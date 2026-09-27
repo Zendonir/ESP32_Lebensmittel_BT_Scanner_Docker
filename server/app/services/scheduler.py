@@ -64,7 +64,7 @@ async def check_expiring(force: bool = False) -> dict:
                 for r in expired[:15]
             ]
         if soon:
-            lines.append(f"Laeuft ab in {warn_days} Tagen ({len(soon)}):")
+            lines.append(f"Läuft ab in {warn_days} Tagen ({len(soon)}):")
             lines += [
                 f"  - {r.name} ({to_display(r.expiry_date)}, {r.location})"
                 for r in soon[:15]

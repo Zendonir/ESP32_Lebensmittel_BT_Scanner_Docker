@@ -85,12 +85,78 @@ export function fmtTime(ts) {
   return d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+// Restlaufzeit in Worten. "3 T über" und "540 T" liessen rechnen: ob 540
+// Tage ein halbes oder anderthalb Jahre sind, sieht man nicht auf einen Blick.
+export function daysText(days) {
+  if (days === null || days === undefined) return 'kein MHD';
+  if (days < 0) return Math.abs(days) === 1 ? '1 Tag drüber' : `${Math.abs(days)} Tage drüber`;
+  if (days === 0) return 'heute';
+  if (days === 1) return 'morgen';
+  if (days <= 60) return `${days} Tage`;
+  if (days <= 730) {
+    const m = Math.round(days / 30.44);
+    return m === 1 ? '1 Monat' : `${m} Monate`;
+  }
+  const j = Math.round((days / 365.25) * 2) / 2;
+  return `${j.toLocaleString('de-DE')} Jahre`;
+}
+
 export function daysPill(days) {
-  if (days === null || days === undefined) return '<span class="pill">kein MHD</span>';
-  if (days < 0) return `<span class="pill danger">${Math.abs(days)} T über</span>`;
-  if (days === 0) return '<span class="pill danger">heute</span>';
-  if (days <= 3) return `<span class="pill warn">${days} T</span>`;
-  return `<span class="pill ok">${days} T</span>`;
+  const cls = days === null || days === undefined ? ''
+    : days <= 0 ? 'danger' : days <= 3 ? 'warn' : 'ok';
+  return `<span class="pill ${cls}">${daysText(days)}</span>`;
+}
+
+// ------------------------------------------------------- Ereignisse lesbar
+// Im Protokoll standen die internen Kennungen ("add", "scan_unknown") und die
+// Rohdaten als JSON. Beides ist fuer die Fehlersuche da, nicht zum Lesen.
+const EVENT_NAMES = {
+  add: 'Eingelagert',
+  remove: 'Ausgelagert',
+  restore: 'Zurückgebucht',
+  edit: 'Geändert',
+  delete: 'Gelöscht',
+  print: 'Nachgedruckt',
+  scan_unknown: 'Unbekannter Barcode',
+  import: 'Übernommen',
+  notify: 'Benachrichtigung',
+  device: 'Terminal',
+  rename_category: 'Kategorie umbenannt',
+  rename_location: 'Lagerort umbenannt',
+};
+
+export function eventName(type) {
+  return EVENT_NAMES[type] || type;
+}
+
+const REASONS = {
+  scan: 'per Scan', web: 'im Web', mobile: 'am Handy', manual: 'von Hand',
+  expired: 'abgelaufen', import: 'beim Import',
+};
+
+const FIELD_NAMES = {
+  name: 'Name', brand: 'Marke', category: 'Kategorie', subcategory: 'Sorte',
+  location: 'Ort', note: 'Notiz', unit: 'Einheit',
+};
+
+export function eventDetails(e) {
+  const d = e.payload || {};
+  const teile = [];
+  if (d.expiry_date) teile.push(`MHD ${fmtDate(d.expiry_date)}`);
+  if (d.quantity !== undefined && e.type !== 'edit') teile.push(`${d.quantity} ${d.unit || ''}`.trim());
+  if (d.reason) teile.push(REASONS[d.reason] || d.reason);
+  if (d.von) teile.push(`vorher „${d.von}“`);
+  if (d.artikel !== undefined && e.type.startsWith('rename')) teile.push(`${d.artikel} Artikel`);
+  if (d.battery !== undefined) teile.push(`Akku ${d.battery} %`);
+  if (e.type === 'notify') teile.push(`${d.expired ?? 0} abgelaufen, ${d.soon ?? 0} bald`);
+  if (e.type === 'edit') {
+    Object.entries(d).forEach(([k, v]) => {
+      if (k === 'expiry_date') return;
+      teile.push(`${FIELD_NAMES[k] || (k === 'quantity' ? 'Menge' : k)}: ${v}`);
+    });
+  }
+  if (e.location && ['add', 'restore'].includes(e.type)) teile.push(e.location);
+  return teile.join(' · ');
 }
 
 export function esc(value) {

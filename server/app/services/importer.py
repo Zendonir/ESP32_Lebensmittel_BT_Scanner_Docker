@@ -305,7 +305,7 @@ async def import_sd_json(
     try:
         rows = json.loads(content.decode("utf-8-sig", errors="replace"))
     except json.JSONDecodeError as exc:
-        result.errors.append(f"Ungueltiges JSON: {exc}")
+        result.errors.append(f"Ungültiges JSON: {exc}")
         return result
 
     if not isinstance(rows, list):
@@ -340,7 +340,7 @@ async def import_sd_zip(
     try:
         archive = zipfile.ZipFile(io.BytesIO(content))
     except zipfile.BadZipFile:
-        result.errors.append("Keine gueltige ZIP-Datei")
+        result.errors.append("Keine gültige ZIP-Datei")
         return result
 
     targets = {name.lower().rsplit("/", 1)[-1]: name for name in archive.namelist()}

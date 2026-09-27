@@ -100,14 +100,14 @@ def build(line_mm: float = 48.0, chars: int = 32) -> dict:
         zeile(f"Soll: {BOX_SOLL_MM:.1f} x {BOX_SOLL_MM:.1f} mm".replace(".", ",")),
         zeile(""),
         # --- 3: kann der Drucker rueckwaerts? ----------------------------
-        zeile("3) Rueckzug", bold=True),
+        zeile("3) Rückzug", bold=True),
         dict(marke),
         {"t": "back", "dots": BACKFEED_DOTS},
         dict(marke),
         zeile("Zwei Balken oder einer?"),
         zeile(""),
         # --- 4: hat er einen Lueckensensor? ------------------------------
-        zeile("4) Lueckensensor", bold=True),
+        zeile("4) Lückensensor", bold=True),
         zeile("Jetzt GS FF:"),
         {"t": "feed", "dots": 0, "form": True},
         zeile("<<< oben am Etikett?", bold=True),
@@ -127,39 +127,39 @@ ANLEITUNG: list[dict] = [
         "messen": f"Abstand zwischen den Innenkanten der beiden Balken. "
                   f"Soll: {LINE_SOLL_MM:.1f} mm".replace(".", ","),
         "bedeutet": "Stimmt es, rechnet der Drucker ESC 3 in Punkten (203 dpi) "
-                    "und das ganze Etikettenlayout geht auf. Ist es groesser, "
-                    "ignoriert er ESC 3 und benutzt seinen eigenen Abstand - "
+                    "und das ganze Etikettenlayout geht auf. Ist es größer, "
+                    "ignoriert er ESC 3 und benutzt seinen eigenen Abstand – "
                     "dann wandern die Etiketten weiter und der Zuschnitt muss "
                     "auf den gemessenen Wert umgerechnet werden.",
     },
     {
         "nr": 2,
         "titel": "Rasterquadrat",
-        "messen": f"Breite und Hoehe des schwarzen Quadrats. "
+        "messen": f"Breite und Höhe des schwarzen Quadrats. "
                   f"Soll: {BOX_SOLL_MM:.1f} x {BOX_SOLL_MM:.1f} mm".replace(".", ","),
         "bedeutet": "Ist es quadratisch, stimmt die Punktdichte in beiden "
-                    "Richtungen und der Weg ueber ein fertig gerechnetes Bild "
-                    "ist gangbar - damit liesse sich der QR-Code neben den "
-                    "Text setzen statt darueber. Ist es verzerrt, steht hier "
-                    "das Verhaeltnis, mit dem gerechnet werden muss.",
+                    "Richtungen und der Weg über ein fertig gerechnetes Bild "
+                    "ist gangbar – damit ließe sich der QR-Code neben den "
+                    "Text setzen statt darüber. Ist es verzerrt, steht hier "
+                    "das Verhältnis, mit dem gerechnet werden muss.",
     },
     {
         "nr": 3,
-        "titel": "Rueckzug",
+        "titel": "Rückzug",
         "messen": "Stehen dort zwei Balken untereinander oder nur einer?",
-        "bedeutet": "Nur einer (oder ein dickerer) heisst: der Drucker kann "
-                    "rueckwaerts, ESC j wirkt. Dann laesst sich der Totbereich "
-                    "am Etikettenanfang zurueckholen. Zwei getrennte Balken "
-                    "heissen: er kann es nicht, 'Rueckzug' bleibt auf 0.",
+        "bedeutet": "Nur einer (oder ein dickerer) heißt: der Drucker kann "
+                    "rückwärts, ESC j wirkt. Dann lässt sich der Totbereich "
+                    "am Etikettenanfang zurückholen. Zwei getrennte Balken "
+                    "heißen: er kann es nicht, 'Rückzug' bleibt auf 0.",
     },
     {
         "nr": 4,
-        "titel": "Lueckensensor",
-        "messen": "Faengt die Zeile mit den Pfeilen oben auf einem neuen "
+        "titel": "Lückensensor",
+        "messen": "Fängt die Zeile mit den Pfeilen oben auf einem neuen "
                   "Etikett an?",
-        "bedeutet": "Ja heisst: der Drucker findet die Trennluecke selbst. "
-                    "Dann 'Etikettenende' auf 'Drucker sucht die Luecke' "
-                    "stellen - danach kann sich kein Versatz mehr ueber die "
+        "bedeutet": "Ja heißt: der Drucker findet die Trennlücke selbst. "
+                    "Dann 'Etikettenende' auf 'Drucker sucht die Lücke' "
+                    "stellen – danach kann sich kein Versatz mehr über die "
                     "Rolle aufsummieren. Bleibt die Zeile stehen, wo sie war, "
                     "oder wirft er eine ganze Seite aus, kennt er GS FF nicht.",
     },
@@ -170,6 +170,6 @@ ANLEITUNG: list[dict] = [
                   "gedruckten Punkt.",
         "bedeutet": "Das ist der Streifen, den der Druckkopf nicht erreicht. "
                     "Unter 'Totbereich (mm)' eintragen; das Layout wird dann "
-                    "entsprechend gekuerzt.",
+                    "entsprechend gekürzt.",
     },
 ]
