@@ -747,28 +747,6 @@ $('#sim-form').addEventListener('submit', async (ev) => {
 
 // ---------------------------------------------------------------------- System
 
-// Ein Feld fuellen, ohne dass ein fehlendes den Rest mitreisst.
-//
-// `$('#weg').value = x` wirft, wenn es das Element nicht gibt - und riss damit
-// alles mit, was danach kam. Genau das ist passiert, als das Feld "Nachschub"
-// entfernt wurde: ein Browser mit noch altem Skript und schon neuem Aufbau
-// brach mitten im Fuellen ab, und die halbe Etikettenmaske blieb leer. Ohne
-// Fehlermeldung, ohne Hinweis - man sah nur leere Felder und hielt das
-// Update fuer kaputt.
-//
-// Aufbau und Skript werden hier nie gleichzeitig ausgetauscht (der Browser
-// hat das eine schon und das andere noch nicht), also darf ein Unterschied
-// zwischen beiden nicht mehr kosten als das eine Feld.
-function setzen(auswahl, wert) {
-  const el = $(auswahl);
-  if (!el) {
-    console.warn(`Feld ${auswahl} gibt es nicht mehr - uebersprungen`);
-    return;
-  }
-  if (el.type === 'checkbox') el.checked = Boolean(wert);
-  else el.value = wert;
-}
-
 async function loadSystem() {
   const [info, settings, events] = await Promise.all([
     get('/api/system'), get('/api/settings'), get('/api/events?limit=60'),
@@ -834,6 +812,10 @@ function settingValue(el) {
   return el.value;
 }
 
+// Gefuellt wird, was im Aufbau steht - nicht, was das Skript erwartet. Aufbau
+// und Skript kommen nie gleichzeitig im Browser an; frueher riss ein einziges
+// entferntes Feld ($('#weg').value = x wirft) den Rest der Maske mit, und die
+// halbe Etikettenmaske blieb nach einem Update ohne Fehlermeldung leer.
 function fillSettings(settings) {
   $$('[data-setting]').forEach((el) => {
     // Ein Feld, in dem gerade jemand tippt, nicht unter den Fingern
