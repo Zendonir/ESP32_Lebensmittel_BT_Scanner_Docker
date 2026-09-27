@@ -122,6 +122,7 @@ async def forget_device(device_id: str, session: AsyncSession = Depends(get_sess
         raise HTTPException(404, "Terminal unbekannt")
     await session.delete(row)
     await session.commit()
+    await hub.notify_ui("devices")
     return {"ok": True}
 
 
@@ -244,6 +245,12 @@ async def system_info(session: AsyncSession = Depends(get_session)):
         },
         "inventory": counts,
         "notify": notify.configured_channels(),
+        # Nur ja/nein - die Werte selbst gehoeren nicht in eine Antwort, die
+        # ohne Web-Passwort jeder im Netz abrufen kann. Die Oberflaeche macht
+        # daraus Hinweise, die sonst nur im Container-Protokoll standen.
+        "token_standard": settings.device_token == "change-me",
+        "update_knopf": deploy.konfiguriert(),
+        "passwortschutz": bool(settings.ui_password),
     }
 
 

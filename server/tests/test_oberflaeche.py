@@ -40,3 +40,21 @@ def test_kein_feld_doppelt():
     """Zwei Felder fuer denselben Wert ueberschreiben sich gegenseitig."""
     felder = _felder()
     assert len(felder) == len(set(felder))
+
+
+def test_systemauskunft_nennt_warnungen_ohne_geheimnisse():
+    """Die Oberflaeche braucht nur ja/nein - nie den Wert selbst.
+
+    /api/system ist ohne Web-Passwort fuer jeden im Netz abrufbar.
+    """
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.main import app
+
+    with TestClient(app) as c:
+        info = c.get("/api/system").json()
+    for schluessel in ("token_standard", "update_knopf", "passwortschutz"):
+        assert isinstance(info[schluessel], bool), schluessel
+    text = str(info)
+    assert settings.device_token not in text

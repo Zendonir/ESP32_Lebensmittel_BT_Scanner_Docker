@@ -303,8 +303,8 @@
         <button id="fw-fetch" class="ghost">Aus GitHub-Release holen</button>
       </div>
       <p class="muted">
-        Der Server hält die Abbilder, die Terminals holen sie sich dort ab.
-        Danach steht bei jedem Gerät oben „Update“ bereit.
+        Der Server hält die Firmware, die Terminals holen sie sich über das WLAN ab.
+        Ist ein neueres Abbild hinterlegt, wird bei jedem Terminal oben „Update“ anklickbar.
       </p>
       <div id="fw-list" class="mono" style="margin:10px 0"></div>
       <form class="row" id="fw-upload-form">
@@ -322,26 +322,33 @@
       </p>
     </div>
 
-    <div class="card" style="margin-top:14px">
-      <h2>Scan simulieren</h2>
-      <p class="muted">Schickt einen Code in den Workflow eines Terminals – zum Testen ohne BLE-Scanner.</p>
+    <details class="card" style="margin-top:14px" id="sim-card">
+      <summary><h2 style="display:inline">Scan simulieren</h2>
+        <span class="muted"> – zum Ausprobieren ohne Handscanner</span></summary>
+      <p class="muted">Schickt einen Code an ein verbundenes Terminal, als wäre er gescannt worden.</p>
       <form class="row" id="sim-form">
         <select id="sim-device"></select>
         <input id="sim-code" placeholder="Barcode oder LEB000123" style="flex:1;min-width:200px">
         <button class="primary">Senden</button>
       </form>
-    </div>
+    </details>
   </section>
 
   <!-- ---------------------------------------------------------------- System -->
   <section class="page" id="page-system">
     <div class="grid cols2">
       <div class="card"><h2>Server</h2>
-        <div id="sys-info" class="mono"></div>
-        <div class="row" style="margin-top:10px">
+        <div id="sys-warnings"></div>
+        <dl id="sys-info" class="facts"></dl>
+        <h3>Aktualisieren</h3>
+        <div class="row">
           <button id="update-check" class="ghost">Nach Updates suchen</button>
           <button id="update-apply" hidden>Jetzt aktualisieren</button>
         </div>
+        <p class="hint" id="update-knopf-hint" hidden>Automatisches Aktualisieren ist nicht
+          eingerichtet – die Suche sagt, ob es etwas Neues gibt und wie man es einspielt.
+          Damit der Knopf das selbst erledigt, braucht es Watchtower
+          (Vorlage: <code>deploy/truenas/watchtower.yaml</code>).</p>
         <div id="update-state" class="muted" style="margin-top:8px;font-size:13px"></div>
       </div>
       <div class="card">
@@ -373,17 +380,20 @@
     </div>
 
     <div class="card" style="margin-top:14px">
+      <h2>Sichern und prüfen</h2>
       <div class="row">
-        <h2 style="margin:0;flex:1">Wartung</h2>
-        <a href="/api/backup/db" download><button class="primary">Datenbank laden</button></a>
-        <a href="/api/export/json" download><button class="ghost">Nutzdaten (JSON)</button></a>
-        <button id="notify-test" class="ghost">Benachrichtigung testen</button>
-        <button id="expiry-now" class="ghost">MHD-Bericht jetzt</button>
+        <a href="/api/backup/db" download><button class="primary">Sicherung herunterladen</button></a>
+        <a href="/api/export/json" download><button class="ghost">Alle Daten als JSON</button></a>
+        <button id="notify-test" class="ghost">Testbenachrichtigung senden</button>
+        <button id="expiry-now" class="ghost">MHD-Bericht jetzt senden</button>
       </div>
+      <p class="hint">Die Sicherung ist die komplette Datenbank – damit lässt sich alles
+        wiederherstellen. Die JSON-Datei ist zum Weiterverarbeiten gedacht.</p>
     </div>
 
-    <div class="card" style="margin-top:14px">
-      <h2>Bestand aus Version 1 übernehmen</h2>
+    <details class="card" style="margin-top:14px">
+      <summary><h2 style="display:inline">Bestand aus Version 1 übernehmen</h2>
+        <span class="muted"> – nur einmal beim Umstieg nötig</span></summary>
       <p class="muted">
         Drei Dateiformen werden erkannt: eine <strong>.csv</strong> wie sie
         <code>SELECT * FROM current_inventory</code> im ersten Projekt liefert, eine
@@ -399,7 +409,7 @@
         <button class="primary" type="submit">Hochladen</button>
       </form>
       <div id="import-result" style="margin-top:10px"></div>
-    </div>
+    </details>
 
     <div class="card" style="margin-top:14px">
       <h2>Ereignisprotokoll</h2>

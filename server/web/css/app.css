@@ -326,3 +326,19 @@ p.hint { margin: 4px 0 8px; }
 
 a { color: var(--primary); }
 a:has(> button) { color: inherit; }
+
+/* ------------------------------------------------------- Kurzangaben (dl) */
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px; }
+dl.facts dt { color: var(--muted); }
+dl.facts dd { margin: 0; }
+
+details.card > summary { cursor: pointer; list-style: none; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::before { content: "▸ "; color: var(--muted); }
+details.card[open] > summary::before { content: "▾ "; }
+details.card[open] > summary { margin-bottom: 12px; }
+
+ol.steps { margin: 8px 0 0; padding-left: 22px; line-height: 1.55; }
+ol.steps li { margin-bottom: 6px; }
+ol.steps code { background: var(--surface-2); padding: 1px 6px; border-radius: 4px; }
+#sys-warnings .notice { margin: 0 0 14px; }

@@ -553,6 +553,31 @@ document.addEventListener('click', async (ev) => {
 
 // ------------------------------------------------------------------- Terminals
 
+// Noch kein Terminal: statt einer leeren Zeile die Schritte, mit denen eins
+// dazukommt - samt der Adresse, die es braucht. Die steht sonst nirgends in
+// der Oberflaeche, und das Portal am Terminal fragt genau danach.
+function terminalEinrichten(eingebettet = false) {
+  const sicher = location.protocol === 'https:';
+  const port = location.port || (sicher ? '443' : '80');
+  return `<div class="${eingebettet ? '' : 'card'}" style="grid-column:1/-1">
+    ${eingebettet ? '' : '<h2>Noch kein Terminal verbunden</h2>'}
+    <p class="muted" style="margin:0">So kommt eins dazu:</p>
+    <ol class="steps">
+      <li>Terminal einschalten. Findet es kein bekanntes WLAN, öffnet es ein eigenes:
+        <code>Lebensmittel-Terminal</code>, Passwort <code>12345678</code>.</li>
+      <li>Mit dem Handy in dieses WLAN gehen und <code>192.168.4.1</code> öffnen
+        (meist öffnet sich die Seite von selbst).</li>
+      <li>Heim-WLAN auswählen und dazu eintragen:
+        Server <code>${esc(location.hostname)}</code>,
+        Port <code>${esc(port)}</code>${sicher ? ', Verschlüsselung <code>HTTPS / WSS</code>' : ''},
+        Geräte-Token = der Wert von <code>DEVICE_TOKEN</code> aus der Container-Konfiguration.</li>
+      <li>Speichern. Das Terminal startet neu und erscheint hier nach wenigen Sekunden.</li>
+    </ol>
+    <p class="hint">Zeigt das Terminal „Kein Server“, stimmt meist das Token nicht –
+      es muss Zeichen für Zeichen gleich sein.</p>
+  </div>`;
+}
+
 // Der Update-Knopf bleibt sichtbar, sagt aber beim Darueberfahren, warum er
 // gerade nichts bringt - ein verschwindender Knopf laesst einen nur raten.
 function updateHint(d) {
@@ -579,43 +604,77 @@ async function loadFirmware() {
     : '<span class="muted">Noch kein Abbild hinterlegt.</span>';
 }
 
-async function loadDevices() {
-  state.devices = await get('/api/devices');
-  $('#devices-list').innerHTML = state.devices.length ? state.devices.map((d) => {
-    const t = d.telemetry || {};
-    const scanner = t.scanner || {};
-    return `<div class="card">
-      <div class="row"><h2 style="margin:0;flex:1">
+// WLAN-Empfang in Worten; -67 dBm sagt nur jemandem etwas, der es schon weiss.
+function wlanText(rssi) {
+  if (rssi === undefined || rssi === null) return '–';
+  const wort = rssi >= -60 ? 'gut' : rssi >= -72 ? 'mittel' : 'schwach';
+  return `${wort} <span class="muted">(${rssi} dBm)</span>`;
+}
+
+function deviceCard(d) {
+  const t = d.telemetry || {};
+  const scanner = t.scanner || {};
+  const kopf = `<div class="row"><h2 style="margin:0;flex:1">
         <span class="dot ${d.online ? 'on' : ''}"></span>${esc(d.name || d.device_id)}</h2>
-        <span class="pill">${esc(d.firmware || '?')}</span></div>
-      <div class="muted mono">${esc(d.device_id)} · ${esc(d.ip)} · zuletzt ${fmtTime(d.last_seen)}</div>
-      <div class="telemetry">
-        <div><b>${t.heap ? Math.round(t.heap / 1024) + ' K' : '–'}</b><span>Heap frei</span></div>
-        <div><b>${t.min_heap ? Math.round(t.min_heap / 1024) + ' K' : '–'}</b><span>Heap min</span></div>
-        <div><b>${t.rssi ?? '–'}</b><span>WLAN dBm</span></div>
-        <div><b>${t.uptime ? Math.floor(t.uptime / 3600) + ' h' : '–'}</b><span>Laufzeit</span></div>
-        <div><b>${scanner.connected ? 'ja' : 'nein'}</b><span>Scanner</span></div>
-        <div><b>${scanner.battery >= 0 ? scanner.battery + ' %' : '–'}</b><span>Scanner-Akku</span></div>
-      </div>
+        ${d.firmware ? `<span class="pill">Firmware ${esc(d.firmware)}</span>` : ''}</div>
+      <div class="muted">${esc(d.device_id)}${d.ip ? ` · ${esc(d.ip)}` : ''}</div>`;
+
+  // Ein getrenntes Terminal zeigte dieselbe Karte wie ein verbundenes, nur mit
+  // Strichen in jedem Feld - und Knoepfen, die ins Leere liefen.
+  if (!d.online) {
+    return `<div class="card">${kopf}
+      <div class="notice" style="margin-top:12px"><span><b>Nicht verbunden</b> – zuletzt gesehen
+        ${fmtTime(d.last_seen) || 'nie'}. Meist ist das Terminal aus oder hat kein WLAN.
+        Zeigt es „Kein Server“, stimmt das Geräte-Token nicht.</span></div>
       <div class="row" style="margin-top:12px">
+        <button class="sm ghost" data-dev-forget="${esc(d.device_id)}">Aus der Liste entfernen</button>
+      </div></div>`;
+  }
+  return `<div class="card">${kopf}
+      <div class="telemetry">
+        <div><b>${scanner.connected ? 'verbunden' : 'nicht verbunden'}</b><span>Handscanner</span></div>
+        <div><b>${scanner.battery >= 0 ? scanner.battery + ' %' : '–'}</b><span>Scanner-Akku</span></div>
+        <div><b>${wlanText(t.rssi)}</b><span>WLAN</span></div>
+        <div><b>${t.uptime ? Math.floor(t.uptime / 3600) + ' h' : '–'}</b><span>Läuft seit</span></div>
+        <div><b>${t.heap ? Math.round(t.heap / 1024) + ' K' : '–'}</b><span>Speicher frei</span></div>
+        <div><b>${t.min_heap ? Math.round(t.min_heap / 1024) + ' K' : '–'}</b><span>Speicher min.</span></div>
+      </div>
+      <label class="field" style="margin-top:12px">Lagert ein in
         <select data-dev-loc="${esc(d.device_id)}">
           ${state.locations.map((l) => `<option ${l.name === d.active_location ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
-        </select>
+        </select></label>
+      <div class="row" style="margin-top:10px">
         <button class="sm" data-dev-beep="${esc(d.device_id)}">Ton</button>
-        <button class="sm" data-dev-update="${esc(d.device_id)}"${updateHint(d)}>Update</button>
-        <button class="sm danger" data-dev-reboot="${esc(d.device_id)}">Neustart</button>
+        <button class="sm" data-dev-update="${esc(d.device_id)}"${updateHint(d)}>Firmware-Update</button>
+        <button class="sm" data-dev-reboot="${esc(d.device_id)}">Neustart</button>
       </div></div>`;
-  }).join('') : '<div class="card empty">Noch kein Terminal verbunden.</div>';
+}
 
-  $('#sim-device').innerHTML = state.devices.map((d) =>
+async function loadDevices() {
+  state.devices = await get('/api/devices');
+  // Die Anleitung bleibt erreichbar, wenn schon Terminals da sind - fuer das
+  // zweite oder ein ersetztes Geraet.
+  $('#devices-list').innerHTML = state.devices.length
+    ? state.devices.map(deviceCard).join('')
+      + `<details class="card" style="grid-column:1/-1"><summary><h2 style="display:inline">Weiteres Terminal einrichten</h2></summary>
+          ${terminalEinrichten(true)}</details>`
+    : terminalEinrichten();
+
+  const sim = $('#sim-card');
+  if (sim) sim.hidden = !state.devices.some((d) => d.online);
+  $('#sim-device').innerHTML = state.devices.filter((d) => d.online).map((d) =>
     `<option value="${esc(d.device_id)}">${esc(d.name || d.device_id)}</option>`).join('');
 }
 
 document.addEventListener('click', async (ev) => {
-  const b = ev.target.closest('button[data-dev-beep],button[data-dev-reboot],button[data-dev-update]');
+  const b = ev.target.closest('button[data-dev-beep],button[data-dev-reboot],button[data-dev-update],button[data-dev-forget]');
   if (!b) return;
   try {
-    if (b.dataset.devBeep) {
+    if (b.dataset.devForget) {
+      if (!confirm('Terminal aus der Liste entfernen?\n\nMeldet es sich wieder, erscheint es von selbst neu.')) return;
+      await del(`/api/devices/${encodeURIComponent(b.dataset.devForget)}`);
+      await loadDevices();
+    } else if (b.dataset.devBeep) {
       await post(`/api/devices/${b.dataset.devBeep}/beep`); toast('Ton gesendet');
     } else if (b.dataset.devUpdate) {
       if (!confirm('Firmware jetzt aufspielen? Das Terminal startet danach neu.')) return;
@@ -719,15 +778,36 @@ async function loadSystem() {
   // Fassung lesbar statt als 40-Zeichen-Hash: Zweig bzw. Tag, kurzer Commit,
   // Baudatum. Ohne das war die Frage "laeuft hier der aktuelle Stand?" vom
   // Panel aus nicht zu beantworten.
-  const stand = [esc(info.version)];
-  if (info.commit_kurz) stand.push(esc(info.commit_kurz));
-  if (info.gebaut) stand.push(fmtTime(info.gebaut));
-  $('#sys-info').innerHTML = `
-    Fassung ${stand.join(' · ')}<br>Python ${esc(info.python)}<br>
-    Datenbank ${esc(info.database)}<br>Zeitzone ${esc(info.timezone)}<br>
-    Laufzeit ${Math.floor(info.uptime / 3600)} h ${Math.floor((info.uptime % 3600) / 60)} min<br>
-    Terminals online ${info.devices.count}<br>
-    Kanäle ${Object.entries(info.notify).filter(([, v]) => v).map(([k]) => k).join(', ') || 'keine'}`;
+  const stand = info.aus_abbild ? [esc(info.version)] : ['Entwicklungsstand (nicht aus einem Abbild)'];
+  if (info.commit_kurz) stand.push(`<span class="mono">${esc(info.commit_kurz)}</span>`);
+  if (info.gebaut) stand.push(`gebaut ${fmtTime(info.gebaut)}`);
+  const kanaele = Object.entries(info.notify || {}).filter(([, v]) => v).map(([k]) => (
+    { ntfy: 'ntfy', telegram: 'Telegram', mqtt: 'MQTT' }[k] || k));
+  const laufzeit = info.uptime >= 86400
+    ? `${Math.floor(info.uptime / 86400)} Tage ${Math.floor((info.uptime % 86400) / 3600)} h`
+    : `${Math.floor(info.uptime / 3600)} h ${Math.floor((info.uptime % 3600) / 60)} min`;
+  $('#sys-info').innerHTML = [
+    ['Fassung', stand.join(' · ')],
+    ['Terminals verbunden', String(info.devices.count)],
+    ['Benachrichtigungen', kanaele.length ? esc(kanaele.join(', ')) : 'keine eingerichtet'],
+    ['Passwortschutz', info.passwortschutz ? 'an' : 'aus'],
+    ['Datenbank', esc(info.database.startsWith('sqlite') ? 'SQLite' : info.database)],
+    ['Zeitzone', esc(info.timezone)],
+    ['Läuft seit', laufzeit],
+  ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+
+  // Was bisher nur im Container-Protokoll stand, wo es niemand liest.
+  const warnungen = [];
+  if (info.token_standard) {
+    warnungen.push(`<div class="notice warn"><span><b>Das Geräte-Token steht noch auf dem
+      Standardwert.</b> Jeder im Netz könnte sich als Terminal ausgeben. In der
+      Container-Konfiguration <code>DEVICE_TOKEN</code> auf einen eigenen Wert setzen
+      (z. B. <code>openssl rand -hex 24</code>) und denselben Wert im WLAN-Portal des
+      Terminals eintragen.</span></div>`);
+  }
+  $('#sys-warnings').innerHTML = warnungen.join('');
+  const hint = $('#update-knopf-hint');
+  if (hint) hint.hidden = Boolean(info.update_knopf);
 
   fillSettings(settings);
 
