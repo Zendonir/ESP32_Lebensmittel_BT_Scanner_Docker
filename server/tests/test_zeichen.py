@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from app.device import protocol
 from app.services import labels
-from app.services.zeichen import latin1
+from app.services import hochformat
+from app.services.zeichen import latin1, latin1_tief
 
 VOM_IPHONE = "„Omas Suppe“ – Rest…"
 
@@ -34,7 +35,12 @@ def test_etikett_enthaelt_nur_druckbare_zeichen():
             "location": "Kühlschrank", "added_date": "2026-09-27"}
     for layout in labels.LAYOUTS:
         payload = labels.render_label(item, {"label_layout": layout, "household": "Fam. Müller – Nord"})
-        texte = [str(b.get(k, "")) for b in payload["blocks"] for k in ("v", "k")]
+        texte = [str(b.get(k, "")) for b in payload["blocks"]
+                 if b["t"] != "raster" for k in ("v", "k")]
+        if layout in labels.BILD_LAYOUTS:
+            # Ein Bild hat keine Textbloecke - geprueft wird, was hineingezeichnet
+            # wurde, und zwar aus demselben umgesetzten Artikel wie im Druck.
+            texte = hochformat.textzeilen(latin1_tief(item), {}, 216, 384)
         schlecht = [t for t in texte if not _nur_latin1(t)]
         assert not schlecht, f"{layout}: {schlecht}"
         assert any("Omas Suppe" in t for t in texte), layout

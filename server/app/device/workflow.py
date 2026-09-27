@@ -111,6 +111,10 @@ class DeviceSession:
     inv_sort: str = "mhd"
     inv_search: str = ""
     roll_size_draft: str = ""
+    # Was die Firmware dieser Verbindung kann, aus ihrem hello(). None heisst:
+    # noch nicht gemeldet. Die Datenbank kennt nur den Stand der *letzten*
+    # Verbindung - direkt nach einem Firmware-Update waere der veraltet.
+    caps: set[str] | None = None
 
     @property
     def current(self) -> str:
@@ -1240,7 +1244,12 @@ async def _scan_barcode(session, sess, code) -> None:
 PRINT_BATCH = 4
 
 # So lange darf ein Auftrag beim Geraet liegen, bevor er als verloren gilt.
-PRINT_STALE_SECONDS = 60
+# Ein Hochformat-Etikett ist ein Bild und braucht bei 9600 Baud rund zehn
+# Sekunden; mit vier Auftraegen beim Geraet kommt die Rueckmeldung zum
+# letzten also erst nach gut 40 s. Mit 60 s lag das zu knapp an der Grenze -
+# ein Auftrag, der nur langsam war, waere erneut gesendet und doppelt
+# gedruckt worden.
+PRINT_STALE_SECONDS = 180
 
 
 async def flush_print_queue(
@@ -1275,8 +1284,8 @@ async def flush_print_queue(
         offen = ("queued", "sent")
         platz = PRINT_BATCH
     else:
-        # Auftraege, zu denen seit einer Minute keine Rueckmeldung kam, gelten
-        # als verloren und gehen zurueck in die Schlange.
+        # Auftraege, zu denen seit PRINT_STALE_SECONDS keine Rueckmeldung kam,
+        # gelten als verloren und gehen zurueck in die Schlange.
         #
         # Ein Etikett braucht unter zwei Sekunden. Bleibt die Antwort aus, ist
         # das Geraet zwischendurch weggewesen, ohne dass der Server es gemerkt
@@ -1317,11 +1326,28 @@ async def flush_print_queue(
         )
     ).scalars().all()
 
+    # Was das Terminal kann, aus seinem hello() in *dieser* Verbindung. Ein
+    # Hochformat-Etikett an eine Firmware ohne Bildstreifen zu schicken
+    # hiesse: sie wirft leeres Papier aus und meldet Erfolg. Solange das
+    # hello noch aussteht, bleibt so ein Auftrag einfach liegen - der
+    # Aufruf nach dem hello schickt ihn dann los oder sagt, woran es liegt.
+    kann = session_for(device_id).caps
+
     sent = 0
     for job in jobs:
         if job.attempts >= 5:
             job.status = "failed"
             job.error = job.error or "zu viele Versuche"
+            continue
+        braucht = (job.payload or {}).get("braucht")
+        if braucht and kann is None:
+            continue
+        if braucht and braucht not in kann:
+            job.status = "failed"
+            job.error = (
+                "Firmware des Terminals kann kein Hochformat - "
+                "unter Terminals ein Firmware-Update einspielen"
+            )
             continue
         if await conn.send(proto.print_job(job.id, job.payload)):
             job.status = "sent"

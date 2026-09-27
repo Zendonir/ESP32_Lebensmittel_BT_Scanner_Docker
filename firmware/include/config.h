@@ -154,11 +154,13 @@
 
 #define WS_PATH "/ws/device"
 
-// Groesste Nachricht, die vom Server angenommen wird. Grosszuegig bemessen -
-// die laengste Bildschirmbeschreibung (Inventarliste mit Suchbegriff) liegt
-// bei rund 3 KB. Alles darueber ist kein Bildschirm mehr, sondern ein Fehler
-// auf der Gegenseite, und wird verworfen statt den Heap zu fuellen.
-#define MAX_MESSAGE_BYTES 8192
+// Groesste Nachricht, die vom Server angenommen wird. Die laengste
+// Bildschirmbeschreibung (Inventarliste mit Suchbegriff) liegt bei rund 3 KB,
+// ein Hochformat-Etikett mit seinen gepackten Bildstreifen bei 7-9 KB. Alles
+// darueber ist ein Fehler auf der Gegenseite und wird verworfen, statt den
+// Heap zu fuellen. Unter 15 KB bleiben: mehr nimmt die WebSocket-Bibliothek
+// ohnehin nicht an (WEBSOCKETS_MAX_DATA_SIZE).
+#define MAX_MESSAGE_BYTES 14336
 
 // ============================================================================
 // Zeitverhalten

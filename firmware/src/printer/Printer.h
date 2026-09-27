@@ -22,21 +22,27 @@ public:
     // dem Server einen Fehlschlag, statt ihn stillschweigend zu verlieren).
     bool enqueue(int jobId, JsonDocument &job);
 
-    // Hoechstens einen Auftrag pro Aufruf drucken.
-    // Gibt die abgeschlossene Auftragsnummer zurueck, sonst 0.
+    // Am aktuellen Auftrag weiterdrucken - Block fuer Block, und nur so viel,
+    // wie gerade in den Sendepuffer passt. Ein Hochformat-Etikett ist ein Bild
+    // von rund 11 KB; bei 9600 Baud sind das zehn Sekunden, und am Stueck
+    // geschrieben stuende der Loop so lange (Touch, Scanner, Server).
+    // Gibt die Auftragsnummer zurueck, sobald der Auftrag ganz gesendet ist,
+    // sonst 0.
     int  process(bool &ok, String &error);
 
     size_t queued() const { return _count; }
     void   setPaperChars(uint8_t chars) { _chars = chars; }
 
 private:
-    void writeBlocks(JsonArray blocks);
+    void   writeBlock(JsonObject block);
+    size_t blockCost(JsonObject block) const;
     void lineSpacing(uint8_t dots);
     void textLine(const String &text, uint8_t align, bool bold, bool large, uint16_t height);
     void row(const String &key, const String &value, bool underline, uint16_t height);
     void separator(uint16_t height);
     void qr(const String &data, uint16_t reserved);
-    void raster(const char *b64, size_t b64len, uint16_t w, uint16_t h);
+    void raster(const char *b64, size_t b64len, uint16_t w, uint16_t h,
+                const char *mode, bool packed);
     void code128(const String &data, uint8_t height);
     void feedDots(uint16_t dots);
     void formFeed();
@@ -57,9 +63,28 @@ private:
     // muesste process() das Bild ueber mehrere Durchlaeufe verteilen.
     static constexpr size_t MAX_RASTER_TRAFFIC = 4096;
 
+    // Sendepuffer (setTxBufferSize in begin()) und wie viel davon ein Block
+    // hoechstens abwarten darf. Ein Block, der mehr verlangt, wird trotzdem
+    // geschrieben, sobald der Puffer so leer ist - sonst wartete er ewig.
+    static constexpr size_t TX_BUFFER   = 8192;
+    static constexpr size_t MAX_WAIT_FOR = 6144;
+    // Mehr als der Hardware-FIFO (128 Byte) - siehe process().
+    static constexpr size_t MIN_FREE    = 256;
+
+    // Die Auftraege liegen im PSRAM. Ein Hochformat-Etikett bringt einige
+    // Kilobyte Bilddaten mit, vier davon sind gleichzeitig unterwegs - im
+    // internen Speicher, den sich WLAN, BLE und die Anzeige teilen, waere das
+    // ein Viertel des Freien. Nur Daten, keine Task-Stacks (siehe CLAUDE.md).
+    struct PsramAllocator : ArduinoJson::Allocator {
+        void *allocate(size_t size) override;
+        void  deallocate(void *ptr) override;
+        void *reallocate(void *ptr, size_t size) override;
+    };
+    static PsramAllocator psram;
+
     struct Job {
         int jobId = 0;
-        JsonDocument doc;
+        JsonDocument doc{&psram};
     };
 
     Job     _queue[MAX_QUEUE];
@@ -67,6 +92,11 @@ private:
     uint8_t _chars = 32;
     bool    _rotate = false;   // Hochkant: Text um 90 Grad gedreht
     bool    _ready = false;
+
+    // Der Auftrag an der Spitze der Warteschlange ist angefangen, bis Block
+    // `_nextBlock` ist er auf der Leitung.
+    bool    _active = false;
+    size_t  _nextBlock = 0;
 
     // Zuletzt gesetzter Zeilenabstand (`ESC 3 n`). -1 = unbekannt, der
     // naechste Block setzt ihn in jedem Fall.

@@ -22,7 +22,9 @@ server/app/
   device/        protocol · hub · workflow · routes
   services/      inventory · labels · calibration · categories · openfoodfacts ·
                  notify · scheduler · dates · settings_store · seed · importer ·
-                 firmware · updates · deploy · zeichen
+                 firmware · updates · deploy · zeichen · hochformat
+  fonts/         DejaVu Sans fuer das Hochformat-Bild (im Repo, damit Test und
+                 Container gleich umbrechen)
 server/web/      index.html · mobile.html · js/ · css/ (kein Build-Schritt)
                  js/vendor/  ZXing – Barcodes aus der Handykamera, siehe
                              das README dort
@@ -87,7 +89,9 @@ cd firmware && pio run --target upload # flashen
 * **Ein Loop, keine eigenen Tasks.** Version 1 hatte vier davon, jeder mit
   Schutzflags, die bei einem fehlgeschlagenen `xTaskCreate` hängenblieben.
 * **Nichts blockieren.** Kein `delay()` außer den 5 ms am Loop-Ende, keine
-  synchronen HTTP-Aufrufe, höchstens ein Etikett pro Durchlauf.
+  synchronen HTTP-Aufrufe. Druckaufträge gehen Block für Block hinaus, und
+  nur so viel, wie gerade in den Sendepuffer passt (`Printer::process`) – ein
+  Hochformat-Etikett braucht bei 9600 Baud rund zehn Sekunden.
 * `esp_task_wdt_reset()` steht als **erste** Zeile im Loop – danach darf jeder
   Zweig früh zurückkehren.
 * **Task-Stacks niemals in PSRAM.** PSRAM hängt am selben Cache-Controller wie
@@ -130,7 +134,12 @@ cd firmware && pio run --target upload # flashen
 | Druckauftrag verschwindet | nie direkt senden, immer über `print_jobs` |
 | Terminal zeigt „Kein Server" | Token in `.env` und im WLAN-Portal vergleichen |
 | Etikett läuft auf das nächste über | Totbereich in den Einstellungen eintragen; der Druckkopf erreicht den Anfang nicht |
-| Strichcode steht quer zur Schrift | `ESC V` dreht nur Zeichen – gedreht geht nur der QR-Code |
+| Etikett soll um 90° gedreht (hochkant) gedruckt werden | Layout `hochformat`: der Server zeichnet ein Bild (`services/hochformat.py`), dreht es und schickt es als gepackte Rasterstreifen. `ESC V` dreht nur Zeichen, die Zeile nicht – und `rotate` stand nie in der Druckauftrag-Nachricht, der alte Schalter "Text drehen" wirkte also gar nicht |
+| Hochformat druckt leer oder verzerrt | Bildmodus (`printer.raster_mode`) aus dem Messstreifen, Punkt 2: das der drei Quadrate A/B/C, das maßhaltig ist. Leere Etiketten mit Meldung "Firmware kann kein Hochformat": Terminal meldet `raster2` nicht in `caps` |
+| Hochformat-Auftrag wird nach Firmware-Update verworfen | Fähigkeiten gelten je Verbindung (`DeviceSession.caps` aus hello), nicht aus der Datenbank – vor dem hello bleiben solche Aufträge liegen, statt an veralteten Angaben zu scheitern |
+| Rasterblock druckt Müll oder gar nicht | Beim Rasterblock ist `h` die Zeilenzahl der Daten – `render_label` darf sie nicht überschreiben. Bei `ESC * 33` ein Vielfaches von 24, sonst wird das letzte Band zu lang |
+| Große Nachricht kommt nie an | WebSockets nimmt höchstens 15 KB, die Firmware 14 KB (`MAX_MESSAGE_BYTES`). Bilddaten deshalb PackBits-gepackt (`z: "rle"`) |
+| `write()` blockiert trotz Prüfung | `availableForWrite()` meldet bei *vollem* Sendepuffer den Platz im 128-Byte-FIFO statt 0. Deshalb immer mindestens `MIN_FREE` (256) verlangen |
 | Folgeetiketten wandern | Ein Etikett muss **genau** eine Teilung Papier verbrauchen, siehe `total_dots()`. Damit das keine Hoffnung bleibt, traegt jeder Block seine Hoehe in `h`, und die Firmware setzt `ESC 3` ausdruecklich darauf - `ESC @` stellt sonst den Standardabstand des Druckers ein (~34 statt 24 Punkte) |
 | QR-Code wird nicht gelesen | Module muessen quadratisch sein und eine Ruhezone haben; die Reservierung ist ein Vielfaches von 8, weil `ESC *` in Baendern druckt |
 | Einstellung wirkt nicht | Erst pruefen, ob sie ueberhaupt gelesen wird - `post_feed_dots`, `printer.qr` und `printer.code128` standen jahrelang in der Oberflaeche, ohne dass sie jemand auswertete |

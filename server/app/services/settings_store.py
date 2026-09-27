@@ -74,6 +74,17 @@ DEFAULTS: dict[str, Any] = {
         # Druckkopf und Abrisskante zurueck. 0 = aus, weil nicht jeder
         # ESC/POS-Drucker rueckwaerts fahren kann.
         "backfeed_dots": 0,
+        # Nur fuer Layouts, die als Bild gedruckt werden (Hochformat).
+        #
+        # Welcher Rasterbefehl auf einem namenlosen Drucker masshaltig
+        # druckt, laesst sich nicht vorher wissen - der Messstreifen druckt
+        # dafuer drei Quadrate, eines je Modus. "gsv0" ist der Befehl, den
+        # die meisten Thermodrucker fuer Bilder verstehen, deshalb die
+        # Vorgabe.
+        "raster_mode": "gsv0",         # gsv0 | esc33 | esc0
+        # Wie das Hochformat-Bild auf dem Papier liegt. Steht das Etikett
+        # beim Lesen auf dem Kopf, die andere Richtung waehlen.
+        "label_portrait_turn": "links",  # links | rechts
     },
 }
 

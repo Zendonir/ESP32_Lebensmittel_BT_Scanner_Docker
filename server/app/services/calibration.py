@@ -37,15 +37,26 @@ LINE_SOLL_MM = LINE_COUNT * LINE_HEIGHT / DOTS_PER_MM
 # Das Rasterquadrat. Quadratisch, damit ein Unterschied zwischen waagerechter
 # und senkrechter Punktdichte sofort auffaellt - genau der Fehler, der den
 # QR-Code unlesbar gemacht hat.
-BOX_DOTS = 80
+#
+# Es kommt dreimal, einmal je Rasterbefehl (A, B, C). Welcher davon auf einem
+# namenlosen Drucker masshaltig druckt, steht in keinem Datenblatt; gedruckt
+# nebeneinander sieht man es sofort. Der passende gehoert dann unter
+# "Bildmodus" - von ihm haengt das Hochformat ab, das als Bild gedruckt wird.
+# 72 statt 80 Punkte: `ESC * 33` druckt in Baendern von 24 Zeilen, und ein
+# angebrochenes Band waere schon wieder eine Verzerrung, die der Drucker gar
+# nicht hat. Nicht groesser, weil der Streifen auch auf einer Firmware drucken
+# soll, die noch keine Bildstreifen kennt - dort muss er in einem Stueck in
+# den Sendepuffer und die Nachricht unter 8 KB bleiben.
+BOX_DOTS = 72
 BOX_SOLL_MM = BOX_DOTS / DOTS_PER_MM
+BOX_MODI = (("A", "GS v 0", "gsv0"), ("B", "ESC * 33", "esc33"), ("C", "ESC * 0", "esc0"))
 
 # Rueckzug fuer den Test. 40 Punkte = 5 mm, weit genug, um mit blossem Auge
 # zu sehen, ob er stattgefunden hat.
 BACKFEED_DOTS = 40
 
 
-def _raster(width: int, height: int, gefuellt: bool = True) -> dict:
+def _raster(width: int, height: int, gefuellt: bool = True, modus: str = "") -> dict:
     """Eine schwarze Flaeche als Rasterblock.
 
     Zeilenweise, ein Bit je Punkt, jede Zeile auf ganze Bytes aufgefuellt,
@@ -62,12 +73,17 @@ def _raster(width: int, height: int, gefuellt: bool = True) -> dict:
         if rest and gefuellt:
             zeile[-1] = (0xFF << (8 - rest)) & 0xFF
         daten += zeile
-    return {
+    block = {
         "t": "raster",
         "w": width,
         "h": height,
         "d": base64.b64encode(bytes(daten)).decode("ascii"),
     }
+    # Ohne Angabe druckt die Firmware wie bisher mit `ESC * 0` - auch eine
+    # aeltere, die `mode` nicht kennt.
+    if modus:
+        block["mode"] = modus
+    return block
 
 
 def breite_dots(line_mm: float) -> int:
@@ -96,8 +112,11 @@ def build(line_mm: float = 48.0, chars: int = 32) -> dict:
         zeile(""),
         # --- 2: stimmt die Rastergeometrie? ------------------------------
         zeile("2) Rasterquadrat", bold=True),
-        _raster(BOX_DOTS, BOX_DOTS),
         zeile(f"Soll: {BOX_SOLL_MM:.1f} x {BOX_SOLL_MM:.1f} mm".replace(".", ",")),
+    ]
+    for buchstabe, name, modus in BOX_MODI:
+        blocks += [zeile(f"{buchstabe}: {name}"), _raster(BOX_DOTS, BOX_DOTS, modus=modus)]
+    blocks += [
         zeile(""),
         # --- 3: kann der Drucker rueckwaerts? ----------------------------
         zeile("3) Rückzug", bold=True),
@@ -135,13 +154,15 @@ ANLEITUNG: list[dict] = [
     {
         "nr": 2,
         "titel": "Rasterquadrat",
-        "messen": f"Breite und Höhe des schwarzen Quadrats. "
+        "messen": f"Breite und Höhe der drei schwarzen Quadrate A, B und C. "
                   f"Soll: {BOX_SOLL_MM:.1f} x {BOX_SOLL_MM:.1f} mm".replace(".", ","),
-        "bedeutet": "Ist es quadratisch, stimmt die Punktdichte in beiden "
-                    "Richtungen und der Weg über ein fertig gerechnetes Bild "
-                    "ist gangbar – damit ließe sich der QR-Code neben den "
-                    "Text setzen statt darüber. Ist es verzerrt, steht hier "
-                    "das Verhältnis, mit dem gerechnet werden muss.",
+        "bedeutet": "Das Quadrat, das genau so groß und wirklich quadratisch "
+                    "ist, zeigt den Bildbefehl, den dein Drucker richtig "
+                    "versteht. Diesen Buchstaben unter 'Bildmodus' wählen – "
+                    "davon hängt das Hochformat ab, das als Bild gedruckt "
+                    "wird. Fehlt ein Quadrat ganz, kennt der Drucker diesen "
+                    "Befehl nicht. Sind alle verzerrt, kann er kein "
+                    "Hochformat.",
     },
     {
         "nr": 3,

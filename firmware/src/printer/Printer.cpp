@@ -1,12 +1,32 @@
 #include "Printer.h"
+#include "PackBits.h"
 
 #include <qrcode.h>
 
 #include "mbedtls/base64.h"
+#include <esp_heap_caps.h>
 
 Printer printer;
 
 static HardwareSerial uart(1);
+
+Printer::PsramAllocator Printer::psram;
+
+// Grosse Auftraege ins PSRAM; gibt es keins (oder ist es voll), in den
+// normalen Heap - ein Etikett ist wichtiger als der Ort, an dem es liegt.
+void *Printer::PsramAllocator::allocate(size_t size) {
+    void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p ? p : malloc(size);
+}
+
+void Printer::PsramAllocator::deallocate(void *ptr) {
+    heap_caps_free(ptr);   // gibt beides frei, PSRAM wie internen Heap
+}
+
+void *Printer::PsramAllocator::reallocate(void *ptr, size_t size) {
+    void *p = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p ? p : realloc(ptr, size);
+}
 
 void Printer::begin(uint32_t baud) {
     // Grosser Sendepuffer: bei 9600 Baud braucht ein Etikett rund eine halbe
@@ -18,7 +38,7 @@ void Printer::begin(uint32_t baud) {
     // kommen die Textzeilen. Mit 2 KB und der alten Schwelle von 1 KB konnte
     // ein Etikett groesser sein als der freie Platz - dann lief write() doch
     // wieder auf die 9600-Baud-Leitung und der Loop stand.
-    uart.setTxBufferSize(8192);
+    uart.setTxBufferSize(TX_BUFFER);
     uart.begin(baud, SERIAL_8N1, PRINTER_RX, PRINTER_TX);
     _ready = true;
     reset();
@@ -86,30 +106,50 @@ int Printer::process(bool &ok, String &error) {
         const int id = _queue[_head].jobId;
         _head = (_head + 1) % MAX_QUEUE;
         _count--;
+        _active = false;
         return id;
     }
 
-    // Erst anfangen, wenn das komplette Etikett in den Sendepuffer passt.
-    // Sonst laeuft der Puffer bei mehreren Auftraegen hintereinander voll und
-    // write() wartet doch wieder auf die 9600-Baud-Leitung. Der Auftrag bleibt
-    // solange in der Warteschlange und kommt im naechsten Durchlauf dran.
-    if (uart.availableForWrite() < 6144) return 0;
-
     Job &job = _queue[_head];
     const int id = job.jobId;
+    JsonArray blocks = job.doc["blocks"].as<JsonArray>();
 
-    _chars = job.doc["chars"] | 32;
-    _rotate = job.doc["rotate"] | false;
-    reset();
-    writeBlocks(job.doc["blocks"].as<JsonArray>());
+    if (!_active) {
+        // Erst anfangen, wenn wenigstens der Anfang Platz hat. Danach geht es
+        // Block fuer Block weiter, jeweils sobald der Sendepuffer genug frei
+        // hat - und bis dahin kehrt der Aufruf sofort zurueck.
+        if ((size_t)uart.availableForWrite() < MIN_FREE) return 0;
+        _chars = job.doc["chars"] | 32;
+        _rotate = job.doc["rotate"] | false;
+        reset();
+        _active = true;
+        _nextBlock = 0;
+    }
+
+    size_t index = 0;
+    for (JsonObject block : blocks) {
+        if (index++ < _nextBlock) continue;
+        // Nie write() auf die 9600-Baud-Leitung warten lassen: dann stuende
+        // der Loop. Passt der Block nicht, im naechsten Durchlauf weiter.
+        //
+        // Mindestens MIN_FREE, auch fuer kleine Bloecke: ist der Sendepuffer
+        // ganz voll, meldet availableForWrite() nicht 0, sondern den freien
+        // Platz im Hardware-FIFO (bis 128 Byte, esp32-hal-uart.c). Ein kurzer
+        // Textblock "passte" dann, und write() wartete doch.
+        const size_t noetig = max(min(blockCost(block), MAX_WAIT_FOR), MIN_FREE);
+        if ((size_t)uart.availableForWrite() < noetig) return 0;
+        writeBlock(block);
+        _nextBlock++;
+    }
+
     // Bewusst kein uart.flush(): das wartet, bis das letzte Bit auf der
-    // Leitung ist, und blockiert damit genau die halbe Sekunde, die der
-    // Sendepuffer gerade vermeiden soll. Der Treiber sendet zuverlaessig zu
-    // Ende; nur ein Neustart mitten im Druck koennte etwas abschneiden.
-
+    // Leitung ist. Der Treiber sendet zuverlaessig zu Ende; nur ein Neustart
+    // mitten im Druck koennte etwas abschneiden.
     job.doc.clear();
     _head = (_head + 1) % MAX_QUEUE;
     _count--;
+    _active = false;
+    _nextBlock = 0;
 
     ok = true;
     error = "";
@@ -134,43 +174,66 @@ void Printer::lineSpacing(uint8_t dots) {
     _spacing = (int16_t)dots;
 }
 
-void Printer::writeBlocks(JsonArray blocks) {
-    if (blocks.isNull()) return;
-    for (JsonObject block : blocks) {
-        const String type = String(block["t"] | "");
-        // `h` ist die Hoehe, mit der der Server gerechnet hat. Fehlt sie
-        // (aelterer Server), bleibt es beim bisherigen Verhalten.
-        const uint16_t height = block["h"] | 0;
+// Wie viele Bytes ein Block auf der Leitung braucht - grosszuegig geschaetzt.
+// Daran haengt, ob er jetzt geschrieben wird oder im naechsten Durchlauf.
+size_t Printer::blockCost(JsonObject block) const {
+    const String type = String(block["t"] | "");
+    const uint16_t h = block["h"] | 0;
+    if (type == "text" || type == "row" || type == "code128") {
+        return 48 + strlen(block["v"] | "") + strlen(block["k"] | "");
+    }
+    if (type == "sep") return 16 + _chars;
+    if (type == "qr") {
+        // `ESC *` in Baendern zu acht Zeilen, je Band so viele Spalten, wie
+        // der Code breit ist - hoechstens so breit wie hoch.
+        return (size_t)((h + 7) / 8) * (h + 8) + 16;
+    }
+    if (type == "raster") {
+        const uint16_t w = block["w"] | 0;
+        const String mode = String(block["mode"] | "");
+        if (mode == "gsv0")  return 16 + (size_t)((w + 7) / 8) * h;
+        if (mode == "esc33") return 16 + (size_t)((h + 23) / 24) * (3u * w + 8);
+        return 16 + (size_t)((h + 7) / 8) * (w + 8);
+    }
+    return 16;   // feed, back, form
+}
 
-        if (type == "text") {
-            textLine(String(block["v"] | ""), block["align"] | 0,
-                     block["bold"] | false, block["large"] | false, height);
-        } else if (type == "row") {
-            row(String(block["k"] | ""), String(block["v"] | ""),
-                block["underline"] | false, height);
-        } else if (type == "sep") {
-            separator(height);
-        } else if (type == "qr") {
-            qr(String(block["v"] | ""), height);
-        } else if (type == "code128") {
-            code128(String(block["v"] | ""), block["height"] | 40);
-        } else if (type == "raster") {
-            // as<const char *>() statt String: die Bilddaten sind das
-            // Groesste in der Nachricht, und eine Kopie davon auf dem Heap
-            // waere reine Verschwendung.
-            const char *daten = block["d"] | "";
-            raster(daten, strlen(daten), block["w"] | 0, block["h"] | 0);
-        } else if (type == "feed") {
-            // `form` ist ein Merkmal des Vorschubs, kein eigener Blocktyp:
-            // eine aeltere Firmware kennt das Merkmal nicht, sieht aber
-            // `dots` und schiebt wenigstens richtig vor. Als eigener Typ
-            // waere der Block bei ihr stillschweigend unter den Tisch
-            // gefallen - und die Etiketten liefen uebereinander.
-            if (block["form"] | false) formFeed();
-            else                       feedDots(block["dots"] | 0);
-        } else if (type == "back") {
-            backfeedDots(block["dots"] | 0);
-        }
+void Printer::writeBlock(JsonObject block) {
+    const String type = String(block["t"] | "");
+    // `h` ist die Hoehe, mit der der Server gerechnet hat. Fehlt sie
+    // (aelterer Server), bleibt es beim bisherigen Verhalten.
+    const uint16_t height = block["h"] | 0;
+
+    if (type == "text") {
+        textLine(String(block["v"] | ""), block["align"] | 0,
+                 block["bold"] | false, block["large"] | false, height);
+    } else if (type == "row") {
+        row(String(block["k"] | ""), String(block["v"] | ""),
+            block["underline"] | false, height);
+    } else if (type == "sep") {
+        separator(height);
+    } else if (type == "qr") {
+        qr(String(block["v"] | ""), height);
+    } else if (type == "code128") {
+        code128(String(block["v"] | ""), block["height"] | 40);
+    } else if (type == "raster") {
+        // as<const char *>() statt String: die Bilddaten sind das
+        // Groesste in der Nachricht, und eine Kopie davon auf dem Heap
+        // waere reine Verschwendung.
+        const char *daten = block["d"] | "";
+        const char *z = block["z"] | "";
+        raster(daten, strlen(daten), block["w"] | 0, height,
+               block["mode"] | "", strcmp(z, "rle") == 0);
+    } else if (type == "feed") {
+        // `form` ist ein Merkmal des Vorschubs, kein eigener Blocktyp:
+        // eine aeltere Firmware kennt das Merkmal nicht, sieht aber
+        // `dots` und schiebt wenigstens richtig vor. Als eigener Typ
+        // waere der Block bei ihr stillschweigend unter den Tisch
+        // gefallen - und die Etiketten liefen uebereinander.
+        if (block["form"] | false) formFeed();
+        else                       feedDots(block["dots"] | 0);
+    } else if (type == "back") {
+        backfeedDots(block["dots"] | 0);
     }
 }
 
@@ -369,64 +432,116 @@ void Printer::backfeedDots(uint8_t dots) {
 // serverseitig setzen und als ein Bild schicken. Erst dann kann etwas
 // nebeneinander stehen - im Textmodus kennt der Drucker nur Zeilen, weshalb
 // der QR-Code dort immer seine volle Hoehe kostet.
-void Printer::raster(const char *b64, size_t b64len, uint16_t w, uint16_t h) {
+void Printer::raster(const char *b64, size_t b64len, uint16_t w, uint16_t h,
+                     const char *mode, bool packed) {
     if (w == 0 || h == 0 || b64 == nullptr) return;
 
     const size_t rowBytes = (w + 7u) / 8u;
-    const size_t bands    = (h + 7u) / 8u;
     const size_t needed   = rowBytes * h;
+    const bool gsv0  = strcmp(mode, "gsv0") == 0;
+    const bool esc33 = strcmp(mode, "esc33") == 0;
+    const size_t bandRows = esc33 ? 24u : 8u;
+    const size_t bands    = (h + bandRows - 1u) / bandRows;
+    // So weit schiebt der Block das Papier - auch wenn er nicht gedruckt
+    // werden kann. Sonst stimmt die Teilung nicht mehr und jedes folgende
+    // Etikett faengt an der falschen Stelle an.
+    const uint16_t vorschub = gsv0 ? h : (uint16_t)(bands * bandRows);
 
     // Wie viele Bytes das auf der Leitung wird. Passt es nicht in den
     // Sendepuffer, wuerde write() auf die 9600-Baud-Leitung warten und der
     // ganze Loop stuende - genau das, was die Warteschlange vermeiden soll.
     // Lieber den Platz leer vorschieben und es melden: das Etikett ist dann
     // unvollstaendig, aber die Teilung stimmt und das Geraet bleibt bedienbar.
-    const size_t traffic = bands * (w + 7u);
+    const size_t traffic = gsv0 ? needed : bands * ((esc33 ? 3u : 1u) * w + 7u);
     if (traffic > MAX_RASTER_TRAFFIC) {
         log_w("Rasterblock zu gross (%ux%u = %u Bytes) - Platz wird vorgeschoben",
               w, h, (unsigned)traffic);
-        feedDots((uint16_t)(bands * 8));
+        feedDots(vorschub);
         return;
     }
 
     uint8_t *bitmap = (uint8_t *)malloc(needed);
     if (bitmap == nullptr) {
         log_e("Kein Speicher fuer %u Byte Rasterdaten", (unsigned)needed);
-        feedDots((uint16_t)(bands * 8));
+        feedDots(vorschub);
         return;
     }
 
+    // Base64 auspacken - bei `z: rle` erst in einen Zwischenpuffer, dann
+    // PackBits in das Bild (siehe PackBits.h). So kommen die Streifen des
+    // Hochformat-Etiketts; ungepackt schickt der Server nur den Messstreifen.
     size_t decoded = 0;
-    const int err = mbedtls_base64_decode(bitmap, needed, &decoded,
-                                          (const unsigned char *)b64, b64len);
+    int err = 0;
+    if (packed) {
+        const size_t maxPacked = (b64len / 4u) * 3u + 3u;
+        uint8_t *zwischen = (uint8_t *)malloc(maxPacked);
+        if (zwischen == nullptr) {
+            log_e("Kein Speicher fuer %u Byte gepackte Rasterdaten", (unsigned)maxPacked);
+            free(bitmap);
+            feedDots(vorschub);
+            return;
+        }
+        size_t gepackt = 0;
+        err = mbedtls_base64_decode(zwischen, maxPacked, &gepackt,
+                                    (const unsigned char *)b64, b64len);
+        if (err == 0) decoded = packbitsEntpacken(zwischen, gepackt, bitmap, needed);
+        free(zwischen);
+    } else {
+        err = mbedtls_base64_decode(bitmap, needed, &decoded,
+                                    (const unsigned char *)b64, b64len);
+    }
     if (err != 0 || decoded < needed) {
         log_w("Rasterdaten unbrauchbar (Fehler %d, %u von %u Byte)",
               err, (unsigned)decoded, (unsigned)needed);
         free(bitmap);
-        feedDots((uint16_t)(bands * 8));
+        feedDots(vorschub);
         return;
     }
 
-    uart.write(0x1B); uart.write('a'); uart.write(1);   // zentriert
-    lineSpacing(8);                                     // ein Band je Zeile
+    if (gsv0) {
+        // GS v 0 - Rasterbild, zeilenweise, genau so, wie es im Speicher
+        // liegt. Linksbuendig: die Streifen eines Etiketts sind verschieden
+        // breit (nur so breit, wie sie Schwarz enthalten) und muessen trotzdem
+        // an derselben Kante anfangen. Der Drucker schiebt selbst genau `h`
+        // Punkte vor.
+        uart.write(0x1B); uart.write('a'); uart.write((uint8_t)0);
+        uart.write(0x1D); uart.write('v'); uart.write('0'); uart.write((uint8_t)0);
+        uart.write((uint8_t)(rowBytes & 0xFF)); uart.write((uint8_t)(rowBytes >> 8));
+        uart.write((uint8_t)(h & 0xFF));        uart.write((uint8_t)(h >> 8));
+        uart.write(bitmap, needed);
+        free(bitmap);
+        return;
+    }
+
+    // `ESC *` will das Bild spaltenweise in Baendern: 8 Punktzeilen je Band
+    // bei Modus 0, 24 bei Modus 33 (drei Bytes je Spalte, oberstes Bit oben).
+    // Modus 33 ist die volle Aufloesung; Modus 0 ist der alte Weg, zentriert
+    // wie bisher, damit Messstreifen und aeltere Server unveraendert drucken.
+    uart.write(0x1B); uart.write('a'); uart.write(esc33 ? (uint8_t)0 : (uint8_t)1);
+    lineSpacing((uint8_t)bandRows);                     // ein Band je Zeile
+    if (esc33 && h % 24u) {
+        log_w("ESC * 33 mit %u Zeilen - das letzte Band wird zu lang", h);
+    }
 
     for (size_t band = 0; band < bands; band++) {
-        uart.write(0x1B); uart.write('*'); uart.write((uint8_t)0);  // 8-Punkt-Einfachdichte
+        uart.write(0x1B); uart.write('*'); uart.write(esc33 ? (uint8_t)33 : (uint8_t)0);
         uart.write((uint8_t)(w & 0xFF));
         uart.write((uint8_t)(w >> 8));
 
         for (uint16_t x = 0; x < w; x++) {
             const size_t byteIndex = x >> 3;
             const uint8_t mask = (uint8_t)(0x80u >> (x & 7u));
-            uint8_t column = 0;
-            for (uint8_t bit = 0; bit < 8; bit++) {
-                const size_t y = band * 8u + bit;
-                if (y >= h) break;
-                if (bitmap[y * rowBytes + byteIndex] & mask) {
-                    column |= (uint8_t)(0x80u >> bit);
+            for (size_t teil = 0; teil < bandRows / 8u; teil++) {
+                uint8_t column = 0;
+                for (uint8_t bit = 0; bit < 8; bit++) {
+                    const size_t y = band * bandRows + teil * 8u + bit;
+                    if (y >= h) break;
+                    if (bitmap[y * rowBytes + byteIndex] & mask) {
+                        column |= (uint8_t)(0x80u >> bit);
+                    }
                 }
+                uart.write(column);
             }
-            uart.write(column);
         }
         uart.write((const uint8_t *)"\r\n", 2);
     }

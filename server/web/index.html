@@ -187,7 +187,7 @@
             <option value="code128">Strichcode (flach)</option>
             <option value="qr">QR-Code (quadratisch)</option>
           </select>
-          <span class="hint">Strichcode spart Höhe, QR geht auch gedreht</span></label>
+          <span class="hint">automatisch = Strichcode, er spart Höhe. Im Hochformat immer QR.</span></label>
         <label class="field">Codegröße
           <select data-setting="printer.label_code_size">
             <option value="klein">klein</option>
@@ -195,14 +195,15 @@
             <option value="gross">groß</option>
           </select>
           <span class="hint">kleiner lässt mehr Platz für Text</span></label>
-        <label class="field check">
-          <span class="row tight"><input data-setting="printer.label_rotate" type="checkbox"> Text um 90° drehen</span>
-          <span class="hint">für schmale Etiketten, die längs gelesen werden</span></label>
+        <label class="field" data-nur-hochformat hidden>Hochformat liegt
+          <select data-setting="printer.label_portrait_turn">
+            <option value="links">Oberkante links</option>
+            <option value="rechts">Oberkante rechts</option>
+          </select>
+          <span class="hint">steht das Etikett beim Lesen auf dem Kopf, die andere Seite wählen</span></label>
       </div>
-      <div class="notice warn" id="rotate-warning" hidden>
-        <span>Gedrehter Text mit flachem Strichcode: der Code steht dann quer zur Schrift.
-          Ein QR-Code lässt sich mitdrehen.</span>
-        <button class="sm" id="rotate-fix">Code auf „automatisch“ stellen</button>
+      <div class="notice warn" id="hochformat-firmware" hidden>
+        <span id="hochformat-firmware-text"></span>
       </div>
       <p class="muted" style="margin:14px 0 0">Aufteilung wählen – die Vorschau zeigt, was
         auf dein Etikett passt:</p>
@@ -229,6 +230,14 @@
             <option value="formfeed">Drucker sucht die Lücke</option>
           </select>
           <span class="hint">Messstreifen Punkt 4: steht die Pfeilzeile oben auf einem neuen Etikett, „Drucker sucht die Lücke“ wählen</span></label>
+        <label class="field">Bildmodus
+          <select data-setting="printer.raster_mode">
+            <option value="gsv0">A – GS v 0</option>
+            <option value="esc33">B – ESC * 33</option>
+            <option value="esc0">C – ESC * 0</option>
+          </select>
+          <span class="hint">Messstreifen Punkt 2: das Quadrat (A, B oder C), das genau 9 × 9 mm misst.
+            Nur für das Hochformat, das als Bild gedruckt wird.</span></label>
       </div>
 
       <h3><span class="step">3</span> Drucker</h3>

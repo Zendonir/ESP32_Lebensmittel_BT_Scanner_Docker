@@ -179,10 +179,13 @@ def test_kalibrierstreifen_stellt_alle_fragen():
     assert any(b.get("form") for b in job["blocks"])   # Lueckensensor (GS FF)
 
     # Das Quadrat muss quadratisch angefordert werden - sonst misst man
-    # nicht die Verzerrung des Druckers, sondern die eigene.
-    quadrat = [b for b in job["blocks"] if b["t"] == "raster" and b["h"] > 8]
-    assert len(quadrat) == 1
-    assert quadrat[0]["w"] == quadrat[0]["h"] == K.BOX_DOTS
+    # nicht die Verzerrung des Druckers, sondern die eigene. Eines je
+    # Bildmodus, damit sich der passende ablesen laesst.
+    quadrate = [b for b in job["blocks"] if b["t"] == "raster" and b["h"] > 8]
+    assert [q.get("mode") for q in quadrate] == [m for _, _, m in K.BOX_MODI]
+    for q in quadrate:
+        assert q["w"] == q["h"] == K.BOX_DOTS
+        assert q["h"] % 24 == 0, "ESC * 33 druckt nur ganze Baender"
 
 
 def test_rasterdaten_sind_vollstaendig_und_randgenau():

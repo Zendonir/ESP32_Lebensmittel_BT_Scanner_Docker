@@ -210,6 +210,13 @@ def test_name_wird_nicht_abgeschnitten(layout):
         [b["v"] for b in rendered["blocks"] if b["t"] == "text"]
         + [f'{b.get("k")} {b.get("v")}' for b in rendered["blocks"] if b["t"] == "row"]
     )
+    if layout in labels_service.BILD_LAYOUTS:
+        # Ein Bild hat keine Textbloecke - geprueft wird, was hineingezeichnet
+        # wurde.
+        from app.services import hochformat
+        gedruckt = " ".join(hochformat.textzeilen(
+            {"label": "LEB000042", "name": "Rueckenfilet", "subcategory": "Schwein",
+             "expiry_date": "2026-12-24", "added_date": "2026-01-01"}, {}, 216, 384))
     assert "Rueckenfilet" in gedruckt
     assert "Schwein" in gedruckt
 
@@ -294,23 +301,22 @@ def test_klassisch_kuerzt_von_unten_und_behaelt_das_mhd():
         assert labels_service.total_dots(rendered["blocks"]) == 240
 
 
-def test_gedreht_niemals_strichcode_auch_wenn_qr_abgeschaltet_ist():
-    """Der Schalter "QR" darf das Querformat nicht kaputt machen.
+def test_automatisch_heisst_strichcode_auch_bei_altem_quer():
+    """"Automatisch" haengt nicht mehr am Drehen.
 
-    ESC V dreht nur Zeichen; ein Strichcode laeuft weiter in Papierrichtung
-    und steht dann quer zur Schrift. Genau so kam der erste Querformat-Druck
-    heraus - Text gedreht, Strichcode nicht, und beides zusammen passte nicht
-    mehr auf ein Etikett.
+    Frueher waehlte ein gedrehtes Etikett heimlich den QR-Code, weil ein
+    Strichcode quer zur gedrehten Schrift stuende. Gedreht wurde aber nie:
+    `rotate` kam in der Druckauftrag-Nachricht gar nicht vor. Uebrig blieb nur
+    der heimliche Codewechsel. Gedreht wird jetzt ueber das Hochformat.
     """
     rendered = labels_service.render_label(
         {"label": "LEB000008", "name": "Natürliches Mineralwasser",
          "brand": "Vilsa", "expiry_date": "2028-11-12", "added_date": "2026-08-12",
          "quantity": 1, "location": "Kühlschrank"},
-        {"label_layout": "vollstaendig", "label_orientation": "quer",
-         "qr": False, "code128": True},
+        {"label_layout": "vollstaendig", "label_orientation": "quer"},
     )
     types = [b["t"] for b in rendered["blocks"]]
-    assert "code128" not in types and "qr" in types
+    assert "code128" in types and "qr" not in types
 
 
 @pytest.mark.parametrize("totbereich", [0, 3, 6, 10])
@@ -351,22 +357,14 @@ def test_rueckzug_holt_den_totbereich_als_druckflaeche_zurueck():
     assert mit["height_dots"] == ohne["height_dots"] + 48
 
 
-def test_quer_dreht_den_text_und_nimmt_den_qr_code():
-    """Querformat heisst gedrehter Text - und damit zwingend QR.
-
-    Der Druckkopf schreibt seine Zeilen ueber die kurze Kante; wer das Etikett
-    quer lesen will, braucht die Drehung. ESC V dreht aber nur Zeichen: ein
-    Strichcode liefe weiter in Papierrichtung und stuende quer zur Schrift.
-    Ein QR-Code ist quadratisch und aus jeder Richtung lesbar.
-    """
+def test_altes_quer_legt_weiter_die_kanten_fest():
+    """Die alte Einstellung "quer" bestimmt weiterhin, welche Kante durch den
+    Drucker laeuft - nur den Code waehlt sie nicht mehr um."""
     rendered = labels_service.render_label(
         {"label": "LEB000042", "name": "Brot", "expiry_date": "2026-12-24"},
         {"label_layout": "kompakt", "label_orientation": "quer",
          "qr": True, "code128": True},
     )
-    types = [b["t"] for b in rendered["blocks"]]
-    assert rendered["rotate"] is True
-    assert "qr" in types and "code128" not in types
     # Quer gelesen: Zeilen laufen ueber die lange Kante, gestapelt wird ueber
     # die kurze.
     assert (rendered["line_mm"], rendered["stack_mm"]) == (50, 30)

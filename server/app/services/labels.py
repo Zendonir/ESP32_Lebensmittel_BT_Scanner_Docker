@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from . import settings_store
 from . import categories
+from . import hochformat
 from .dates import to_display
 from .zeichen import latin1, latin1_tief
 
@@ -228,6 +229,8 @@ LAYOUTS: dict[str, str] = {
     "kompakt": "Name und MHD groß. Aus zwei Metern lesbar.",
     "standard": "Name groß, dazu MHD, Menge und Ort. Der Allrounder.",
     "vollstaendig": "Alle Angaben in normaler Schrift.",
+    "hochformat": "Um 90° gedreht: hochkant gelesen, Name und MHD groß, QR unten. "
+                  "Als Bild gedruckt – dauert rund 10 s.",
 }
 
 # Anzeigename fuer die Oberflaeche - der Schluessel bleibt umlautfrei, damit
@@ -239,7 +242,14 @@ TITLES: dict[str, str] = {
     "standard": "Standard",
     "vollstaendig": "Vollständig",
     "sparsam": "Sparsam",
+    "hochformat": "Hochformat",
 }
+
+# Layouts, die als Bild gedruckt werden. Sie brauchen eine Firmware, die
+# komprimierte Rasterstreifen versteht und ueber mehrere Durchlaeufe
+# verteilt sendet - eine aeltere druckt statt dessen leere Etiketten.
+BILD_LAYOUTS = ("hochformat",)
+BILD_FAEHIGKEIT = "raster2"
 DEFAULT_LAYOUT = "klassisch"
 
 
@@ -330,16 +340,19 @@ DEFAULT_CODE_SIZE = "mittel"
 def code_choice(cfg: dict) -> str:
     """Welcher Code gedruckt wird: "qr" oder "code128".
 
-    "automatisch" heisst: gedreht ein QR, sonst ein Strichcode. Denn ESC V
-    dreht nur Zeichen - Strichcode und Bitmap laufen weiter in Papierrichtung
-    und stehen bei gedrehtem Text quer zur Schrift. Wem die Etikettenhoehe
-    wichtiger ist als das Aussehen, der waehlt den Strichcode fest: er kostet
-    ein Drittel der Hoehe eines QR-Codes.
+    "automatisch" heisst Strichcode: er kostet ein Drittel der Hoehe eines
+    QR-Codes. Das Hochformat nimmt immer einen QR (services/hochformat.py),
+    weil ein Strichcode auf 30 mm Breite nicht lesbar hinpasst.
+
+    Frueher hing "automatisch" am Schalter "Text um 90 Grad drehen". Der kam
+    beim Drucker aber nie an - `rotate` stand nicht in der Druckauftrag-
+    Nachricht (protocol.print_job), ESC V wurde also nie gesendet. Der
+    Schalter waehlte nur heimlich den Code um.
     """
     wahl = cfg.get("label_code", "auto")
     if wahl in ("qr", "code128"):
         return wahl
-    return "qr" if is_rotated(cfg) else "code128"
+    return "code128"
 
 
 def _code_blocks(item: dict, cfg: dict) -> list[dict]:
@@ -494,7 +507,14 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     verloren = max(0, dead - backfeed)
 
     budget = pitch + backfeed - dead - SAFETY_DOTS
-    blocks = _fit(_build(layout, item, printer_cfg, chars), budget)
+    if layout in BILD_LAYOUTS:
+        # Der Druckkopf, nicht das Etikett, begrenzt die Hoehe des Bildes:
+        # ein 58-mm-Drucker hat 384 Punkte (48 mm), auch unter 50 mm Etikett.
+        kopf = min(int(line_mm * DOTS_PER_MM), int(printer_cfg.get(
+            "paper_chars", settings.label_paper_chars)) * 12)
+        blocks = hochformat.bloecke(item, printer_cfg, budget, kopf)
+    else:
+        blocks = _fit(_build(layout, item, printer_cfg, chars), budget)
 
     # Passt es immer noch nicht, muss das jemand erfahren.
     #
@@ -552,13 +572,17 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     # `dots` und laufen ueber `ESC J` / `ESC j`, die vom Zeilenabstand
     # unabhaengig sind.
     for block in blocks:
-        if block.get("t") not in ("feed", "form", "back"):
+        # Beim Rasterblock ist `h` die Zahl der Bildzeilen und damit schon
+        # die Hoehe - sie hier zu ueberschreiben (aufgerundet auf ganze
+        # Baender) haette die Firmware mehr Daten erwarten lassen, als da sind.
+        if block.get("t") not in ("feed", "form", "back", "raster"):
             block["h"] = block_dots(block)
 
-    return {
+    payload = {
         "chars": chars,
         "layout": layout,
-        "rotate": rotate,
+        # ESC V gilt nur fuer Text; ein gedrehtes Bild ist schon gedreht.
+        "rotate": rotate and layout not in BILD_LAYOUTS,
         "backfeed": backfeed,
         # Kantenlaengen so, wie das Etikett hinterher gelesen wird - die
         # Vorschau zeichnet danach und muss die Drehung nicht nachrechnen.
@@ -574,6 +598,11 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
         "overflow": overflow,
         "blocks": blocks,
     }
+    if layout in BILD_LAYOUTS:
+        # Der Server prueft das vor dem Senden: ein Terminal ohne diese
+        # Faehigkeit bekaeme sonst leere Etiketten statt einer Meldung.
+        payload["braucht"] = BILD_FAEHIGKEIT
+    return payload
 
 
 # ------------------------------------------------------------------ Vorschau

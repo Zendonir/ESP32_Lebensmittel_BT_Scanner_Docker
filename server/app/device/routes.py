@@ -48,6 +48,12 @@ async def _upsert_device(device_id: str, info: dict) -> Device:
         for key in ("ssid", "flash_mb", "res", "sd", "board"):
             if key in info:
                 telemetry[key] = info[key]
+        # Was die Firmware kann. Nur hello() traegt "firmware" - dann gilt
+        # die Liste neu, auch wenn sie fehlt: eine aeltere Firmware, die
+        # zurueckgespielt wurde, darf nicht weiter als faehig gelten.
+        if "firmware" in info:
+            caps = info.get("caps")
+            telemetry["caps"] = [str(c) for c in caps] if isinstance(caps, list) else []
         device.telemetry = telemetry
         await session.commit()
         await session.refresh(device)
@@ -185,6 +191,10 @@ async def _handle_message(device_id: str, sess, raw: str, client_ip: str) -> Non
                 # `hello` traegt nur Name, Version und Faehigkeiten nach - ein
                 # zweiter Screen-Push wuerde die Anzeige unnoetig neu aufbauen.
                 await _upsert_device(device_id, {**msg, "ip": client_ip})
+                caps = msg.get("caps")
+                sess.caps = {str(c) for c in caps} if isinstance(caps, list) else set()
+                # Auftraege, die auf die Faehigkeiten gewartet haben.
+                await workflow.flush_print_queue(session, device_id)
                 await hub.notify_ui("devices")
 
             elif kind == "scan":

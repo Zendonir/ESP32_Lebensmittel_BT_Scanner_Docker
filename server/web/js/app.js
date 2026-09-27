@@ -218,8 +218,8 @@ async function loadLabels() {
   ]);
   state.settings = settings;
   fillSettings(settings);
-  updateRotateWarning();
   loadLayouts().catch((e) => toast(e.message, 'error'));
+  hochformatHinweise().catch(() => {});
   $('#roll-state').textContent = roll.size
     ? `${roll.remaining} von ${roll.size} Etiketten übrig (${roll.used} verbraucht)`
     : 'Keine Rollengröße hinterlegt.';
@@ -249,6 +249,7 @@ $('#calibrate').addEventListener('click', async () => {
   try {
     const r = await post('/api/labels/calibrate');
     box.innerHTML = `
+      ${r.hinweis ? `<div class="notice warn" style="margin:0 0 10px"><span>${esc(r.hinweis)}</span></div>` : ''}
       <p class="muted" style="margin:0 0 8px">
         Streifen gesendet (${r.laenge_mm} mm Papier). Mit einem Lineal
         nachmessen und die Werte unten eintragen.</p>
@@ -869,26 +870,8 @@ document.addEventListener('change', async (ev) => {
 
   const ok = await saveSetting(el, bereich, { [schluessel]: wert });
   if (ok && bereich === 'printer') {
-    updateRotateWarning();
     await loadLayouts().catch((e) => toast(e.message, 'error'));
   }
-});
-
-// Gedrehter Text mit flachem Strichcode ist erlaubt, aber selten gewollt: der
-// Code steht dann quer zur Schrift. Frueher stand das nur im Hilfetext unter
-// den Feldern - also dort, wo es niemand liest, nachdem er die beiden
-// Einstellungen schon getroffen hat.
-function updateRotateWarning() {
-  const p = state.settings?.printer || {};
-  const box = $('#rotate-warning');
-  if (box) box.hidden = !(p.label_rotate && p.label_code === 'code128');
-}
-
-$('#rotate-fix')?.addEventListener('click', () => {
-  const sel = $('[data-setting="printer.label_code"]');
-  if (!sel) return;
-  sel.value = 'auto';
-  sel.dispatchEvent(new Event('change', { bubbles: true }));
 });
 
 // Verweise zwischen den Reitern ("steht unter Etiketten").
@@ -917,8 +900,7 @@ async function loadLayouts() {
     <div class="why">${esc(l.description)}</div>
     <div class="fill">${l.passt
       ? `passt · braucht ${fmtMm(l.mm)} mm`
-      : `<b>passt nicht</b> · braucht ${fmtMm(l.mm)} mm`}${l.rotate
-      ? '<br>Vorschau ungedreht – der Drucker dreht die Schrift' : ''}</div>
+      : `<b>passt nicht</b> · braucht ${fmtMm(l.mm)} mm`}</div>
   </div>`).join('');
 }
 
@@ -928,7 +910,33 @@ function fmtMm(mm) {
 
 async function chooseLayout(el) {
   const ok = await saveSetting(el, 'printer', { label_layout: el.dataset.layout });
-  if (ok) await loadLayouts();
+  if (ok) { await loadLayouts(); await hochformatHinweise(); }
+}
+
+// Hochformat wird als Bild gedruckt. Dafuer gibt es eigene Einstellungen,
+// das Einzeln-Drehen der Buchstaben wirkt dort nicht - und ein Terminal mit
+// aelterer Firmware kann es gar nicht. Das soll man sehen, bevor die ersten
+// Auftraege mit "Firmware zu alt" in der Warteschlange stehen.
+async function hochformatHinweise() {
+  const hoch = state.settings?.printer?.label_layout === 'hochformat';
+  $$('[data-nur-hochformat]').forEach((el) => { el.hidden = !hoch; });
+
+  const box = $('#hochformat-firmware');
+  if (!box) return;
+  let alte = [];
+  if (hoch) {
+    try {
+      const geraete = await get('/api/devices');
+      alte = geraete.filter((d) => d.online && !((d.telemetry || {}).caps || []).includes('raster2'));
+    } catch { /* Hinweis ist Beiwerk */ }
+  }
+  box.hidden = !alte.length;
+  if (alte.length) {
+    $('#hochformat-firmware-text').textContent =
+      `${alte.map((d) => d.name || d.device_id).join(', ')}: Firmware kann noch kein Hochformat. `
+      + 'Unter Terminals zuerst „Aus GitHub-Release holen“ und „Firmware-Update“ – '
+      + 'bis dahin bleiben Hochformat-Etiketten mit einer Meldung in der Warteschlange stehen.';
+  }
 }
 $('#layout-picker')?.addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-layout]');
@@ -1060,7 +1068,7 @@ liveConnect(
     const relevant = {
       inventory: ['dashboard', 'inventory', 'labels'],
       catalog: ['catalog', 'templates', 'labels'],
-      devices: ['devices', 'dashboard'],
+      devices: ['devices', 'dashboard', 'labels'],
       shopping: ['shopping'],
       settings: ['system', 'labels'],
     }[msg.event] || [];

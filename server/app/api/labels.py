@@ -11,7 +11,7 @@ from ..device import workflow
 from ..device.hub import hub
 from ..models import InventoryItem, PrintJob
 from ..schemas import LabelCreate, LabelCreateResult, PrintJobOut
-from ..services import calibration
+from ..services import calibration, hochformat
 from ..services import inventory as inv
 from ..services import labels as label_service
 from ..services import settings_store
@@ -31,6 +31,19 @@ _SAMPLE = {
     "unit": "g",
     "location": "Kühlschrank",
 }
+
+
+def _vorschau(name: str, payload: dict, cfg: dict) -> str:
+    """Die Vorschau: bei Text-Layouts aus der Blockliste gezeichnet, beim
+    Hochformat genau das Bild, das auch zum Drucker geht."""
+    if name not in label_service.BILD_LAYOUTS:
+        return label_service.render_preview_svg(payload, cfg)
+    stack_mm, line_mm = label_service.feed_and_line_mm(cfg)
+    pitch = int(stack_mm * label_service.DOTS_PER_MM)
+    backfeed = int(payload.get("backfeed", 0))
+    budget = pitch + backfeed - int(payload.get("dead_dots", 0)) - label_service.SAFETY_DOTS
+    kopf = min(int(line_mm * label_service.DOTS_PER_MM), int(cfg.get("paper_chars", 32)) * 12)
+    return hochformat.vorschau_svg(_SAMPLE, cfg, budget, kopf)
 
 
 @router.get("/layouts")
@@ -60,13 +73,14 @@ async def list_layouts(session: AsyncSession = Depends(get_session)):
                     [b for b in payload["blocks"] if b["t"] in ("qr", "code128")]
                 ) / label_service.DOTS_PER_MM, 1),
             "passt": used <= payload["height_dots"] - label_service.SAFETY_DOTS,
-            "code": "QR-Code" if codes and codes[0] == "qr" else "Strichcode",
+            "code": "QR-Code" if (codes and codes[0] == "qr") or name in label_service.BILD_LAYOUTS
+                    else "Strichcode",
             "rotate": payload["rotate"],
             "title": label_service.TITLES.get(name, name),
             "description": description,
             "dots": used,
             "height_dots": payload["height_dots"],
-            "svg": label_service.render_preview_svg(payload, cfg),
+            "svg": _vorschau(name, payload, cfg),
         })
     return out
 
@@ -207,9 +221,20 @@ async def calibrate(
     if not target:
         raise HTTPException(503, "Kein Terminal online – der Drucker hängt am Terminal")
     sent = await workflow.flush_print_queue(session, target)
+    # Eine Firmware ohne Bildstreifen kennt die Modi A und B nicht und druckt
+    # alle drei Quadrate gleich. Wer das nicht weiss, liest daraus, sein
+    # Drucker koenne alles - und bekommt spaeter leere Hochformat-Etiketten.
+    caps = workflow.session_for(target).caps
+    hinweis = ""
+    if caps is not None and label_service.BILD_FAEHIGKEIT not in caps:
+        hinweis = ("Das Terminal hat noch eine ältere Firmware: die drei Quadrate "
+                   "unter Punkt 2 sehen deshalb gleich aus und sagen nichts. Erst "
+                   "unter Terminals die Firmware aktualisieren, dann den Streifen "
+                   "noch einmal drucken.")
     return {
         "ok": bool(sent),
         "job": job.id,
+        "hinweis": hinweis,
         "laenge_mm": round(
             sum(label_service.block_dots(b) for b in job.payload["blocks"])
             / label_service.DOTS_PER_MM
