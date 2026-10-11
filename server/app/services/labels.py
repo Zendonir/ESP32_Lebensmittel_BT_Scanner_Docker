@@ -235,6 +235,7 @@ LAYOUTS: dict[str, str] = {
     "vollstaendig": "Alle Angaben in normaler Schrift.",
     "hochformat": "Um 90° gedreht: hochkant gelesen, Name und MHD groß, QR unten. "
                   "Als Bild gedruckt – bei 9600 Baud rund 10 s.",
+    "eigen": "Selbst zusammengestellt: welche Angaben, in welcher Reihenfolge, wie groß.",
 }
 
 # Anzeigename fuer die Oberflaeche - der Schluessel bleibt umlautfrei, damit
@@ -247,6 +248,7 @@ TITLES: dict[str, str] = {
     "vollstaendig": "Vollständig",
     "sparsam": "Sparsam",
     "hochformat": "Hochformat",
+    "eigen": "Eigene",
 }
 
 # Layouts, die als Bild gedruckt werden. Sie brauchen eine Firmware, die
@@ -396,12 +398,117 @@ def _code_blocks(item: dict, cfg: dict) -> list[dict]:
     return [{"t": "code128", "v": label, "height": height}]
 
 
+# ------------------------------------------------------- eigene Aufteilung
+# Felder, die man auf ein eigenes Etikett setzen kann: Schluessel ->
+# (Bezeichnung auf dem Etikett, Wert aus dem Artikel).
+def _feld_werte(item: dict, cfg: dict) -> dict[str, tuple[str, str]]:
+    menge = item.get("quantity", 1)
+    return {
+        "name": ("Name", item.get("name", "") or "Unbekanntes Produkt"),
+        "name_sorte": ("Name", _title(item) or "Unbekanntes Produkt"),
+        "subcategory": ("Sorte", item.get("subcategory", "")),
+        "category": ("Kategorie", item.get("category", "")),
+        "brand": ("Marke", item.get("brand", "")),
+        "expiry_date": ("MHD", to_display(item.get("expiry_date", ""))),
+        "added_date": ("Eingelagert", to_display(item.get("added_date", ""))),
+        "count": ("Stück", f"{menge:g}" if isinstance(menge, (int, float)) else str(menge)),
+        "quantity": ("Menge", _quantity(item)),
+        "location": ("Ort", item.get("location", "")),
+        "household": ("Haushalt", item.get("household", "")
+                      or latin1(cfg.get("household") or settings.household)),
+        "label": ("Nummer", item.get("label", "")),
+    }
+
+
+# Fuer die Oberflaeche: was waehlbar ist. Reihenfolge = Reihenfolge im Menue.
+EIGEN_FELDER: dict[str, str] = {
+    "name": "Lebensmittelname",
+    "name_sorte": "Name mit Sorte",
+    "subcategory": "Sorte",
+    "category": "Kategorie",
+    "brand": "Marke",
+    "expiry_date": "MHD",
+    "added_date": "Einlagerungsdatum",
+    "count": "Stückzahl",
+    "quantity": "Menge mit Einheit",
+    "location": "Ort",
+    "household": "Haushalt",
+    "label": "Etikettennummer",
+    "linie": "— Trennlinie —",
+    "code": "Code (Strich/QR)",
+}
+EIGEN_STILE: dict[str, str] = {
+    "zeile": "Bezeichnung … Wert",
+    "gross": "groß, mittig",
+    "fett": "fett, mittig",
+    "text": "normal, mittig",
+    "links": "normal, links",
+}
+EIGEN_STANDARD: list[dict] = [
+    {"feld": "name_sorte", "stil": "gross"},
+    {"feld": "expiry_date", "stil": "zeile", "unterstrichen": True},
+    {"feld": "quantity", "stil": "zeile"},
+    {"feld": "location", "stil": "zeile"},
+    {"feld": "added_date", "stil": "zeile"},
+    {"feld": "code", "stil": "zeile"},
+]
+
+
+def _eigen(item: dict, cfg: dict, chars: int) -> list[dict]:
+    """Die eigene Aufteilung aus `printer.label_custom`.
+
+    Leere Felder fallen weg, statt eine Zeile "Ort ...... " zu drucken. Was
+    nicht passt, kuerzt _fit() wie bei den festen Aufteilungen von hinten -
+    das MHD und der Code bleiben stehen.
+    """
+    zeilen = cfg.get("label_custom")
+    if not isinstance(zeilen, list) or not zeilen:
+        zeilen = EIGEN_STANDARD
+    werte = _feld_werte(item, cfg)
+    blocks: list[dict] = []
+    code_gesetzt = False
+    for zeile in zeilen:
+        if not isinstance(zeile, dict):
+            continue
+        feld, stil = zeile.get("feld"), zeile.get("stil", "zeile")
+        if feld == "linie":
+            blocks.append({"t": "sep"})
+            continue
+        if feld == "code":
+            if not code_gesetzt:
+                blocks += _code_blocks(item, cfg)
+                code_gesetzt = True
+            continue
+        if feld not in werte:
+            continue
+        bezeichnung, wert = werte[feld]
+        if not wert:
+            continue
+        schutz = feld == "expiry_date"
+        if stil == "gross":
+            neu = _title_blocks(wert, chars, large=True)
+        elif stil in ("fett", "text", "links"):
+            neu = [{"t": "text", "v": wert, "align": 0 if stil == "links" else 1,
+                    "bold": stil == "fett"}]
+        else:
+            neu = [{"t": "row", "k": bezeichnung, "v": wert,
+                    "underline": bool(zeile.get("unterstrichen"))}]
+        if schutz:
+            for b in neu:
+                b["keep"] = True
+        blocks += neu
+    return blocks
+
+
 def _build(layout: str, item: dict, cfg: dict, chars: int) -> list[dict]:
     title = _title(item)
     expiry = to_display(item.get("expiry_date", ""))
     label = item.get("label", "")
     location = item.get("location", "")
     brand = item.get("brand", "")
+
+    if layout == "eigen":
+        return _eigen(item, cfg, chars)
 
     if layout == "klassisch":
         # 1:1 der Zuschnitt aus dem Vorgaengerprojekt (LabelRenderer.cpp):

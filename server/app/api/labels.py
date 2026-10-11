@@ -191,6 +191,15 @@ async def test_print(
     sent = await workflow.flush_print_queue(session, target)
     return {"ok": bool(sent), "job": job.id}
 
+@router.get("/eigen")
+async def eigen_aufteilung(session: AsyncSession = Depends(get_session)):
+    """Was die eigene Aufteilung anbietet und was gerade eingestellt ist."""
+    cfg = await settings_store.get(session, "printer", {})
+    zeilen = cfg.get("label_custom") or label_service.EIGEN_STANDARD
+    return {"felder": label_service.EIGEN_FELDER, "stile": label_service.EIGEN_STILE,
+            "zeilen": zeilen}
+
+
 @router.get("/tests")
 async def list_tests():
     """Die Testknoepfe: je Befehlsvariante ein Etikett (services/druckertest)."""

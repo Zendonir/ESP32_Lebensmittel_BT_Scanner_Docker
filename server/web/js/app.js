@@ -947,6 +947,70 @@ async function chooseLayout(el) {
   if (ok) { await loadLayouts(); await hochformatHinweise(); }
 }
 
+// Eigene Aufteilung: Zeilen auswaehlen, sortieren, Stil setzen. Jede
+// Aenderung wird sofort gespeichert und die Vorschau neu gezeichnet - wie
+// alle anderen Einstellungen hier, ohne Speichern-Knopf.
+const eigen = { felder: {}, stile: {}, zeilen: [] };
+async function eigenLaden() {
+  const r = await get('/api/labels/eigen');
+  Object.assign(eigen, r);
+  eigenZeichnen();
+}
+function eigenZeichnen() {
+  const box = $('#eigen-zeilen');
+  if (!box) return;
+  const opt = (map, wert) => Object.entries(map)
+    .map(([k, v]) => `<option value="${esc(k)}" ${k === wert ? 'selected' : ''}>${esc(v)}</option>`).join('');
+  box.innerHTML = eigen.zeilen.map((z, i) => {
+    const ohneStil = z.feld === 'linie' || z.feld === 'code';
+    return `<div class="row" data-eigen="${i}" style="gap:6px;margin:4px 0;align-items:center;flex-wrap:wrap">
+      <select data-eigen-feld>${opt(eigen.felder, z.feld)}</select>
+      <select data-eigen-stil style="${ohneStil ? 'display:none' : ''}">${opt(eigen.stile, z.stil || 'zeile')}</select>
+      <label class="row tight" style="${ohneStil || (z.stil || 'zeile') !== 'zeile' ? 'display:none' : ''}">
+        <input type="checkbox" data-eigen-unter ${z.unterstrichen ? 'checked' : ''}> unterstrichen</label>
+      <button class="ghost" data-eigen-auf title="nach oben" ${i === 0 ? 'disabled' : ''}>↑</button>
+      <button class="ghost" data-eigen-ab title="nach unten" ${i === eigen.zeilen.length - 1 ? 'disabled' : ''}>↓</button>
+      <button class="ghost" data-eigen-weg title="entfernen">✕</button>
+    </div>`;
+  }).join('');
+}
+async function eigenSpeichern() {
+  eigenZeichnen();
+  const ok = await saveSetting($('#eigen-zeilen'), 'printer', { label_custom: eigen.zeilen });
+  if (ok) await loadLayouts();
+}
+$('#eigen-zeilen')?.addEventListener('change', (ev) => {
+  const zeile = ev.target.closest('[data-eigen]');
+  if (!zeile) return;
+  ev.stopPropagation();
+  const z = eigen.zeilen[Number(zeile.dataset.eigen)];
+  if (ev.target.matches('[data-eigen-feld]')) z.feld = ev.target.value;
+  if (ev.target.matches('[data-eigen-stil]')) z.stil = ev.target.value;
+  if (ev.target.matches('[data-eigen-unter]')) z.unterstrichen = ev.target.checked;
+  eigenSpeichern();
+});
+$('#eigen-zeilen')?.addEventListener('click', (ev) => {
+  const knopf = ev.target.closest('button');
+  const zeile = ev.target.closest('[data-eigen]');
+  if (!knopf || !zeile) return;
+  const i = Number(zeile.dataset.eigen);
+  const z = eigen.zeilen;
+  if (knopf.matches('[data-eigen-auf]') && i > 0) [z[i - 1], z[i]] = [z[i], z[i - 1]];
+  else if (knopf.matches('[data-eigen-ab]') && i < z.length - 1) [z[i + 1], z[i]] = [z[i], z[i + 1]];
+  else if (knopf.matches('[data-eigen-weg]')) z.splice(i, 1);
+  else return;
+  eigenSpeichern();
+});
+$('#eigen-neu')?.addEventListener('click', () => {
+  eigen.zeilen.push({ feld: 'location', stil: 'zeile' });
+  eigenSpeichern();
+});
+$('#eigen-reset')?.addEventListener('click', () => {
+  eigen.zeilen = [];
+  saveSetting($('#eigen-zeilen'), 'printer', { label_custom: [] })
+    .then(() => eigenLaden()).then(() => loadLayouts());
+});
+
 // Hochformat wird als Bild gedruckt. Dafuer gibt es eigene Einstellungen,
 // das Einzeln-Drehen der Buchstaben wirkt dort nicht - und ein Terminal mit
 // aelterer Firmware kann es gar nicht. Das soll man sehen, bevor die ersten
@@ -955,6 +1019,9 @@ async function hochformatHinweise() {
   const drucker = state.settings?.printer || {};
   const hoch = drucker.label_layout === 'hochformat';
   $$('[data-nur-hochformat]').forEach((el) => { el.hidden = !hoch; });
+  const eigen = drucker.label_layout === 'eigen';
+  $$('[data-nur-eigen]').forEach((el) => { el.hidden = !eigen; });
+  if (eigen) eigenLaden().catch(() => {});
 
   // Was die eingestellten Etiketten vom Terminal verlangen - genau das, was
   // der Server vor dem Senden prueft (workflow.flush_print_queue).

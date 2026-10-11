@@ -78,6 +78,9 @@ DEFAULTS: dict[str, Any] = {
         # oder "esck" (ESC K, viele namenlose Drucker). Herausfinden ueber die
         # Testknoepfe unter Etiketten -> Einrichten.
         "backfeed_cmd": "escj",
+        # Die Aufteilung "eigen": Liste von {"feld", "stil", "unterstrichen"}.
+        # Leer = Vorschlag aus labels.EIGEN_STANDARD.
+        "label_custom": [],
         # Nur fuer Layouts, die als Bild gedruckt werden (Hochformat).
         #
         # Welcher Rasterbefehl auf einem namenlosen Drucker masshaltig

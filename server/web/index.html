@@ -208,6 +208,16 @@
       <p class="muted" style="margin:14px 0 0">Aufteilung wählen – die Vorschau zeigt, was
         auf dein Etikett passt:</p>
       <div id="layout-picker" class="layouts"></div>
+      <div id="eigen-editor" data-nur-eigen hidden style="margin-top:12px">
+        <div style="margin-bottom:6px"><b>Eigene Aufteilung</b> – von oben nach unten.
+          <span class="muted">Leere Angaben fallen auf dem Etikett weg. Passt nicht alles,
+          wird von unten gekürzt; MHD und Code bleiben immer.</span></div>
+        <div id="eigen-zeilen"></div>
+        <div class="row" style="gap:8px;margin-top:8px">
+          <button class="ghost" id="eigen-neu">+ Zeile</button>
+          <button class="ghost" id="eigen-reset">Vorschlag wiederherstellen</button>
+        </div>
+      </div>
 
       <h3><span class="step">2</span> Drucker einmessen</h3>
       <p class="muted" style="margin:0 0 10px">Der Messstreifen zeigt, wo dein Drucker wirklich
