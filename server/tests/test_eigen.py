@@ -75,3 +75,16 @@ def test_vorschau_mit_esc_k_zeigt_die_erste_zeile():
     svg = labels.render_preview_svg(p, cfg)
     ys = [int(y) for y in re.findall(r'<text[^>]*\by="(-?\d+)"', svg)]
     assert ys and min(ys) > 0
+
+
+def test_ablauf_einfach_rueckzug_laenge_vorschub():
+    cfg = {"label_layout": "standard", "label_height_mm": 25, "label_feed_edge": "hoehe",
+           "backfeed_dots": 48, "label_dead_zone_mm": 8,
+           "label_sequence": "einfach", "label_gap_mm": 3}
+    p = labels.render_label(ITEM, cfg)
+    b = p["blocks"]
+    assert b[0] == {"t": "back", "dots": 48}
+    assert b[-1] == {"t": "feed", "dots": 24}               # 3 mm Vorschub danach
+    inhalt = sum(labels.block_dots(x) for x in b[1:-1])
+    assert inhalt == 25 * 8                                 # genau die Hoehe
+    assert labels.total_dots(b) == -48 + 200 + 24

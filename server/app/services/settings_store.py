@@ -81,6 +81,10 @@ DEFAULTS: dict[str, Any] = {
         # Die Aufteilung "eigen": Liste von {"feld", "stil", "unterstrichen"}.
         # Leer = Vorschlag aus labels.EIGEN_STANDARD.
         "label_custom": [],
+        # "teilung": Etikett + Luecke als eine Teilung, Totbereich gerechnet.
+        # "einfach": Rueckzug -> Etikett in label_height_mm -> label_gap_mm leer.
+        "label_sequence": "teilung",
+        "label_gap_mm": 0,
         # Nur fuer Layouts, die als Bild gedruckt werden (Hochformat).
         #
         # Welcher Rasterbefehl auf einem namenlosen Drucker masshaltig

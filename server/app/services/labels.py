@@ -636,6 +636,15 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     verloren = max(0, dead - backfeed)
 
     budget = pitch + backfeed - dead - SAFETY_DOTS
+
+    # Ablauf "einfach": Rueckzug, dann das Etikett in genau der eingestellten
+    # Laenge, dann ein fester Leervorschub. Kein Rechnen mit Totbereich und
+    # Teilung - wer seinen Drucker kennt, stellt die drei Werte direkt ein.
+    einfach = printer_cfg.get("label_sequence") == "einfach"
+    luecke = max(0, int(float(printer_cfg.get("label_gap_mm", 0) or 0) * DOTS_PER_MM))
+    if einfach:
+        dead = verloren = 0
+        budget = pitch - SAFETY_DOTS
     if layout in BILD_LAYOUTS:
         # Der Druckkopf, nicht das Etikett, begrenzt die Hoehe des Bildes:
         # ein 58-mm-Drucker hat 384 Punkte (48 mm), auch unter 50 mm Etikett.
@@ -684,7 +693,13 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     # nicht jeder Drucker kann es; deshalb eine Einstellung und nicht die
     # Vorgabe.
     remaining = pitch - total_dots(blocks)
-    if remaining > 0:
+    if einfach:
+        # Der Rueckzug zaehlt hier nicht zur Laenge: das Etikett beginnt
+        # dort, wo der Rueckzug endet, und ist danach genau `pitch` lang.
+        remaining = pitch - (total_dots(blocks) + backfeed)
+    if remaining > 0 and einfach:
+        blocks.append({"t": "feed", "dots": remaining})
+    elif remaining > 0:
         # Der Formularvorschub ist ein *Merkmal* des Vorschubs, kein eigener
         # Blocktyp.
         #
@@ -695,6 +710,12 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
         # wenigstens `dots` und macht das Richtige; wer `form` kennt, sucht
         # stattdessen die Luecke.
         vorschub = {"t": "feed", "dots": remaining}
+        if printer_cfg.get("label_end") == "formfeed":
+            vorschub["form"] = True
+        blocks.append(vorschub)
+
+    if einfach and luecke:
+        vorschub = {"t": "feed", "dots": luecke}
         if printer_cfg.get("label_end") == "formfeed":
             vorschub["form"] = True
         blocks.append(vorschub)
