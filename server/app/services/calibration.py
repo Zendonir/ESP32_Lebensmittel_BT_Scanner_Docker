@@ -54,6 +54,9 @@ BOX_MODI = (("A", "GS v 0", "gsv0"), ("B", "ESC * 33", "esc33"), ("C", "ESC * 0"
 # Rueckzug fuer den Test. 40 Punkte = 5 mm, weit genug, um mit blossem Auge
 # zu sehen, ob er stattgefunden hat.
 BACKFEED_DOTS = 40
+# Vorschub vor dem Rueckzug, und wo der zweite Balken dann landet.
+BACK_VOR_DOTS = 64
+BACK_SOLL_MM = (BACK_VOR_DOTS + 8 - BACKFEED_DOTS) / DOTS_PER_MM
 
 
 def _raster(width: int, height: int, gefuellt: bool = True, modus: str = "") -> dict:
@@ -147,17 +150,26 @@ def build(stack_mm: float = 30.0, line_mm: float = 48.0, chars: int = 32,
             _raster(BOX_DOTS, BOX_DOTS, modus=modus),
         ])
     # --- 3: kann der Drucker rueckwaerts? ----------------------------
+    # Erster Balken, 8 mm vor, 5 mm zurueck, zweiter (halb so breiter)
+    # Balken. Rechnet der Drucker den Rueckzug, liegen die Oberkanten 4 mm
+    # auseinander, sonst 9 mm. Frueher kam der zweite Balken direkt nach dem
+    # Rueckzug: ohne Rueckzug lagen die Balken dann Kante an Kante und sahen
+    # aus wie *ein* dicker - genau das Bild, das "geht" bedeuten sollte.
     etiketten.append([
         _zeile("3) Rückzug", bold=True), dict(marke),
-        {"t": "back", "dots": BACKFEED_DOTS}, dict(marke),
-        _zeile("Zwei Balken oder einer?"),
+        {"t": "feed", "dots": BACK_VOR_DOTS},
+        {"t": "back", "dots": BACKFEED_DOTS}, _raster(width // 2, 8),
+        {"t": "feed", "dots": BACKFEED_DOTS},
+        _zeile(f"Oberkanten: {_mm(BACK_SOLL_MM)} mm = geht"),
+        _zeile(f"{_mm((BACK_VOR_DOTS + 8) / DOTS_PER_MM)} mm = geht nicht"),
     ])
 
     blocks: list[dict] = []
     for inhalt in etiketten:
         hoehe = sum(_hoehe(b) for b in inhalt)
         blocks += inhalt
-        blocks.append({"t": "feed", "dots": max(0, pitch - hoehe)})
+        # "teilung" ist nur fuer die Tests: hier endet ein Etikett.
+        blocks.append({"t": "feed", "dots": max(0, pitch - hoehe), "teilung": True})
 
     # --- 4: hat er einen Lueckensensor? ------------------------------
     # Steht am Ende, weil GS FF auf einem Drucker ohne Sensor eine ganze
@@ -222,11 +234,15 @@ ANLEITUNG: list[dict] = [
     {
         "nr": 3,
         "titel": "Rückzug",
-        "messen": "Stehen dort zwei Balken untereinander oder nur einer?",
-        "bedeutet": "Nur einer (oder ein dickerer) heißt: der Drucker kann "
-                    "rückwärts, ESC j wirkt. Dann lässt sich der Totbereich "
-                    "am Etikettenanfang zurückholen. Zwei getrennte Balken "
-                    "heißen: er kann es nicht, 'Rückzug' bleibt auf 0.",
+        "messen": "Abstand zwischen den Oberkanten des langen und des kurzen "
+                  f"Balkens. {_mm(BACK_SOLL_MM)} mm: der Drucker fährt "
+                  f"zurück. {_mm((BACK_VOR_DOTS + 8) / DOTS_PER_MM)} mm: er kann es nicht.",
+        "bedeutet": "Kann er zurück, lässt sich der Totbereich am "
+                    "Etikettenanfang zurückholen: unter 'Rückzug (Punkte)' "
+                    "den Totbereich in Punkten eintragen (mm × 8). Liegt der "
+                    "Wert dazwischen, fährt er nur einen Teil zurück – "
+                    "Rückzug dann auf 0 lassen. Kann er es nicht, bleibt "
+                    "'Rückzug' auf 0.",
     },
     {
         "nr": 4,

@@ -228,7 +228,7 @@ def test_kalibrierstreifen_ein_test_je_etikett(hoehe, tot):
     for b in job["blocks"]:
         if b.get("form"):
             break
-        if b["t"] == "feed":
+        if b.get("teilung"):
             stuecke.append((aktuell, b["dots"]))
             aktuell = []
         else:
@@ -236,6 +236,10 @@ def test_kalibrierstreifen_ein_test_je_etikett(hoehe, tot):
     assert len(stuecke) == 5          # Zeilenabstand, A, B, C, Rueckzug
     for inhalt, auffuellen in stuecke:
         belegt = sum(K._hoehe(b) for b in inhalt)
-        assert max(belegt, sum(max(K._hoehe(b), 0) for b in inhalt)) <= nutzbar
+        hoechster, stand = 0, 0
+        for b in inhalt:
+            stand += K._hoehe(b)
+            hoechster = max(hoechster, stand)
+        assert hoechster <= nutzbar
         assert belegt + auffuellen == pitch
     assert job["soll_mm"] * K.DOTS_PER_MM == K.zeilen_test(hoehe, tot) * K.LINE_HEIGHT
