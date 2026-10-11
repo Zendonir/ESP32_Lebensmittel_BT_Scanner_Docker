@@ -263,6 +263,39 @@ $('#calibrate').addEventListener('click', async () => {
     toast('Kalibrierdruck gesendet', 'success');
   } catch (e) { toast(e.message, 'error'); }
 });
+// Testknoepfe: je Befehlsvariante ein Etikett. Die Liste kommt vom Server
+// (services/druckertest.py), damit Knopf und gedruckte Bytes nicht
+// auseinanderlaufen.
+async function loadDruckerTests() {
+  const box = $('#drucker-tests-liste');
+  if (!box || box.dataset.geladen) return;
+  try {
+    const tests = await get('/api/labels/tests');
+    const gruppen = [...new Set(tests.map((t) => t.gruppe))];
+    box.innerHTML = gruppen.map((g) => `
+      <div style="margin:10px 0 4px"><b>${esc(g)}</b></div>
+      <div class="row" style="flex-wrap:wrap;gap:8px">${tests.filter((t) => t.gruppe === g).map((t) => `
+        <button class="ghost" data-druckertest="${esc(t.id)}" title="${esc(t.hinweis)}">
+          ${esc(t.titel)}<br><span class="muted" style="font-size:11px">${esc(t.befehl)}</span>
+        </button>`).join('')}</div>`).join('');
+    box.dataset.geladen = '1';
+  } catch (e) { box.textContent = e.message; }
+}
+$('#drucker-tests')?.addEventListener('toggle', (ev) => { if (ev.target.open) loadDruckerTests(); });
+$('#drucker-tests-liste')?.addEventListener('click', async (ev) => {
+  const knopf = ev.target.closest('[data-druckertest]');
+  if (!knopf) return;
+  const status = $('#drucker-tests-status');
+  knopf.disabled = true;
+  try {
+    const r = await post(`/api/labels/tests/${encodeURIComponent(knopf.dataset.druckertest)}`);
+    status.textContent = r.ok
+      ? `Gesendet: ${knopf.title}`
+      : `Nicht gedruckt: ${r.error || r.status}`;
+    toast(r.ok ? 'Test gesendet' : (r.error || 'Nicht gedruckt'), r.ok ? 'success' : 'error');
+  } catch (e) { toast(e.message, 'error'); }
+  finally { knopf.disabled = false; }
+});
 // Update-Pruefung. Fragt beim Ursprung nach und sagt, wie weit dieser Server
 // zurueck ist - aktualisiert aber nichts: ein Dienst, der sich selbst
 // ersetzt, braucht einen Rueckweg, und den gibt es noch nicht.

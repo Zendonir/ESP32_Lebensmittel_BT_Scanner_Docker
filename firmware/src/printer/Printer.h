@@ -46,6 +46,7 @@ private:
     void code128(const String &data, uint8_t height);
     void feedDots(uint16_t dots);
     void formFeed();
+    void rawBytes(const char *b64);
     void backfeedDots(uint8_t dots);
     void reset();
     static bool baudErlaubt(uint32_t baud);

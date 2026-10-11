@@ -217,6 +217,14 @@
         <button id="test-print" class="ghost">Testetikett drucken</button>
       </div>
       <div id="calibration-guide" hidden style="margin-top:12px"></div>
+      <details id="drucker-tests" style="margin-top:12px">
+        <summary><b>Einzelne Befehle testen</b> – je Knopf ein Etikett</summary>
+        <p class="muted" style="margin:8px 0">Für Fragen, die der Messstreifen offen lässt:
+          welchen Befehl dein Drucker für Rückzug, Vorschub oder das Etikettenende versteht.
+          Auf jedem Test-Etikett steht, was du nachmessen sollst.</p>
+        <div id="drucker-tests-liste"></div>
+        <p id="drucker-tests-status" class="muted" style="margin:8px 0 0"></p>
+      </details>
       <div class="settings-grid" style="margin-top:14px">
         <label class="field">Totbereich (mm)
           <input data-setting="printer.label_dead_zone_mm" data-art="float" type="number" min="0" max="20" step="0.5">

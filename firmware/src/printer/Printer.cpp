@@ -218,6 +218,7 @@ size_t Printer::blockCost(JsonObject block) const {
         if (mode == "esc33") return 16 + (size_t)((h + 23) / 24) * (3u * w + 8);
         return 16 + (size_t)((h + 7) / 8) * (w + 8);
     }
+    if (type == "raw") return 16 + strlen(block["d"] | "");
     return 16;   // feed, back, form
 }
 
@@ -239,6 +240,8 @@ void Printer::writeBlock(JsonObject block) {
         qr(String(block["v"] | ""), height);
     } else if (type == "code128") {
         code128(String(block["v"] | ""), block["height"] | 40);
+    } else if (type == "raw") {
+        rawBytes(block["d"] | "");
     } else if (type == "raster") {
         // as<const char *>() statt String: die Bilddaten sind das
         // Groesste in der Nachricht, und eine Kopie davon auf dem Heap
@@ -583,6 +586,25 @@ void Printer::raster(const char *b64, size_t b64len, uint16_t w, uint16_t h,
 // stillschweigend - dann fehlt der Restvorschub und das naechste Etikett
 // beginnt zu frueh. Deshalb schickt der Server ihn nur, wenn er in den
 // Einstellungen ausdruecklich verlangt wird (printer.label_end).
+// Rohe Bytes an den Drucker - nur fuer die Testknoepfe der Oberflaeche
+// (services/druckertest.py). Damit laesst sich an einem namenlosen Drucker
+// ausprobieren, welchen Befehl er versteht, ohne fuer jede Variante eine neue
+// Firmware zu bauen. Fachlogik steckt keine darin: welche Bytes es sind,
+// entscheidet der Server.
+void Printer::rawBytes(const char *b64) {
+    uint8_t buf[512];
+    size_t n = 0;
+    if (mbedtls_base64_decode(buf, sizeof(buf), &n, (const unsigned char *)b64,
+                              strlen(b64)) != 0) {
+        log_w("Rohdaten unbrauchbar - uebersprungen");
+        return;
+    }
+    uart.write(buf, n);
+    // Was auch immer die Bytes eingestellt haben: der naechste Block setzt
+    // seinen Zeilenabstand wieder selbst.
+    _spacing = -1;
+}
+
 void Printer::formFeed() {
     uart.write(0x1D); uart.write(0x0C);
 }

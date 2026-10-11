@@ -11,7 +11,7 @@ from ..device import workflow
 from ..device.hub import hub
 from ..models import InventoryItem, PrintJob
 from ..schemas import LabelCreate, LabelCreateResult, PrintJobOut
-from ..services import calibration, hochformat
+from ..services import calibration, druckertest, hochformat
 from ..services import inventory as inv
 from ..services import labels as label_service
 from ..services import settings_store
@@ -190,6 +190,34 @@ async def test_print(
         raise HTTPException(503, "Kein Terminal online – der Drucker hängt am Terminal")
     sent = await workflow.flush_print_queue(session, target)
     return {"ok": bool(sent), "job": job.id}
+
+@router.get("/tests")
+async def list_tests():
+    """Die Testknoepfe: je Befehlsvariante ein Etikett (services/druckertest)."""
+    return druckertest.katalog()
+
+
+@router.post("/tests/{test_id}")
+async def run_test(
+    test_id: str, device_id: str | None = None, session: AsyncSession = Depends(get_session)
+):
+    if test_id not in druckertest.BY_ID:
+        raise HTTPException(404, "Unbekannter Test")
+    printer_cfg = await settings_store.get(session, "printer", {})
+    stack_mm, line_mm = label_service.feed_and_line_mm(printer_cfg)
+    payload = druckertest.build(test_id, stack_mm, line_mm,
+                                int(printer_cfg.get("paper_chars", 32)))
+    target = device_id or (hub.online_ids()[0] if hub.online_ids() else None)
+    if not target:
+        raise HTTPException(503, "Kein Terminal online – der Drucker hängt am Terminal")
+    job = PrintJob(label="TEST", payload=payload, status="queued")
+    session.add(job)
+    await session.commit()
+    await workflow.flush_print_queue(session, target)
+    await session.refresh(job)
+    return {"ok": job.status != "failed", "job": job.id, "status": job.status,
+            "error": job.error}
+
 
 @router.post("/calibrate")
 async def calibrate(

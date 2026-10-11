@@ -1356,6 +1356,9 @@ async def flush_print_queue(
                 f"Firmware des Terminals kann nur mit 9600 Baud drucken, eingestellt "
                 f"sind {baud} - unter Terminals ein Firmware-Update einspielen"
                 if labels.BAUD_FAEHIGKEIT in fehlt else
+                "Firmware des Terminals kennt die Testbefehle noch nicht - "
+                "unter Terminals ein Firmware-Update einspielen"
+                if "raw" in fehlt else
                 "Firmware des Terminals kann kein Hochformat - "
                 "unter Terminals ein Firmware-Update einspielen"
             )
