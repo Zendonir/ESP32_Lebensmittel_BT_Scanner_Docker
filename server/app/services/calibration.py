@@ -90,55 +90,110 @@ def breite_dots(line_mm: float) -> int:
     return min(MARK_WIDTH_DOTS, MAX_WIDTH_DOTS, int(line_mm * DOTS_PER_MM))
 
 
-def build(line_mm: float = 48.0, chars: int = 32) -> dict:
-    """Den Teststreifen als Druckauftrag bauen."""
+def _zeile(text: str, bold: bool = False) -> dict:
+    return {"t": "text", "v": text, "align": 0, "bold": bold, "h": LINE_HEIGHT}
+
+
+def _mm(wert: float) -> str:
+    return f"{wert:.1f}".replace(".", ",")
+
+
+def zeilen_test(stack_mm: float, dead_mm: float = 0.0) -> int:
+    """Wie viele Testzeilen auf ein Etikett passen - hoechstens LINE_COUNT.
+
+    Ueberschrift, zwei Balken und die Beschriftung muessen mit auf dasselbe
+    Etikett: eine Strecke, die ueber die Luecke zum naechsten laeuft, kann
+    man nicht messen.
+    """
+    nutzbar = _nutzbar(stack_mm, dead_mm)
+    rest = nutzbar - 2 * LINE_HEIGHT - 2 * 8
+    return max(2, min(LINE_COUNT, rest // LINE_HEIGHT))
+
+
+def _nutzbar(stack_mm: float, dead_mm: float) -> int:
+    # 16 Punkte Luft wie bei den Etiketten (labels.SAFETY_DOTS): lieber etwas
+    # frei lassen, als die letzte Zeile auf die Kante zu setzen.
+    return int(stack_mm * DOTS_PER_MM) - int(dead_mm * DOTS_PER_MM) - 16
+
+
+def build(stack_mm: float = 30.0, line_mm: float = 48.0, chars: int = 32,
+          dead_mm: float = 0.0) -> dict:
+    """Den Teststreifen als Druckauftrag bauen - ein Test je Etikett.
+
+    Frueher lief der Streifen am Stueck ueber die Rolle. Auf gestanzten
+    Etiketten fiel dabei die Messstrecke ueber die Luecke, und ganze Punkte
+    landeten auf dem Traegerpapier dazwischen. Jetzt ist jedes Stueck
+    hoechstens so hoch wie die bedruckbare Flaeche und wird auf genau eine
+    Teilung aufgefuellt - wie ein Etikett.
+    """
+    pitch = int(stack_mm * DOTS_PER_MM)
     width = breite_dots(line_mm)
     marke = _raster(width, 8)
+    n = zeilen_test(stack_mm, dead_mm)
+    soll_mm = n * LINE_HEIGHT / DOTS_PER_MM
 
-    def zeile(text: str, hoehe: int = LINE_HEIGHT, bold: bool = False) -> dict:
-        return {"t": "text", "v": text, "align": 0, "bold": bold, "h": hoehe}
-
-    blocks: list[dict] = [
-        zeile("KALIBRIERUNG", bold=True),
-        zeile(""),
+    etiketten: list[list[dict]] = [
         # --- 1: gilt ESC 3 in Punkten? ----------------------------------
-        zeile("1) Zeilenabstand", bold=True),
-        dict(marke),
+        [_zeile("1) Zeilenabstand", bold=True), dict(marke),
+         *[_zeile("|") for _ in range(n)],
+         dict(marke), _zeile(f"Innenkanten: {_mm(soll_mm)} mm")],
     ]
-    blocks += [zeile("|") for _ in range(LINE_COUNT)]
-    blocks += [
-        dict(marke),
-        zeile(f"Balken-Innenkanten: {LINE_SOLL_MM:.1f} mm".replace(".", ",")),
-        zeile(""),
-        # --- 2: stimmt die Rastergeometrie? ------------------------------
-        zeile("2) Rasterquadrat", bold=True),
-        zeile(f"Soll: {BOX_SOLL_MM:.1f} x {BOX_SOLL_MM:.1f} mm".replace(".", ",")),
-    ]
+    # --- 2: stimmt die Rastergeometrie? ------------------------------
+    # Jedes Quadrat auf ein eigenes Etikett, mit seinem Buchstaben darueber.
     for buchstabe, name, modus in BOX_MODI:
-        blocks += [zeile(f"{buchstabe}: {name}"), _raster(BOX_DOTS, BOX_DOTS, modus=modus)]
+        etiketten.append([
+            _zeile(f"2{buchstabe.lower()}) Bildmodus {buchstabe}: {name}", bold=True),
+            _zeile(f"Soll {_mm(BOX_SOLL_MM)} x {_mm(BOX_SOLL_MM)} mm"),
+            _raster(BOX_DOTS, BOX_DOTS, modus=modus),
+        ])
+    # --- 3: kann der Drucker rueckwaerts? ----------------------------
+    etiketten.append([
+        _zeile("3) Rückzug", bold=True), dict(marke),
+        {"t": "back", "dots": BACKFEED_DOTS}, dict(marke),
+        _zeile("Zwei Balken oder einer?"),
+    ])
+
+    blocks: list[dict] = []
+    for inhalt in etiketten:
+        hoehe = sum(_hoehe(b) for b in inhalt)
+        blocks += inhalt
+        blocks.append({"t": "feed", "dots": max(0, pitch - hoehe)})
+
+    # --- 4: hat er einen Lueckensensor? ------------------------------
+    # Steht am Ende, weil GS FF auf einem Drucker ohne Sensor eine ganze
+    # Seite auswerfen kann - dann ist wenigstens der Rest schon gedruckt.
     blocks += [
-        zeile(""),
-        # --- 3: kann der Drucker rueckwaerts? ----------------------------
-        zeile("3) Rückzug", bold=True),
-        dict(marke),
-        {"t": "back", "dots": BACKFEED_DOTS},
-        dict(marke),
-        zeile("Zwei Balken oder einer?"),
-        zeile(""),
-        # --- 4: hat er einen Lueckensensor? ------------------------------
-        zeile("4) Lückensensor", bold=True),
-        zeile("Jetzt GS FF:"),
+        _zeile("4) Lückensensor", bold=True),
+        _zeile("Jetzt GS FF:"),
         {"t": "feed", "dots": 0, "form": True},
-        zeile("<<< oben am Etikett?", bold=True),
-        zeile(""),
-        zeile("Ende."),
-        {"t": "feed", "dots": 80},
+        _zeile("<<< oben am Etikett?", bold=True),
+        _zeile("Ende."),
+        {"t": "feed", "dots": max(0, pitch - 2 * LINE_HEIGHT)},
     ]
-    return {"chars": chars, "rotate": False, "blocks": blocks}
+    return {"chars": chars, "rotate": False, "blocks": blocks, "soll_mm": soll_mm}
+
+
+def _hoehe(block: dict) -> int:
+    # Dieselbe Rechnung wie labels.block_dots, ohne den Import im Kreis.
+    if block["t"] == "back":
+        return -int(block["dots"])
+    if block["t"] == "raster":
+        return -(-int(block["h"]) // 8) * 8
+    if block["t"] == "feed":
+        return int(block.get("dots", 0))
+    return int(block.get("h", LINE_HEIGHT))
 
 
 # Was der Benutzer ablesen soll, und was die Antwort bedeutet. Steht hier und
 # nicht in der Oberflaeche, damit Messung und Deutung nicht auseinanderlaufen.
+def anleitung(soll_mm: float = LINE_SOLL_MM) -> list[dict]:
+    """Die Anleitung mit dem Sollwert, der auf dem Streifen steht."""
+    schritte = [dict(s) for s in ANLEITUNG]
+    schritte[0]["messen"] = ("Abstand zwischen den Innenkanten der beiden Balken. "
+                             f"Soll: {_mm(soll_mm)} mm")
+    return schritte
+
+
 ANLEITUNG: list[dict] = [
     {
         "nr": 1,
@@ -154,7 +209,7 @@ ANLEITUNG: list[dict] = [
     {
         "nr": 2,
         "titel": "Rasterquadrat",
-        "messen": f"Breite und Höhe der drei schwarzen Quadrate A, B und C. "
+        "messen": f"Breite und Höhe der schwarzen Quadrate A, B und C (je ein Etikett). "
                   f"Soll: {BOX_SOLL_MM:.1f} x {BOX_SOLL_MM:.1f} mm".replace(".", ","),
         "bedeutet": "Das Quadrat, das genau so groß und wirklich quadratisch "
                     "ist, zeigt den Bildbefehl, den dein Drucker richtig "
@@ -187,8 +242,8 @@ ANLEITUNG: list[dict] = [
     {
         "nr": 5,
         "titel": "Totbereich",
-        "messen": "Abstand von der Oberkante des Etiketts bis zum ersten "
-                  "gedruckten Punkt.",
+        "messen": "Abstand von der Oberkante eines Etiketts bis zu seiner "
+                  "ersten Zeile.",
         "bedeutet": "Das ist der Streifen, den der Druckkopf nicht erreicht. "
                     "Unter 'Totbereich (mm)' eintragen; das Layout wird dann "
                     "entsprechend gekürzt.",

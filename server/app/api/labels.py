@@ -197,21 +197,20 @@ async def calibrate(
 ):
     """Kalibrierstreifen drucken.
 
-    Kein Etikett, sondern ein Messstreifen ueber mehrere Teilungen: er laeuft
-    bewusst nicht durch render_label(), damit das Zuschneiden die Messung
-    nicht schon verfaelscht. Was gemessen werden soll und was die Antwort
+    Ein Test je Etikett, jedes Stueck auf genau eine Teilung aufgefuellt -
+    sonst faellt die Messstrecke ueber die Luecke. Er laeuft trotzdem nicht
+    durch render_label(), damit kein Layout die Messung verfaelscht. Was gemessen werden soll und was die Antwort
     bedeutet, steht in `anleitung` - und zwar aus derselben Quelle wie der
     Druck, damit Streifen und Erklaerung nicht auseinanderlaufen.
     """
     printer_cfg = await settings_store.get(session, "printer", {})
-    _, line_mm = label_service.feed_and_line_mm(printer_cfg)
+    stack_mm, line_mm = label_service.feed_and_line_mm(printer_cfg)
     chars = int(printer_cfg.get("paper_chars", 32))
+    dead_mm = float(printer_cfg.get("label_dead_zone_mm", 0) or 0)
 
-    job = PrintJob(
-        label="KALIBRIERUNG",
-        payload=calibration.build(line_mm=line_mm, chars=chars),
-        status="queued",
-    )
+    payload = calibration.build(stack_mm=stack_mm, line_mm=line_mm, chars=chars,
+                                dead_mm=dead_mm)
+    job = PrintJob(label="KALIBRIERUNG", payload=payload, status="queued")
     session.add(job)
     # Die Rolle wird hier bewusst nicht belastet: ein Messstreifen ist kein
     # Etikett, und er verbraucht ohnehin mehrere Teilungen.
@@ -239,7 +238,7 @@ async def calibrate(
             sum(label_service.block_dots(b) for b in job.payload["blocks"])
             / label_service.DOTS_PER_MM
         ),
-        "anleitung": calibration.ANLEITUNG,
+        "anleitung": calibration.anleitung(payload["soll_mm"]),
     }
 
 

@@ -209,3 +209,33 @@ def test_rasterdaten_sind_vollstaendig_und_randgenau():
     roh = base64.b64decode(krumm["d"])
     assert len(roh) == ((daten_breite + 7) // 8) * 8
     assert roh[12] == 0xF0                        # nur die ersten vier Bit
+
+
+@pytest.mark.parametrize("hoehe,tot", [(30, 0), (30, 4), (25, 0), (40, 2)])
+def test_kalibrierstreifen_ein_test_je_etikett(hoehe, tot):
+    """Auf gestanzten Etiketten fiel die Messstrecke ueber die Luecke.
+
+    Jedes Stueck bis zum Lueckensensor muss in die bedruckbare Flaeche passen
+    und genau eine Teilung verbrauchen - sonst rutscht das naechste Stueck
+    wieder auf die Kante.
+    """
+    from app.services import calibration as K
+
+    job = K.build(stack_mm=hoehe, line_mm=50, dead_mm=tot)
+    pitch = hoehe * K.DOTS_PER_MM
+    nutzbar = pitch - int(tot * K.DOTS_PER_MM)
+    stuecke, aktuell = [], []
+    for b in job["blocks"]:
+        if b.get("form"):
+            break
+        if b["t"] == "feed":
+            stuecke.append((aktuell, b["dots"]))
+            aktuell = []
+        else:
+            aktuell.append(b)
+    assert len(stuecke) == 5          # Zeilenabstand, A, B, C, Rueckzug
+    for inhalt, auffuellen in stuecke:
+        belegt = sum(K._hoehe(b) for b in inhalt)
+        assert max(belegt, sum(max(K._hoehe(b), 0) for b in inhalt)) <= nutzbar
+        assert belegt + auffuellen == pitch
+    assert job["soll_mm"] * K.DOTS_PER_MM == K.zeilen_test(hoehe, tot) * K.LINE_HEIGHT

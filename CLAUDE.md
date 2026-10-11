@@ -154,6 +154,7 @@ cd firmware && pio run --target upload # flashen
 | Terminal bietet fuer immer "Update" an | Die Firmware muss unter demselben Namen laufen, unter dem der Server sie aus dem Release ablegt: `FIRMWARE_VERSION` = Release-Tag, gesetzt im Release-Bau, gelesen von `scripts/version.py` |
 | Der Server soll sich selbst aktualisieren | Er laedt und startet **keinen** Code aus dem Netz. `services/deploy.py` schickt nur eine Anfrage an einen Dienst, der den Container ersetzen darf; das Abbild bleibt das, was in der Registry steht |
 | GitHub-Vergleich meldet immer "aktuell" | `/compare/base...head` liefert `ahead_by` fuer das, was head voraus ist - `behind_by` ist die Gegenrichtung und bleibt dabei 0 |
+| Messstreifen faellt in die Etikettenluecken | Ein Test je Etikett, jedes Stueck auf genau eine Teilung aufgefuellt (`calibration.build(stack_mm=…)`). Die Zeilenstrecke richtet sich nach der Etikettenhoehe, der Sollwert steht im Druck und in `anleitung()` |
 | Namenloser Drucker, kein Datenblatt | Nicht raten: `POST /api/labels/calibrate` druckt einen Messstreifen, der Zeilenabstand, Rastergeometrie, Rueckzug und Lueckensensor mit dem Lineal ablesbar macht (`services/calibration.py`) |
 | Umlaute tanzen in der Zeile | Hinting staucht Zeichen mit Aufsatz; `gen_gfx_font.py` zieht die Grundlinie nach |
 | Kamera-Scan geht am iPhone nicht | Safari hat kein `BarcodeDetector` (ZXing springt ein) **und** braucht HTTPS |
