@@ -786,8 +786,11 @@ def render_preview_svg(payload: dict, cfg: dict) -> str:
     for block in payload.get("blocks", []):
         kind = block.get("t")
         dots = block_dots(block)
-        if kind in ("back", "form", "feed"):
-            y += dots if kind != "back" else 0
+        # Rueckzug (ESC j als "back", ESC K als "raw") verschiebt nichts in
+        # der Vorschau: die gestrichelte Linie zeigt ihn schon. Als Vorschub
+        # gerechnet rutschte die erste Zeile ueber den oberen Rand.
+        if kind in ("back", "form", "feed", "raw"):
+            y += dots if kind in ("form", "feed") else 0
             continue
         if kind == "text":
             large = block.get("large")

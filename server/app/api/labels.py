@@ -61,7 +61,7 @@ async def list_layouts(session: AsyncSession = Depends(get_session)):
         # zur Perforation und wuerde jedes Layout als randvoll ausweisen, der
         # Rueckzug zaehlt negativ und wuerde es kuenstlich leer rechnen.
         used = label_service.total_dots(
-            [b for b in payload["blocks"] if b.get("t") not in ("feed", "back")]
+            [b for b in payload["blocks"] if b.get("t") not in ("feed", "back", "raw")]
         )
         codes = [b["t"] for b in payload["blocks"] if b["t"] in ("qr", "code128")]
         mm = used / label_service.DOTS_PER_MM

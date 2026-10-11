@@ -63,3 +63,15 @@ def test_mhd_bleibt_wenn_es_eng_wird():
     p = labels.render_label(ITEM, {**_cfg(zeilen), "label_height_mm": 20})
     assert any(b["t"] == "row" and b["k"] == "MHD" for b in p["blocks"])
     assert p["overflow"] == 0 or any(b["t"] in ("qr", "code128") for b in p["blocks"])
+
+
+def test_vorschau_mit_esc_k_zeigt_die_erste_zeile():
+    """Der raw-Block des Rueckzugs (h negativ) schob die erste Zeile ueber den Rand."""
+    import re
+
+    cfg = {**_cfg([{"feld": "name", "stil": "gross"}, {"feld": "code"}]),
+           "backfeed_dots": 48, "backfeed_cmd": "esck", "label_dead_zone_mm": 8}
+    p = labels.render_label(ITEM, cfg)
+    svg = labels.render_preview_svg(p, cfg)
+    ys = [int(y) for y in re.findall(r'<text[^>]*\by="(-?\d+)"', svg)]
+    assert ys and min(ys) > 0
