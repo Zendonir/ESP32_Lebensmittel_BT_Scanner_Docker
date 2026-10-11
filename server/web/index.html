@@ -231,7 +231,13 @@
           <span class="hint">Messstreifen Punkt 5: unbedruckter Streifen am Etikettenanfang</span></label>
         <label class="field">Rückzug (Punkte)
           <input data-setting="printer.backfeed_dots" data-art="int" type="number" min="0" max="100" step="8">
-          <span class="hint">Messstreifen Punkt 3: nur bei <i>einem</i> Balken, sonst 0 lassen. 8 Punkte = 1 mm</span></label>
+          <span class="hint">Totbereich in Punkten (mm × 8), wenn der Drucker zurückfahren kann – sonst 0</span></label>
+        <label class="field">Rückzugsbefehl
+          <select data-setting="printer.backfeed_cmd">
+            <option value="escj">ESC j (Epson)</option>
+            <option value="esck">ESC K</option>
+          </select>
+          <span class="hint">Der unter „Einzelne Befehle testen“, bei dem die Oberkanten 4 mm auseinander lagen</span></label>
         <label class="field">Etikettenende
           <select data-setting="printer.label_end">
             <option value="feed">berechneter Vorschub</option>

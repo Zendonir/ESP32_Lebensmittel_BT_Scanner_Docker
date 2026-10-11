@@ -9,6 +9,7 @@ Etiketten, die physisch noch im Schrank klebten.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -181,6 +182,9 @@ def block_dots(block: dict) -> int:
         return -(-int(block.get("h", 0)) // QR_BAND) * QR_BAND
     if kind in ("feed", "form"):
         return int(block.get("dots", 0))
+    if kind == "raw":
+        # Rohe Bytes (Rueckzug mit ESC K): `h` ist, was sie vorschieben.
+        return int(block.get("h", 0))
     if kind == "back":
         # Rueckzug zaehlt negativ. Dadurch stimmt total_dots() weiterhin mit
         # dem Papiervorschub ueberein, den ein Etikett insgesamt verursacht -
@@ -250,6 +254,7 @@ TITLES: dict[str, str] = {
 # verteilt sendet - eine aeltere druckt statt dessen leere Etiketten.
 BILD_LAYOUTS = ("hochformat",)
 BILD_FAEHIGKEIT = "raster2"
+RAW_FAEHIGKEIT = "raw"
 DEFAULT_LAYOUT = "klassisch"
 
 # Geschwindigkeit der Leitung zum Drucker. 9600 ist der Werkszustand der
@@ -546,8 +551,18 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
             "Teilung %d Punkte). Kleinerer Code oder kuerzerer Zuschnitt noetig.",
             item.get("label", "?"), overflow, layout, pitch,
         )
+    noetig: list[str] = []
     if backfeed:
-        blocks.insert(0, {"t": "back", "dots": backfeed})
+        if printer_cfg.get("backfeed_cmd") == "esck":
+            # ESC K kennt die Firmware nicht als eigenen Block; er geht als
+            # rohe Bytes hinaus. Ein Merkmal am "back"-Block haette eine
+            # neue Firmware gebraucht - und eine aeltere haette stattdessen
+            # ESC j geschickt, das dieser Drucker ignoriert.
+            blocks.insert(0, {"t": "raw", "h": -backfeed, "d": base64.b64encode(
+                bytes([0x1B, 0x4B, backfeed])).decode("ascii")})
+            noetig.append(RAW_FAEHIGKEIT)
+        else:
+            blocks.insert(0, {"t": "back", "dots": backfeed})
 
     # Rest bis zur Perforation vorschieben, damit das naechste Etikett oben
     # anfaengt - aber nur den Rest, nicht pauschal. total_dots() enthaelt den
@@ -592,7 +607,7 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
         # Beim Rasterblock ist `h` die Zahl der Bildzeilen und damit schon
         # die Hoehe - sie hier zu ueberschreiben (aufgerundet auf ganze
         # Baender) haette die Firmware mehr Daten erwarten lassen, als da sind.
-        if block.get("t") not in ("feed", "form", "back", "raster"):
+        if block.get("t") not in ("feed", "form", "back", "raster", "raw"):
             block["h"] = block_dots(block)
 
     payload = {
@@ -618,7 +633,9 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     if layout in BILD_LAYOUTS:
         # Der Server prueft das vor dem Senden: ein Terminal ohne diese
         # Faehigkeit bekaeme sonst leere Etiketten statt einer Meldung.
-        payload["braucht"] = BILD_FAEHIGKEIT
+        noetig.insert(0, BILD_FAEHIGKEIT)
+    if noetig:
+        payload["braucht"] = noetig[0] if len(noetig) == 1 else noetig
     return payload
 
 

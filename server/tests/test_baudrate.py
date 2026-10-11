@@ -98,3 +98,27 @@ def test_andere_baudrate_nur_an_terminals_die_umschalten(baud, caps, erwartet):
     if erwartet == "sent":
         auftraege = [json.loads(g) for g in gesendet if json.loads(g).get("t") == "print"]
         assert auftraege and auftraege[-1]["baud"] == baud
+
+
+# ------------------------------------------------- Rueckzug mit ESC K
+@pytest.mark.parametrize("layout", ["standard", "hochformat"])
+def test_rueckzug_mit_esc_k_geht_als_rohe_bytes(layout):
+    import base64
+
+    cfg = {"label_layout": layout, "backfeed_dots": 24, "backfeed_cmd": "esck",
+           "label_dead_zone_mm": 3, "label_feed_edge": "hoehe"}
+    payload = labels.render_label(ITEM, cfg)
+    erster = payload["blocks"][0]
+    assert erster["t"] == "raw" and base64.b64decode(erster["d"]) == bytes([0x1B, 0x4B, 24])
+    assert not any(b["t"] == "back" for b in payload["blocks"])
+    braucht = payload["braucht"]
+    assert labels.RAW_FAEHIGKEIT in (braucht if isinstance(braucht, list) else [braucht])
+    # Die Teilung stimmt weiter: der Rueckzug zaehlt negativ wie bei ESC j.
+    ohne = labels.render_label(ITEM, {**cfg, "backfeed_cmd": "escj"})
+    assert labels.total_dots(payload["blocks"]) == labels.total_dots(ohne["blocks"])
+
+
+def test_rueckzug_esc_j_bleibt_wie_bisher():
+    payload = labels.render_label(ITEM, {"label_layout": "standard", "backfeed_dots": 24})
+    assert payload["blocks"][0] == {"t": "back", "dots": 24}
+    assert "braucht" not in payload

@@ -74,6 +74,10 @@ DEFAULTS: dict[str, Any] = {
         # Druckkopf und Abrisskante zurueck. 0 = aus, weil nicht jeder
         # ESC/POS-Drucker rueckwaerts fahren kann.
         "backfeed_dots": 0,
+        # Mit welchem Befehl der Drucker zurueckfaehrt: "escj" (ESC j, Epson)
+        # oder "esck" (ESC K, viele namenlose Drucker). Herausfinden ueber die
+        # Testknoepfe unter Etiketten -> Einrichten.
+        "backfeed_cmd": "escj",
         # Nur fuer Layouts, die als Bild gedruckt werden (Hochformat).
         #
         # Welcher Rasterbefehl auf einem namenlosen Drucker masshaltig

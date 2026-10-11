@@ -1359,7 +1359,8 @@ async def flush_print_queue(
             job.status = "failed"
             job.error = job.error or "zu viele Versuche"
             continue
-        noetig = [n for n in ((job.payload or {}).get("braucht"),) if n]
+        braucht = (job.payload or {}).get("braucht")
+        noetig = [n for n in (braucht if isinstance(braucht, list) else [braucht]) if n]
         if baud != labels.BAUD_STANDARD:
             noetig.append(labels.BAUD_FAEHIGKEIT)
         if noetig and kann is None:
