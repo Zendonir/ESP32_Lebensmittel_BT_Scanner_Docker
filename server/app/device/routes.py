@@ -123,7 +123,7 @@ async def device_socket(ws: WebSocket) -> None:
 
     await ws.accept()
     conn = await hub.register(device_id, ws)
-    sess = workflow.session_for(device_id)
+    sess = workflow.new_session(device_id)
     log.info("Geraet verbunden: %s", device_id)
 
     heartbeat: asyncio.Task | None = None
@@ -153,10 +153,12 @@ async def device_socket(ws: WebSocket) -> None:
             heartbeat.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat
-        await hub.unregister(conn)
-        workflow.drop_session(device_id)
-        await _mark_offline(device_id)
-        await hub.notify_ui("devices")
+        # Hat sich das Geraet inzwischen neu verbunden, gehoeren Sitzung und
+        # Online-Status der neuen Verbindung - nicht anfassen.
+        if await hub.unregister(conn):
+            workflow.drop_session(device_id, sess)
+            await _mark_offline(device_id)
+            await hub.notify_ui("devices")
         with contextlib.suppress(Exception):
             await ws.close()
 

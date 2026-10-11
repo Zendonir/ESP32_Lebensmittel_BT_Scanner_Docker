@@ -176,8 +176,23 @@ def session_for(device_id: str) -> DeviceSession:
     return sess
 
 
-def drop_session(device_id: str) -> None:
-    _sessions.pop(device_id, None)
+def drop_session(device_id: str, sess: DeviceSession | None = None) -> None:
+    """Sitzung verwerfen - mit `sess` nur, wenn es noch genau diese ist.
+
+    Ohne diese Pruefung loeschte eine alte Verbindung, die erst nach dem
+    Reconnect abgebaut wurde, die Sitzung der neuen samt ihren Faehigkeiten
+    aus dem hello. Danach galt das hello als ausstehend, und jeder Auftrag,
+    der eine Faehigkeit braucht, blieb fuer immer auf "queued".
+    """
+    if sess is None or _sessions.get(device_id) is sess:
+        _sessions.pop(device_id, None)
+
+
+def new_session(device_id: str) -> DeviceSession:
+    """Frische Sitzung fuer eine neue Verbindung - nie die der alten erben."""
+    sess = DeviceSession(device_id=device_id)
+    _sessions[device_id] = sess
+    return sess
 
 
 def rename_location(old: str, new: str) -> None:

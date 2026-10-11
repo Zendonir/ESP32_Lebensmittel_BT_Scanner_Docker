@@ -88,11 +88,18 @@ class Hub:
             self._devices[device_id] = conn
         return conn
 
-    async def unregister(self, conn: DeviceConnection) -> None:
+    async def unregister(self, conn: DeviceConnection) -> bool:
+        """Verbindung austragen. True, wenn sie noch die aktuelle war.
+
+        False heisst: das Geraet hat sich laengst neu verbunden, und wer
+        aufraeumt, darf den Zustand der neuen Verbindung nicht anfassen.
+        """
         async with self._lock:
-            if self._devices.get(conn.device_id) is conn:
+            aktuell = self._devices.get(conn.device_id) is conn
+            if aktuell:
                 del self._devices[conn.device_id]
         conn.alive = False
+        return aktuell
 
     def get(self, device_id: str) -> DeviceConnection | None:
         conn = self._devices.get(device_id)
