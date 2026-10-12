@@ -88,3 +88,13 @@ def test_ablauf_einfach_rueckzug_laenge_vorschub():
     inhalt = sum(labels.block_dots(x) for x in b[1:-1])
     assert inhalt == 25 * 8                                 # genau die Hoehe
     assert labels.total_dots(b) == -48 + 200 + 24
+
+
+def test_weggelassene_zeilen_werden_genannt():
+    zeilen = [{"feld": f, "stil": "zeile"} for f in
+              ("name", "brand", "quantity", "location", "added_date", "household",
+               "category", "label")] + [{"feld": "code"}]
+    p = labels.render_label(ITEM, {**_cfg(zeilen), "label_height_mm": 20})
+    assert p["weggelassen"], "bei 20 mm passt nicht alles"
+    gedruckt = {b.get("k") for b in p["blocks"] if b["t"] == "row"}
+    assert not gedruckt & set(p["weggelassen"])

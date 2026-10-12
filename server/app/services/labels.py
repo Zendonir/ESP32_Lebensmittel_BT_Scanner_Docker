@@ -652,7 +652,14 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
             "paper_chars", settings.label_paper_chars)) * 12)
         blocks = hochformat.bloecke(item, printer_cfg, budget, kopf)
     else:
-        blocks = _fit(_build(layout, item, printer_cfg, chars), budget)
+        alle = _build(layout, item, printer_cfg, chars)
+        blocks = _fit(alle, budget)
+        # Was _fit() aus Platzgruenden weggelassen hat - sonst fehlt eine
+        # Zeile auf dem Etikett, ohne dass irgendwo steht, warum.
+        weggelassen = [
+            b.get("k") or b.get("v") or b.get("t")
+            for b in alle if b.get("t") != "feed" and not any(b is x for x in blocks)
+        ]
 
     # Passt es immer noch nicht, muss das jemand erfahren.
     #
@@ -667,6 +674,8 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
             "Teilung %d Punkte). Kleinerer Code oder kuerzerer Zuschnitt noetig.",
             item.get("label", "?"), overflow, layout, pitch,
         )
+    if layout in BILD_LAYOUTS:
+        weggelassen = []
     noetig: list[str] = []
     if backfeed:
         if printer_cfg.get("backfeed_cmd") == "esck":
@@ -756,6 +765,7 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
         # Wie viele Punkte ueber die bedruckbare Hoehe hinausgehen. 0 heisst:
         # das Etikett endet genau an der Perforation.
         "overflow": overflow,
+        "weggelassen": weggelassen,
         "blocks": blocks,
     }
     if layout in BILD_LAYOUTS:

@@ -935,6 +935,8 @@ async function loadLayouts() {
     <div class="fill">${l.passt
       ? `passt · braucht ${fmtMm(l.mm)} mm`
       : `<b>passt nicht</b> · braucht ${fmtMm(l.mm)} mm`}</div>
+    ${(l.weggelassen || []).length ? `<div class="fill" style="color:var(--warn,#cc9218)">
+      kein Platz für: ${esc(l.weggelassen.join(', '))}</div>` : ''}
   </div>`).join('');
 }
 

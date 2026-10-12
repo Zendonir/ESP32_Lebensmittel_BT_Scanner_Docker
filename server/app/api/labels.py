@@ -30,6 +30,8 @@ _SAMPLE = {
     "quantity": 500,
     "unit": "g",
     "location": "Kühlschrank",
+    "category": "Fleisch & Fisch",
+    "household": "Zuhause",
 }
 
 
@@ -81,6 +83,7 @@ async def list_layouts(session: AsyncSession = Depends(get_session)):
             "dots": used,
             "height_dots": payload["height_dots"],
             "svg": _vorschau(name, payload, cfg),
+            "weggelassen": payload.get("weggelassen", []),
         })
     return out
 
@@ -167,20 +170,10 @@ async def test_print(
     device_id: str | None = None, session: AsyncSession = Depends(get_session)
 ):
     printer_cfg = await settings_store.get(session, "printer", {})
-    payload = label_service.render_label(
-        {
-            "label": "LEB000000",
-            "name": "Testetikett",
-            "brand": "Lebensmittel-Scanner",
-            "subcategory": "",
-            "expiry_date": "2099-12-31",
-            "added_date": "2099-01-01",
-            "quantity": 1,
-            "unit": "",
-            "location": "Test",
-        },
-        printer_cfg,
-    )
+    # Dasselbe Beispiel wie in der Vorschau: was dort steht, kommt so aus dem
+    # Drucker. Ein eigener Testartikel mit anderen Angaben liess Zeilen
+    # scheinbar verschwinden.
+    payload = label_service.render_label(_SAMPLE, printer_cfg)
     job = PrintJob(label="TEST", payload=payload, status="queued")
     session.add(job)
     await label_service.consume_roll(session, 1)
