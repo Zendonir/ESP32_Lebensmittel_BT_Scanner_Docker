@@ -13,7 +13,7 @@ import tempfile
 import time
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -79,6 +79,10 @@ async def patch_device(
     for key, value in body.model_dump(exclude_unset=True, exclude_none=True).items():
         setattr(row, key, value)
     await session.commit()
+    # Laufende Sitzung sofort umstellen - sonst lagerte das Terminal bis zum
+    # naechsten Reconnect weiter im alten Haushalt ein.
+    if body.household is not None:
+        workflow.session_for(device_id).household = row.household
 
     if body.active_location is not None:
         sess = workflow.session_for(device_id)
@@ -204,11 +208,17 @@ async def patch_settings(
 # ------------------------------------------------------------------ Diagnose
 @router.get("/events", response_model=list[EventOut])
 async def list_events(
+    request: Request,
     session: AsyncSession = Depends(get_session),
     type: str = "",
     limit: int = Query(200, ge=1, le=2000),
 ):
+    from ..services import haushalte
+
     stmt = select(Event).order_by(Event.id.desc()).limit(limit)
+    haushalt = await haushalte.aus_anfrage(request, session)
+    if haushalt:
+        stmt = stmt.where(Event.household == haushalt)
     if type:
         stmt = stmt.where(Event.type == type)
     return (await session.execute(stmt)).scalars().all()

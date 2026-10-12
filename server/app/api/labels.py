@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +11,7 @@ from ..device import workflow
 from ..device.hub import hub
 from ..models import InventoryItem, PrintJob
 from ..schemas import LabelCreate, LabelCreateResult, PrintJobOut
-from ..services import calibration, druckertest, hochformat
+from ..services import calibration, druckertest, haushalte, hochformat
 from ..services import inventory as inv
 from ..services import labels as label_service
 from ..services import settings_store
@@ -89,8 +89,10 @@ async def list_layouts(session: AsyncSession = Depends(get_session)):
 
 
 @router.post("", response_model=LabelCreateResult, status_code=201)
-async def create_labels(body: LabelCreate, session: AsyncSession = Depends(get_session)):
+async def create_labels(body: LabelCreate, request: Request,
+                        session: AsyncSession = Depends(get_session)):
     """Derselbe Weg wie der Geraete-Workflow - eine Implementierung, zwei Aufrufer."""
+    haushalt = await haushalte.aus_anfrage(request, session)
     items, jobs = await inv.add_items(
         session,
         name=body.name,
@@ -104,12 +106,15 @@ async def create_labels(body: LabelCreate, session: AsyncSession = Depends(get_s
         location=body.location,
         count=body.count,
         want_print=body.print,
+        household=haushalt or "",
     )
     await session.commit()
 
     printed = False
     if jobs:
-        target = body.device_id or (hub.online_ids()[0] if hub.online_ids() else None)
+        # Gedruckt wird am Terminal des eigenen Haushalts, wenn eines da ist.
+        target = body.device_id or workflow.terminal_fuer(haushalt) or (
+            hub.online_ids()[0] if hub.online_ids() else None)
         if target:
             printed = await workflow.flush_print_queue(session, target) > 0
 

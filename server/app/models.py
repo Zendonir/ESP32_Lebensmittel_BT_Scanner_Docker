@@ -53,6 +53,20 @@ class Category(Base, TimestampMixin):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class Household(Base, TimestampMixin):
+    """Ein Haushalt. Artikel, Terminals und Protokoll tragen seinen Namen.
+
+    Als Name und nicht als Verweis - wie Kategorie und Lagerort. Umbenennen
+    laeuft deshalb ueber services/haushalte.umbenennen(), das nachzieht.
+    """
+
+    __tablename__ = "households"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class Location(Base, TimestampMixin):
     __tablename__ = "locations"
 
@@ -157,6 +171,9 @@ class Event(Base):
     name: Mapped[str] = mapped_column(String(255), default="")
     location: Mapped[str] = mapped_column(String(100), default="")
     device: Mapped[str] = mapped_column(String(64), default="")
+    # Haushalt, dem der Artikel gehoert. Bei einer Fremdentnahme steht der
+    # entnehmende Haushalt zusaetzlich in payload["fremd"].
+    household: Mapped[str] = mapped_column(String(100), default="", index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
@@ -186,6 +203,8 @@ class Device(Base, TimestampMixin):
     firmware: Mapped[str] = mapped_column(String(32), default="")
     ip: Mapped[str] = mapped_column(String(64), default="")
     active_location: Mapped[str] = mapped_column(String(100), default="")
+    # Haushalt, dem alles gehoert, was an diesem Terminal eingelagert wird.
+    household: Mapped[str] = mapped_column(String(100), default="")
     has_printer: Mapped[bool] = mapped_column(Boolean, default=False)
     online: Mapped[bool] = mapped_column(Boolean, default=False)
     last_seen: Mapped[datetime | None] = mapped_column(

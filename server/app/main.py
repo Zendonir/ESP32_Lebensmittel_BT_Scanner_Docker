@@ -6,8 +6,11 @@ und Geraetekopplung liegen alle hier. Das ESP32 ist ab jetzt ein Terminal.
 
 from __future__ import annotations
 
+import html
+import json
 import logging
 import os
+import re
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -18,11 +21,11 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
-from .api import catalog, firmware, inventory, labels, system
+from .api import catalog, firmware, haushalte as haushalte_api, inventory, labels, system
 from .config import settings
 from .db import init_db, session_scope
 from .device import routes as device_routes
-from .services import scheduler, seed, updates
+from .services import haushalte, scheduler, seed, updates
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -88,14 +91,32 @@ class _Oberflaeche(StaticFiles):
         return antwort
 
 
-def _seite(datei: str, medientyp: str = "text/html; charset=utf-8") -> Response:
+def _seite(datei: str, medientyp: str = "text/html; charset=utf-8",
+           haushalt: tuple[int, str] | None = None) -> Response:
     """Eine Seite ausliefern und ihre Dateiadressen mit der Kennung versehen.
 
     Die Seite selbst wird nie zwischengespeichert - sie ist der Einstieg, und
     aus ihr erfaehrt der Browser die neuen Adressen.
+
+    Mit `haushalt` liegt sie unter /h/<id>/: Verweise auf die Handy- und die
+    Desktop-Seite und das Manifest bleiben in diesem Haushalt. Als Web-App
+    gespeichert startet sie deshalb immer dort.
     """
     text = (WEB_DIR / datei).read_text("utf-8")
     text = text.replace("/static/", f"{ASSET_PREFIX}{_asset_version()}/")
+    if haushalt:
+        hid, name = haushalt
+        basis = f"/h/{hid}"
+        for alt, neu in (('href="/manifest.json"', f'href="{basis}/manifest.json"'),
+                         ("location.replace('/mobile')", f"location.replace('{basis}/mobile')"),
+                         ('href="/mobile"', f'href="{basis}/mobile"'),
+                         ('href="/?desktop=1"', f'href="{basis}/?desktop=1"')):
+            text = text.replace(alt, neu)
+        sicher = html.escape(name, quote=True)
+        text = text.replace(
+            "<head>", f'<head>\n  <meta name="haushalt" content="{hid}" data-name="{sicher}">', 1)
+        text = re.sub(r"<title>(.*?)</title>", lambda m: f"<title>{sicher} · {m.group(1)}</title>",
+                      text, count=1)
     return Response(
         text,
         media_type=medientyp,
@@ -103,11 +124,38 @@ def _seite(datei: str, medientyp: str = "text/html; charset=utf-8") -> Response:
     )
 
 
+def _auswahl(liste) -> Response:
+    """Startseite bei mehreren Haushalten: einen waehlen."""
+    knoepfe = "".join(
+        f'<a class="haus" href="/h/{h.id}/">{html.escape(h.name)}</a>' for h in liste)
+    seite = f"""<!doctype html><html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Haushalt wählen · Lebensmittel-Scanner</title>
+<link rel="stylesheet" href="{ASSET_PREFIX}{_asset_version()}/css/app.css">
+<style>
+ body{{display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}}
+ .wahl{{max-width:420px;width:100%;padding:24px}}
+ .haus{{display:block;padding:18px 20px;margin:10px 0;border-radius:14px;font-size:20px;
+   text-decoration:none;background:var(--surface);color:var(--text);border:1px solid var(--border);box-shadow:var(--shadow)}}
+ .haus:hover{{border-color:var(--primary)}}
+ .alle{{display:block;margin-top:18px;text-align:center;opacity:.7}}
+</style></head><body><div class="wahl">
+<h1 style="margin:0 0 6px">Welcher Haushalt?</h1>
+<p class="muted" style="margin:0 0 14px">Danach als Web-App speichern – sie startet dann
+immer direkt in diesem Haushalt.</p>
+{knoepfe}
+<a class="alle" href="/?alle=1">Verwaltung – alle Haushalte</a>
+</div></body></html>"""
+    return Response(seite, media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-cache"})
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     async with session_scope() as session:
         await seed.run(session)
+        await haushalte.einrichten(session)
     scheduler.start()
     if settings.device_token == "change-me":
         log.warning(
@@ -171,6 +219,7 @@ app.include_router(catalog.router, dependencies=_guard)
 app.include_router(labels.router, dependencies=_guard)
 app.include_router(system.router, dependencies=_guard)
 app.include_router(firmware.router, dependencies=_guard)
+app.include_router(haushalte_api.router, dependencies=_guard)
 # Beide ohne _guard - sie melden sich ueber DEVICE_TOKEN an, nicht ueber
 # das Web-Passwort, das die Terminals gar nicht kennen.
 app.include_router(firmware.public_router)
@@ -215,12 +264,56 @@ if WEB_DIR.is_dir():
 
     app.mount("/static", _Oberflaeche(directory=WEB_DIR), name="static")
 
+    async def _haushalt_oder_404(hid: int) -> tuple[int, str]:
+        from .models import Household
+
+        async with session_scope() as session:
+            row = await session.get(Household, hid)
+        if row is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Haushalt unbekannt")
+        return row.id, row.name
+
     @app.get("/", include_in_schema=False)
-    async def index(_: None = Depends(require_ui_auth)):
+    async def index(request: Request, _: None = Depends(require_ui_auth)):
+        # Mehrere Haushalte: erst waehlen. `?alle` ist die Verwaltung ueber
+        # alle Haushalte hinweg (und der Weg zurueck fuer alte Lesezeichen).
+        if "alle" not in request.query_params and "desktop" not in request.query_params:
+            async with session_scope() as session:
+                liste = await haushalte.alle(session)
+            if len(liste) > 1:
+                return _auswahl(liste)
         return _seite("index.html")
 
+    @app.get("/h/{hid}", include_in_schema=False)
+    @app.get("/h/{hid}/", include_in_schema=False)
+    async def haushalt_index(hid: int, _: None = Depends(require_ui_auth)):
+        return _seite("index.html", haushalt=await _haushalt_oder_404(hid))
+
+    @app.get("/h/{hid}/mobile", include_in_schema=False)
+    async def haushalt_mobile(hid: int, _: None = Depends(require_ui_auth)):
+        return _seite("mobile.html", haushalt=await _haushalt_oder_404(hid))
+
+    @app.get("/h/{hid}/manifest.json", include_in_schema=False)
+    async def haushalt_manifest(hid: int):
+        hid, name = await _haushalt_oder_404(hid)
+        daten = json.loads((WEB_DIR / "manifest.json").read_text("utf-8"))
+        daten.update({
+            "id": f"/h/{hid}/",
+            "name": f"{name} · Lebensmittel-Scanner",
+            "short_name": name[:12],
+            "start_url": f"/h/{hid}/mobile",
+            "scope": f"/h/{hid}/",
+        })
+        return JSONResponse(daten, media_type="application/manifest+json",
+                            headers={"Cache-Control": "no-cache"})
+
     @app.get("/mobile", include_in_schema=False)
-    async def mobile(_: None = Depends(require_ui_auth)):
+    async def mobile(request: Request, _: None = Depends(require_ui_auth)):
+        if "alle" not in request.query_params:
+            async with session_scope() as session:
+                liste = await haushalte.alle(session)
+            if len(liste) > 1:
+                return _auswahl(liste)
         return _seite("mobile.html")
 
     @app.get("/manifest.json", include_in_schema=False)

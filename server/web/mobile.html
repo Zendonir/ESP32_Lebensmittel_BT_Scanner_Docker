@@ -103,7 +103,7 @@
 
 <div id="toasts"></div>
 <script type="module">
-import { get, post, del, put, toast, auslagern, fmtDate, daysPill, esc, liveConnect, tagEditor } from '/static/js/api.js';
+import { get, post, del, put, toast, auslagern, fmtDate, daysPill, esc, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from '/static/js/api.js';
 
 // Wer die Handyansicht oeffnet, hat sich fuer sie entschieden - die
 // Weiterleitung auf der grossen Seite gilt dann wieder (siehe index.html).
@@ -139,13 +139,22 @@ async function render() {
 // Die Suche bleibt beim Wechsel zwischen Inventar und Ablaufend erhalten.
 let suche = '';
 let listUrl = '';
+let ueberall = false;
 
 async function renderList(url) {
   listUrl = url;
   view.innerHTML = `
+    <div id="m-fremd"></div>
     <div class="msearch"><input id="m-q" type="search" placeholder="Suchen: Name, Marke, Etikett"
-      value="${esc(suche)}" autocomplete="off" enterkeyhint="search" aria-label="Suchen"></div>
+      value="${esc(suche)}" autocomplete="off" enterkeyhint="search" aria-label="Suchen">
+      ${HAUSHALT ? `<label class="row tight" style="margin-top:6px;font-size:14px">
+        <input type="checkbox" id="m-alle" ${ueberall ? 'checked' : ''}> auch in anderen Haushalten suchen</label>` : ''}</div>
     <div class="list" id="m-list"></div>`;
+  fremdHinweis(document.getElementById('m-fremd')).catch(() => {});
+  document.getElementById('m-alle')?.addEventListener('change', (ev) => {
+    ueberall = ev.target.checked;
+    fillList().catch((e) => toast(e.message, 'error'));
+  });
   let timer;
   document.getElementById('m-q').addEventListener('input', (ev) => {
     clearTimeout(timer);
@@ -159,7 +168,8 @@ async function renderList(url) {
 async function fillList() {
   const box = document.getElementById('m-list');
   if (!box) return;
-  const rows = await get(listUrl + (suche ? `&q=${encodeURIComponent(suche)}` : ''));
+  const rows = await get(listUrl + (suche ? `&q=${encodeURIComponent(suche)}` : '')
+    + (ueberall && suche ? '&alle=true' : ''));
   count.textContent = rows.length;
   const leer = suche ? `Nichts gefunden für „${esc(suche)}“.` : 'Nichts vorhanden.';
   box.innerHTML = rows.length ? `
@@ -168,7 +178,8 @@ async function fillList() {
     <div class="swipe" data-label="${esc(i.label)}">
       <div class="swipe-action">auslagern</div>
       <div class="swipe-inner" role="button" tabindex="0" aria-expanded="false">
-        <div class="t">${esc(i.display_name || i.name)}</div>
+        <div class="t">${esc(i.display_name || i.name)}${HAUSHALT && i.household !== HAUSHALT.name
+          ? ` <span class="pill warn">🏠 ${esc(i.household)}</span>` : ''}</div>
         <div class="s">${esc(i.brand || '')}</div>
         <div class="s">${fmtDate(i.expiry_date)} ${daysPill(i.days_left)} · ${esc(i.location)}</div>
         <div class="s mono">${esc(i.label)}</div>

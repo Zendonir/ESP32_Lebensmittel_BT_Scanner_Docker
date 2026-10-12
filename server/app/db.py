@@ -69,6 +69,8 @@ if _is_sqlite:
 # ALTER beim Start reicht und laeuft auf SQLite wie auf Postgres.
 _ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("products", "subcategory", "VARCHAR(100) DEFAULT ''"),
+    ("devices", "household", "VARCHAR(100) DEFAULT ''"),
+    ("events", "household", "VARCHAR(100) DEFAULT ''"),
 )
 
 

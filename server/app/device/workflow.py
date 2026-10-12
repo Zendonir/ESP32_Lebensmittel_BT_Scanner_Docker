@@ -115,6 +115,9 @@ class DeviceSession:
     # noch nicht gemeldet. Die Datenbank kennt nur den Stand der *letzten*
     # Verbindung - direkt nach einem Firmware-Update waere der veraltet.
     caps: set[str] | None = None
+    # Haushalt des Terminals (Device.household, sonst der erste Haushalt).
+    # Was hier eingelagert wird, gehoert ihm; Listen zeigen nur seins.
+    household: str = ""
 
     @property
     def current(self) -> str:
@@ -174,6 +177,28 @@ def session_for(device_id: str) -> DeviceSession:
         sess = DeviceSession(device_id=device_id)
         _sessions[device_id] = sess
     return sess
+
+
+def _eigener_haushalt(sess: DeviceSession) -> tuple:
+    """Filter fuer Listen am Terminal: nur der eigene Haushalt."""
+    return (InventoryItem.household == sess.household,) if sess.household else ()
+
+
+def terminal_fuer(haushalt: str | None) -> str | None:
+    """Ein verbundenes Terminal dieses Haushalts - zum Drucken aus dem Web."""
+    if not haushalt:
+        return None
+    for device_id in hub.online_ids():
+        sess = _sessions.get(device_id)
+        if sess is not None and sess.household == haushalt:
+            return device_id
+    return None
+
+
+def haushalt_umbenannt(alt: str, neu: str) -> None:
+    for sess in _sessions.values():
+        if sess.household == alt:
+            sess.household = neu
 
 
 def drop_session(device_id: str, sess: DeviceSession | None = None) -> None:
@@ -336,6 +361,7 @@ async def _screen_expiring(session, sess, sid, status) -> dict:
                 InventoryItem.status == "active",
                 InventoryItem.expiry_date != "",
                 InventoryItem.expiry_date <= horizon,
+                *_eigener_haushalt(sess),
             )
             .order_by(InventoryItem.expiry_date.asc())
             .limit(50)
@@ -574,7 +600,8 @@ def _screen_subcategory(sess, sid, status) -> dict:
 
 async def _screen_inventory(session, sess, sid, status) -> dict:
     rows = (
-        await session.execute(select(InventoryItem).where(InventoryItem.status == "active"))
+        await session.execute(select(InventoryItem).where(
+            InventoryItem.status == "active", *_eigener_haushalt(sess)))
     ).scalars().all()
 
     search = sess.inv_search.strip().lower()
@@ -825,6 +852,9 @@ async def check_idle_locations() -> None:
 
 
 async def on_connect(session: AsyncSession, sess: DeviceSession, device: Device) -> None:
+    from ..services import haushalte
+
+    sess.household = device.household or await haushalte.standard(session)
     sess.location = device.active_location or await inv.default_location(session)
     sess.reset()
     sess.touch()
@@ -1134,6 +1164,7 @@ async def _save_draft(session: AsyncSession, sess: DeviceSession) -> None:
         count=draft.count,
         device_id=sess.device_id,
         want_print=True,
+        household=sess.household,
     )
     await session.commit()
 
@@ -1189,7 +1220,8 @@ async def _scan_label(session, sess, code) -> None:
     """Ein eigenes Etikett wurde gescannt."""
     item = await inv.find_active_by_label(session, code)
     if item is not None:
-        await inv.remove_item(session, item, reason="scan", device_id=sess.device_id)
+        await inv.remove_item(session, item, reason="scan", device_id=sess.device_id,
+                              household=sess.household)
         await session.commit()
         await hub.send_to(sess.device_id, proto.beep("ok"))
         await hub.send_to(

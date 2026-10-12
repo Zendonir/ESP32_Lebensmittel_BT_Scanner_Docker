@@ -18,11 +18,12 @@ server/app/
   config.py      Einstellungen aus der Umgebung (kein Config-File!)
   models.py      ORM: inventory, events, products, templates, categories,
                  locations, shopping_list, devices, print_jobs, settings
-  api/           inventory · catalog · labels · system · firmware
+  api/           inventory · catalog · labels · system · firmware · haushalte
   device/        protocol · hub · workflow · routes
   services/      inventory · labels · calibration · categories · openfoodfacts ·
                  notify · scheduler · dates · settings_store · seed · importer ·
-                 firmware · updates · deploy · zeichen · hochformat
+                 firmware · updates · deploy · zeichen · hochformat · haushalte ·
+                 druckertest
   fonts/         DejaVu Sans fuer das Hochformat-Bild (im Repo, damit Test und
                  Container gleich umbrechen)
 server/web/      index.html · mobile.html · js/ · css/ (kein Build-Schritt)
@@ -57,6 +58,12 @@ cd server && ../.venv/bin/python -m pytest tests -q
   offene Browser sich aktualisieren.
 * Sicherheitsrelevantes (Token, Passwort, Datenbank) kommt aus der Umgebung;
   nur Bedienbares (Helligkeit, Papierbreite) gehört in `settings_store`.
+* **Haushalte:** Die Web-Seite eines Haushalts liegt unter `/h/<id>/` und
+  schickt `X-Haushalt` mit (`api.js`). Neue Listen/Zahlen filtern über
+  `haushalte.aus_anfrage()` – ohne Kopf (Verwaltung, `/?alle=1`) gilt alles.
+  Terminals tragen ihren Haushalt in `Device.household` / `DeviceSession.household`.
+  Entnimmt ein Haushalt bei einem anderen, steht das beim Besitzer im Event
+  (`household` = Besitzer, `payload.fremd` = Entnehmer).
 * Neue Einstellungsschlüssel brauchen einen Eintrag in
   `settings_store.DEFAULTS` – `PATCH /api/settings/{key}` lehnt Unbekanntes ab.
 

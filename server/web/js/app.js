@@ -1,7 +1,7 @@
 // Admin-Oberflaeche. Bewusst ohne Framework und ohne Build-Schritt: das Image
 // bleibt klein und die Dateien sind das, was ausgeliefert wird.
 
-import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, liveConnect, tagEditor } from './api.js';
+import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from './api.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -71,6 +71,14 @@ async function loadDashboard() {
     get('/api/events?limit=12'),
   ]);
 
+  let fremdBox = $('#dash-fremd');
+  if (!fremdBox && HAUSHALT) {
+    fremdBox = document.createElement('div');
+    fremdBox.id = 'dash-fremd';
+    $('#stats').before(fremdBox);
+  }
+  fremdHinweis(fremdBox).catch(() => {});
+
   $('#stats').innerHTML = [
     ['Im Bestand', stats.total, 'ok'],
     ['Läuft ab', stats.expiring, 'warn'],
@@ -91,7 +99,8 @@ async function loadDashboard() {
     : '<tr><td colspan="4" class="muted">Nichts läuft demnächst ab.</td></tr>';
 
   $('#dash-events').innerHTML = events.map((e) => `<tr>
-      <td class="muted">${fmtTime(e.ts)}</td><td>${esc(eventName(e.type))}</td>
+      <td class="muted">${fmtTime(e.ts)}</td><td>${esc(eventName(e.type))}${e.payload?.fremd
+        ? ` <span class="pill warn">von ${esc(e.payload.fremd)}</span>` : ''}</td>
       <td class="name">${esc(e.name || e.label || e.barcode)}</td></tr>`).join('')
     || '<tr><td colspan="3" class="muted">Noch nichts passiert.</td></tr>';
 
@@ -123,12 +132,14 @@ async function loadInventory() {
   if ($('#inv-q').value.trim()) params.set('q', $('#inv-q').value.trim());
   if ($('#inv-category').value) params.set('category', $('#inv-category').value);
   if ($('#inv-location').value) params.set('location', $('#inv-location').value);
+  if ($('#inv-alle')?.checked) params.set('alle', 'true');
 
   const rows = await get(`/api/inventory?${params}`);
   $('#inv-empty').hidden = rows.length > 0;
   $('#inv-body').innerHTML = rows.map((i) => `<tr>
     <td class="mono">${esc(i.label)}</td>
-    <td class="name"><b>${esc(i.display_name || i.name)}</b>${i.brand ? `<br><span class="muted">${esc(i.brand)}</span>` : ''}</td>
+    <td class="name"><b>${esc(i.display_name || i.name)}</b>${HAUSHALT && i.household !== HAUSHALT.name
+      ? ` <span class="pill warn" title="gehört einem anderen Haushalt – Auslagern ist eine Fremdentnahme">🏠 ${esc(i.household)}</span>` : ''}${i.brand ? `<br><span class="muted">${esc(i.brand)}</span>` : ''}</td>
     <td>${esc(i.category)}</td>
     <td>${fmtDate(i.expiry_date)}</td>
     <td>${daysPill(i.days_left)}</td>
@@ -143,8 +154,16 @@ async function loadInventory() {
     </td></tr>`).join('');
 }
 
-['#inv-q', '#inv-category', '#inv-location', '#inv-status', '#inv-sort'].forEach((sel) => {
+if (HAUSHALT) {
+  const lbl = document.createElement('label');
+  lbl.className = 'row tight';
+  lbl.innerHTML = '<input type="checkbox" id="inv-alle"> auch in anderen Haushalten';
+  lbl.title = 'Nur zusammen mit einem Suchbegriff. Wer dort auslagert, macht eine Fremdentnahme.';
+  $('#inv-reload').before(lbl);
+}
+['#inv-q', '#inv-category', '#inv-location', '#inv-status', '#inv-sort', '#inv-alle'].forEach((sel) => {
   const el = $(sel);
+  if (!el) return;
   const handler = debounce(() => loadInventory().catch((e) => toast(e.message, 'error')), 250);
   el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', handler);
 });
@@ -469,7 +488,43 @@ async function templateDialog(tpl) {
 }
 
 // ------------------------------------------------------------------ Stammdaten
+// Haushalte: anlegen, umbenennen, loeschen. Mit mehr als einem fragt die
+// Startseite, in welchen man will; jeder hat seine Adresse /h/<id>/.
+async function loadHaushalte() {
+  const box = $('#haus-body');
+  if (!box) return;
+  state.haushalte = await get('/api/households');
+  box.innerHTML = state.haushalte.map((h) => `<tr>
+    <td class="name"><a href="/h/${h.id}/">${esc(h.name)}</a>${HAUSHALT && String(h.id) === HAUSHALT.id ? ' <span class="pill ok">hier</span>' : ''}</td>
+    <td class="muted">${h.artikel} Artikel · ${h.terminals} Terminal(s)</td>
+    <td class="right">
+      <button class="sm" data-haus-ren="${h.id}">Umbenennen</button>
+      <button class="sm ghost" data-haus-del="${h.id}">Löschen</button></td></tr>`).join('');
+}
+document.addEventListener('click', async (ev) => {
+  const b = ev.target.closest('#haus-new,[data-haus-ren],[data-haus-del]');
+  if (!b) return;
+  try {
+    if (b.id === 'haus-new') {
+      const name = prompt('Name des neuen Haushalts');
+      if (!name) return;
+      await post('/api/households', { name });
+    } else if (b.dataset.hausRen) {
+      const h = state.haushalte.find((x) => String(x.id) === b.dataset.hausRen);
+      const name = prompt('Neuer Name', h?.name || '');
+      if (!name || name === h?.name) return;
+      await patch(`/api/households/${b.dataset.hausRen}`, { name, sort_order: h.sort_order });
+    } else if (b.dataset.hausDel) {
+      if (!confirm('Haushalt löschen? Geht nur, wenn dort nichts mehr liegt.')) return;
+      await del(`/api/households/${b.dataset.hausDel}`);
+    }
+    toast('Gespeichert', 'success');
+    await loadHaushalte();
+  } catch (e) { toast(e.message, 'error'); }
+});
+
 async function loadCatalogPage() {
+  loadHaushalte().catch((e) => toast(e.message, 'error'));
   await loadCatalogData();
   $('#cat-body').innerHTML = state.categories.map((c) => `<tr>
     <td><span class="swatch" style="background:${esc(c.color)}"></span>${esc(c.name)}
@@ -673,7 +728,11 @@ function deviceCard(d) {
         <div><b>${t.heap ? Math.round(t.heap / 1024) + ' K' : '–'}</b><span>Speicher frei</span></div>
         <div><b>${t.min_heap ? Math.round(t.min_heap / 1024) + ' K' : '–'}</b><span>Speicher min.</span></div>
       </div>
-      <label class="field" style="margin-top:12px">Lagert ein in
+      <label class="field" style="margin-top:12px">Haushalt
+        <select data-dev-haus="${esc(d.device_id)}">
+          ${(state.haushalte || []).map((h) => `<option ${h.name === d.household ? 'selected' : ''}>${esc(h.name)}</option>`).join('')}
+        </select></label>
+      <label class="field" style="margin-top:8px">Lagert ein in
         <select data-dev-loc="${esc(d.device_id)}">
           ${state.locations.map((l) => `<option ${l.name === d.active_location ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
         </select></label>
@@ -685,7 +744,7 @@ function deviceCard(d) {
 }
 
 async function loadDevices() {
-  state.devices = await get('/api/devices');
+  [state.devices, state.haushalte] = await Promise.all([get('/api/devices'), get('/api/households')]);
   // Die Anleitung bleibt erreichbar, wenn schon Terminals da sind - fuer das
   // zweite oder ein ersetztes Geraet.
   $('#devices-list').innerHTML = state.devices.length
@@ -758,6 +817,13 @@ $('#fw-upload-form')?.addEventListener('submit', async (ev) => {
     await loadFirmware();
     await loadDevices();
   } catch (e) { toast(e.message, 'error'); }
+});
+
+document.addEventListener('change', async (ev) => {
+  const sel = ev.target.closest('select[data-dev-haus]');
+  if (!sel) return;
+  await patch(`/api/devices/${sel.dataset.devHaus}`, { household: sel.value });
+  toast(`Terminal gehört jetzt zu „${sel.value}“`, 'success');
 });
 
 document.addEventListener('change', async (ev) => {

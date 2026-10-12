@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +19,7 @@ from ..schemas import (
     Stats,
 )
 from ..services import inventory as inv
-from ..services import openfoodfacts, settings_store
+from ..services import haushalte, openfoodfacts, settings_store
 from ..services.dates import today_iso
 
 router = APIRouter(prefix="/api/inventory", tags=["inventar"])
@@ -27,6 +27,7 @@ router = APIRouter(prefix="/api/inventory", tags=["inventar"])
 
 @router.get("", response_model=list[InventoryOut])
 async def list_inventory(
+    request: Request,
     session: AsyncSession = Depends(get_session),
     status: str = Query("active", pattern="^(active|removed|all)$"),
     q: str = "",
@@ -36,8 +37,15 @@ async def list_inventory(
     sort: str = Query("expiry", pattern="^(expiry|name|added|location)$"),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
+    alle: bool = False,
 ):
     stmt = select(InventoryItem)
+    # Grundsaetzlich nur der eigene Haushalt. `alle` ist die ausdrueckliche
+    # Suche in den anderen - sie kommt nur mit einem Suchbegriff, damit
+    # niemand nebenbei den ganzen fremden Bestand durchblaettert.
+    haushalt = await haushalte.aus_anfrage(request, session)
+    if haushalt and not (alle and q.strip()):
+        stmt = stmt.where(InventoryItem.household == haushalt)
     if status != "all":
         stmt = stmt.where(InventoryItem.status == status)
     if q:
@@ -77,8 +85,8 @@ async def list_inventory(
 
 
 @router.get("/stats", response_model=Stats)
-async def get_stats(session: AsyncSession = Depends(get_session)):
-    return await inv.stats(session)
+async def get_stats(request: Request, session: AsyncSession = Depends(get_session)):
+    return await inv.stats(session, await haushalte.aus_anfrage(request, session))
 
 
 @router.get("/{label}", response_model=InventoryOut)
@@ -113,18 +121,20 @@ async def patch_item(
 
 
 @router.post("/remove", response_model=InventoryOut)
-async def remove(req: RemoveRequest, session: AsyncSession = Depends(get_session)):
+async def remove(req: RemoveRequest, request: Request,
+                 session: AsyncSession = Depends(get_session)):
     """Auslagern - per Etikett (exakt) oder per Produkt-Barcode (aeltestes zuerst)."""
+    haushalt = await haushalte.aus_anfrage(request, session)
     if req.label:
         row = await inv.find_active_by_label(session, req.label)
     elif req.barcode:
-        row = await inv.find_removable_by_barcode(session, req.barcode)
+        row = await inv.find_removable_by_barcode(session, req.barcode, haushalt)
     else:
         raise HTTPException(400, "Etikett oder Barcode angeben")
 
     if row is None:
         raise HTTPException(404, "Kein aktiver Artikel gefunden")
-    await inv.remove_item(session, row, reason=req.reason)
+    await inv.remove_item(session, row, reason=req.reason, household=haushalt)
     await session.commit()
     await hub.notify_ui("inventory")
     return inv.with_days_left(row)
@@ -158,7 +168,8 @@ async def delete_item(label: str, session: AsyncSession = Depends(get_session)):
 
 
 @router.post("/scan")
-async def scan(req: ScanRequest, session: AsyncSession = Depends(get_session)):
+async def scan(req: ScanRequest, request: Request,
+               session: AsyncSession = Depends(get_session)):
     """Denselben Scan-Pfad wie das Geraet ausloesen - fuer Handy-Kamera-Scans.
 
     Ist ein Geraet angegeben (oder genau eines online), wandert der Code in
@@ -182,7 +193,8 @@ async def scan(req: ScanRequest, session: AsyncSession = Depends(get_session)):
     if workflow.is_label(code):
         item = await inv.find_active_by_label(session, code)
         if item is not None:
-            await inv.remove_item(session, item, reason="mobil")
+            await inv.remove_item(session, item, reason="mobil",
+                                  household=await haushalte.aus_anfrage(request, session))
             await session.commit()
             await hub.notify_ui("inventory")
             return {"ok": True, "routed_to": None, "action": "removed",

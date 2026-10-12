@@ -227,6 +227,7 @@ class DeviceOut(ORMModel):
     firmware: str
     ip: str
     active_location: str
+    household: str = ""
     has_printer: bool
     online: bool
     last_seen: datetime | None
@@ -236,6 +237,7 @@ class DeviceOut(ORMModel):
 class DevicePatch(BaseModel):
     name: str | None = None
     active_location: str | None = None
+    household: str | None = None
 
 
 class PrintJobOut(ORMModel):
@@ -256,6 +258,7 @@ class EventOut(ORMModel):
     name: str
     location: str
     device: str
+    household: str = ""
     payload: dict
 
 

@@ -1,7 +1,17 @@
 // Schmaler Zugriff auf die REST-API. Eine Stelle fuer Fehlerbehandlung.
 
+// Haushalt der Seite: /h/<id>/... (die Seite traegt ihn zusaetzlich im
+// <meta name="haushalt">). Jede Anfrage nennt ihn im Kopf X-Haushalt - so
+// sieht man grundsaetzlich nur die eigenen Dinge, ohne dass jede einzelne
+// Stelle daran denken muss.
+const HAUSHALT_META = document.querySelector('meta[name="haushalt"]');
+export const HAUSHALT = HAUSHALT_META
+  ? { id: HAUSHALT_META.content, name: HAUSHALT_META.dataset.name || '' }
+  : null;
+
 export async function api(path, options = {}) {
   const opts = { headers: {}, ...options };
+  if (HAUSHALT) opts.headers = { 'X-Haushalt': HAUSHALT.id, ...opts.headers };
   if (opts.body !== undefined && typeof opts.body !== 'string') {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(opts.body);
@@ -278,4 +288,39 @@ export function liveConnect(onEvent, onStatus) {
   setInterval(() => {
     if (socket && socket.readyState === WebSocket.OPEN) socket.send('ping');
   }, 25000);
+}
+
+// Kleines Schild "Haushalt X · wechseln" - damit klar ist, wessen Bestand man
+// gerade sieht.
+if (HAUSHALT) {
+  const zeigen = () => {
+    if (document.getElementById('haushalt-schild')) return;
+    const a = document.createElement('a');
+    a.id = 'haushalt-schild';
+    a.href = '/';
+    a.title = 'Haushalt wechseln';
+    a.textContent = `🏠 ${HAUSHALT.name}`;
+    a.className = 'pill';
+    a.style.cssText = 'text-decoration:none;margin:0 8px;white-space:nowrap';
+    const kopf = document.querySelector('body > header');
+    if (kopf) kopf.insertBefore(a, kopf.querySelector('.spacer, .linkbtn'));
+    else document.body.prepend(a);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', zeigen);
+  else zeigen();
+}
+
+// Hinweis "bei euch wurde etwas entnommen" - Fremdentnahmen der letzten
+// Tage. Steht in Uebersicht und Handyliste des Haushalts, dem es gehoerte.
+export async function fremdHinweis(box) {
+  if (!box || !HAUSHALT) return;
+  const r = await api('/api/households/fremd?tage=14');
+  const bei = r.bei_uns || [];
+  if (!bei.length) { box.innerHTML = ''; return; }
+  const zeilen = bei.slice(0, 5).map((e) =>
+    `<li>${esc(e.name || e.label)} – entnommen von <b>${esc(e.fremd)}</b>, ${fmtTime(e.ts)}</li>`).join('');
+  box.innerHTML = `<div class="notice warn" style="margin:8px 0;display:block">
+    <b>Aus eurem Bestand entnommen (letzte 14 Tage)</b>
+    <ul style="margin:6px 0 0;padding-left:18px">${zeilen}</ul>
+    ${bei.length > 5 ? `<div class="muted">und ${bei.length - 5} weitere</div>` : ''}</div>`;
 }

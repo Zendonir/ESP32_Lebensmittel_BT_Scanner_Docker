@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -32,6 +32,7 @@ async def log_event(session: AsyncSession, type_: str, **kw) -> Event:
         name=kw.get("name", ""),
         location=kw.get("location", ""),
         device=kw.get("device", ""),
+        household=kw.get("household", ""),
         payload=kw.get("payload", {}) or {},
     )
     session.add(event)
@@ -70,9 +71,13 @@ async def add_items(
     count: int = 1,
     device_id: str = "",
     want_print: bool = True,
+    household: str = "",
 ) -> tuple[list[InventoryItem], list[PrintJob]]:
     """`count` Etiketten anlegen und optional Druckauftraege einreihen."""
+    from . import haushalte
+
     count = max(1, min(int(count), 20))
+    household = household or await haushalte.standard(session)
     if not location:
         location = await default_location(session)
 
@@ -95,7 +100,7 @@ async def add_items(
             quantity=float(quantity),
             unit=unit,
             location=location,
-            household=settings.household,
+            household=household,
             note=note,
             status="active",
             source_device=device_id,
@@ -110,6 +115,7 @@ async def add_items(
             name=name,
             location=location,
             device=device_id,
+            household=household,
             payload={"expiry_date": expiry_date, "quantity": quantity, "unit": unit},
         )
 
@@ -125,6 +131,7 @@ async def add_items(
                     "quantity": quantity,
                     "unit": unit,
                     "location": location,
+                    "household": household,
                 },
                 printer_cfg,
             )
@@ -151,26 +158,37 @@ async def find_active_by_label(session: AsyncSession, label: str) -> InventoryIt
 
 
 async def find_removable_by_barcode(
-    session: AsyncSession, barcode: str
+    session: AsyncSession, barcode: str, household: str | None = None
 ) -> InventoryItem | None:
-    """Aeltestes aktives Exemplar eines Produkt-Barcodes (FIFO nach MHD)."""
-    rows = (
-        await session.execute(
-            select(InventoryItem)
-            .where(InventoryItem.barcode == barcode, InventoryItem.status == "active")
-            .order_by(InventoryItem.expiry_date.asc(), InventoryItem.id.asc())
-            .limit(1)
-        )
-    ).scalars().all()
+    """Aeltestes aktives Exemplar eines Produkt-Barcodes (FIFO nach MHD).
+
+    Mit `household` nur aus diesem Haushalt - wer nach Barcode auslagert,
+    meint das Glas im eigenen Schrank, nicht das aelteste im ganzen Haus.
+    """
+    stmt = (
+        select(InventoryItem)
+        .where(InventoryItem.barcode == barcode, InventoryItem.status == "active")
+        .order_by(InventoryItem.expiry_date.asc(), InventoryItem.id.asc())
+        .limit(1)
+    )
+    if household:
+        stmt = stmt.where(InventoryItem.household == household)
+    rows = (await session.execute(stmt)).scalars().all()
     return rows[0] if rows else None
 
 
 async def remove_item(
-    session: AsyncSession, item: InventoryItem, reason: str = "manual", device_id: str = ""
+    session: AsyncSession, item: InventoryItem, reason: str = "manual", device_id: str = "",
+    household: str | None = None,
 ) -> InventoryItem:
+    """Auslagern. `household` ist, wer entnimmt - ist das nicht der Besitzer,
+    ist es eine Fremdentnahme und steht als solche im Protokoll."""
     item.status = "removed"
     item.removed_at = utcnow()
     item.removed_reason = reason
+    payload: dict = {"reason": reason}
+    if household and item.household and household != item.household:
+        payload["fremd"] = household
     await log_event(
         session,
         "remove",
@@ -179,7 +197,8 @@ async def remove_item(
         name=item.name,
         location=item.location,
         device=device_id,
-        payload={"reason": reason},
+        household=item.household,
+        payload=payload,
     )
     await session.flush()
     return item
@@ -221,6 +240,7 @@ async def restore_by_label(
         name=item.name,
         location=item.location,
         device=device_id,
+        household=item.household,
     )
     await session.flush()
     return item
@@ -285,7 +305,7 @@ def with_days_left(item: InventoryItem) -> dict:
     return data
 
 
-async def stats(session: AsyncSession) -> dict:
+async def stats(session: AsyncSession, household: str | None = None) -> dict:
     ui_cfg = await settings_store.get(session, "ui", {})
     warn_days = int(ui_cfg.get("expiring_days", 7))
     today = today_iso()
@@ -294,6 +314,9 @@ async def stats(session: AsyncSession) -> dict:
     ).isoformat()
 
     active = InventoryItem.status == "active"
+    if household:
+        active = and_(active, InventoryItem.household == household)
+    eigene = (Event.household == household) if household else true()
     total = (
         await session.execute(
             select(func.count()).select_from(InventoryItem).where(active)
@@ -343,14 +366,14 @@ async def stats(session: AsyncSession) -> dict:
         await session.execute(
             select(func.count())
             .select_from(Event)
-            .where(Event.type == "add", Event.ts >= since)
+            .where(Event.type == "add", Event.ts >= since, eigene)
         )
     ).scalar_one()
     removed_30d = (
         await session.execute(
             select(func.count())
             .select_from(Event)
-            .where(Event.type == "remove", Event.ts >= since)
+            .where(Event.type == "remove", Event.ts >= since, eigene)
         )
     ).scalar_one()
 
