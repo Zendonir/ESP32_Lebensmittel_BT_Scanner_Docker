@@ -40,6 +40,16 @@ public:
     void showBoot(const String &line1, const String &line2 = "");
     void setBrightness(uint8_t percent);
 
+    // Abdunkeln nach so vielen Sekunden ohne Bedienung (device_ui.idle_seconds,
+    // 0 = nie). Bisher stand das Feld in der Oberflaeche, ohne dass die
+    // Firmware es auswertete.
+    void setIdleDim(uint16_t seconds);
+
+    // Bedienung melden (Beruehrung, Taster, Scan). true heisst: der
+    // Bildschirm war dunkel und ist jetzt nur aufgewacht - die Beruehrung,
+    // die ihn geweckt hat, soll dann nichts weiter ausloesen.
+    bool wake();
+
     // Muss regelmaessig laufen: blendet Meldungen aus, zeichnet die Uhr.
     void loop();
 
@@ -127,6 +137,10 @@ private:
     String   _banner;
     int16_t  _bodyY = 66;   // Oberkante des Inhalts, siehe bodyTop()
     uint8_t  _brightness = 80;
+
+    uint16_t _dimAfterS  = 0;
+    uint32_t _lastWakeMs = 0;
+    bool     _dimmed     = false;
 };
 
 extern Screen screen;

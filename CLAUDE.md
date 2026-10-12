@@ -118,6 +118,14 @@ cd firmware && pio run --target upload # flashen
   Controller offen; die Verbindung steht in dem Moment, in dem der Scanner
   eingeschaltet wird. Suchläufe kosten Funkzeit, die neben WLAN im selben Band
   fehlt.
+* Aufgebaut wird **schnell** (15–30 ms, Latenz 0), und die Verschlüsselung
+  startet schon in `onConnect` (`secureConnection(true)`). Erst nach dem
+  Abonnieren wird auf sparsam (30–50 ms, Latenz 4) umgestellt. Mit den
+  sparsamen Werten von Anfang an durfte der Scanner sich je GATT-Abfrage bis
+  zu 250 ms Zeit lassen – das waren Sekunden bis „bereit“.
+* Wie lange der Scanner nach dem letzten Barcode verbunden bleibt, kommt vom
+  Server (`device_ui.scanner_minutes` in der config-Nachricht, 0 = nie
+  trennen); `BLE_IDLE_TIMEOUT_MS` ist nur der Startwert.
 * Es bleibt immer **genau eine** Kopplung gespeichert. Sonst zeigt
   `getBondedAddress(0)` nach einem Scannerwechsel womöglich auf das alte Gerät.
 * Töne laufen über den **ES8311-Codec**, nicht über einen Piezo – das Board
@@ -183,6 +191,9 @@ cd firmware && pio run --target upload # flashen
 | Etikett soll „Rückzug → Länge → Vorschub“ drucken | `printer.label_sequence: "einfach"`: Rückzug, dann der Inhalt auf genau `label_height_mm` aufgefüllt, dann `label_gap_mm` leer. Totbereich wird dabei nicht gerechnet. Standard bleibt `"teilung"` |
 | Walze dreht zwischen Etiketten durch, Papier bleibt stehen | `printer.feed_step_dots`: Vorschub in kleine `feed`-Blöcke zerlegen (z. B. 8 Punkte). Summe und Teilung bleiben gleich; `form`-Vorschübe werden nicht zerlegt |
 | Eigenes Etikett zusammenstellen | Aufteilung `eigen`: `printer.label_custom` ist eine Liste `{feld, stil, unterstrichen}` (Felder/Stile in `labels.EIGEN_FELDER`/`EIGEN_STILE`). Leere Werte fallen weg, `_fit()` kuerzt von hinten, MHD und Code bleiben |
+| Scanner ist „da“, aber erst Sekunden später benutzbar | Verbindungsparameter beim Aufbau schnell, Verschlüsselung sofort in `onConnect` – siehe Firmware-Regeln. Wie lange die Kopplung gedauert hat, meldet die Telemetrie (`scanner.setup_ms`) |
+| Scanner trennt „von selbst“ | Trenngrund steht unter Terminals (`scanner.reason`, lesbar über `services/scanner.py`). 0x13 = der Scanner legt selbst auf – dessen Energiesparen, einstellbar nur am Scanner; 0x16 = das Terminal (Verbindungsdauer) |
+| Neuer Einstellungsschlüssel fehlt in bestehenden Installationen | `settings_store.get()`/`all_settings()` füllen gespeicherte Bereiche mit `DEFAULTS` auf (`_mit_vorgaben`). Ohne das zeigte die Oberfläche ein leeres Feld und ans Terminal ging der Wert nie |
 | Neue Einstellung in der Oberflaeche | Feld mit `data-setting="bereich.schluessel"` (und `data-art="int"`/`"float"` fuer Zahlen) - es speichert sich beim Aendern selbst. Kein eigener Speichern-Knopf; `test_oberflaeche.py` prueft, dass der Schluessel in `settings_store.DEFAULTS` steht |
 | Kategorie/Lagerort umbenannt, Artikel fallen aus dem Filter | Namen stehen an Artikeln als Text. Umbenennen nur ueber `inventory.rename_category()`/`rename_location()`, die Artikel, Vorlagen, Produkte und Terminals nachziehen |
 | `?` statt Anfuehrungszeichen oder Strich auf Etikett/Terminal | Beide kennen nur Latin-1. Text zur Hardware laeuft durch `services/zeichen.py` (in `render_label` und `protocol.screen`/`toast`) - neue Wege zur Hardware ebenso |

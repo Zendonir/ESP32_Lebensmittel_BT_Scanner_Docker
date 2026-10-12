@@ -23,6 +23,9 @@ DEFAULTS: dict[str, Any] = {
         "brightness": 80,
         "beep": True,
         "idle_seconds": 60,
+        # So lange bleibt der Handscanner nach dem letzten Barcode verbunden.
+        # 0 = das Terminal trennt nie (leert den Akku des Scanners schneller).
+        "scanner_minutes": 10,
     },
     "printer": {
         "enabled": True,
@@ -102,12 +105,32 @@ DEFAULTS: dict[str, Any] = {
 }
 
 
+def _mit_vorgaben(key: str, wert: Any) -> Any:
+    """Gespeicherten Bereich mit den Vorgaben auffuellen.
+
+    Gespeichert ist ein Bereich so, wie er beim letzten Aendern war. Kommt
+    danach ein neuer Schluessel dazu (etwa `scanner_minutes`), fehlte er in
+    jeder bestehenden Installation: die Oberflaeche zeigte ein leeres Feld,
+    und ans Terminal ging er nie - bis jemand zufaellig etwas im selben
+    Bereich aenderte. Jetzt gilt fuer alles, was nicht gespeichert ist, die
+    Vorgabe. Immer als Kopie, damit niemand DEFAULTS veraendert.
+    """
+    vorgabe = DEFAULTS.get(key)
+    if isinstance(vorgabe, dict) and isinstance(wert, dict):
+        return {**vorgabe, **wert}
+    if isinstance(wert, dict):
+        return dict(wert)
+    if isinstance(wert, list):
+        return list(wert)
+    return wert
+
+
 async def get(session: AsyncSession, key: str, default: Any = None) -> Any:
     row = await session.get(Setting, key)
     if row is None:
-        return DEFAULTS.get(key, default)
+        return _mit_vorgaben(key, DEFAULTS.get(key, default))
     try:
-        return json.loads(row.value)
+        return _mit_vorgaben(key, json.loads(row.value))
     except (ValueError, TypeError):
         return row.value
 
@@ -134,10 +157,10 @@ async def merge(session: AsyncSession, key: str, patch: dict) -> dict:
 
 async def all_settings(session: AsyncSession) -> dict[str, Any]:
     rows = (await session.execute(select(Setting))).scalars().all()
-    out = dict(DEFAULTS)
+    out = {key: _mit_vorgaben(key, wert) for key, wert in DEFAULTS.items()}
     for row in rows:
         try:
-            out[row.key] = json.loads(row.value)
+            out[row.key] = _mit_vorgaben(row.key, json.loads(row.value))
         except (ValueError, TypeError):
             out[row.key] = row.value
     return out

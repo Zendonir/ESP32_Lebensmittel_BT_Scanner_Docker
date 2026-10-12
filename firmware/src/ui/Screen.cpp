@@ -55,7 +55,21 @@ void Screen::begin() {
 
 void Screen::setBrightness(uint8_t percent) {
     _brightness = constrain(percent, 5, 100);
+    // Dunkel bleibt dunkel - die neue Helligkeit gilt ab dem Aufwachen.
+    if (!_dimmed) ledcWrite(LCD_BL, map(_brightness, 0, 100, 0, 255));
+}
+
+void Screen::setIdleDim(uint16_t seconds) {
+    _dimAfterS = seconds;
+    wake();
+}
+
+bool Screen::wake() {
+    _lastWakeMs = millis();
+    if (!_dimmed) return false;
+    _dimmed = false;
     ledcWrite(LCD_BL, map(_brightness, 0, 100, 0, 255));
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +103,7 @@ void Screen::apply(JsonDocument &doc) {
 }
 
 void Screen::toast(const String &text, const String &level) {
+    wake();   // eine Meldung, die niemand sieht, ist keine
     _toastText = text;
     _toastLevel = level;
     _toastUntil = millis() + 2500;
@@ -97,6 +112,7 @@ void Screen::toast(const String &text, const String &level) {
 
 void Screen::setBanner(const String &text) {
     if (_banner == text) return;
+    if (!text.isEmpty()) wake();   // "Kein Server" soll man sehen
     _banner = text;
     redraw();
 }
@@ -115,6 +131,10 @@ void Screen::showBoot(const String &line1, const String &line2) {
 }
 
 void Screen::loop() {
+    if (_dimAfterS && !_dimmed && millis() - _lastWakeMs > (uint32_t)_dimAfterS * 1000UL) {
+        _dimmed = true;
+        ledcWrite(LCD_BL, 0);
+    }
     if (_toastUntil && millis() > _toastUntil) {
         _toastUntil = 0;
         _toastText = "";

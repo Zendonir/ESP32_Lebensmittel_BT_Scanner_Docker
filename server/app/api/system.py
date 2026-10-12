@@ -60,11 +60,21 @@ async def ws_ticket():
 
 @router.get("/devices", response_model=list[DeviceOut])
 async def list_devices(session: AsyncSession = Depends(get_session)):
+    from ..services import scanner as scanner_info
+
     rows = (await session.execute(select(Device).order_by(Device.name))).scalars().all()
     online = set(hub.online_ids())
+    out = []
     for row in rows:
-        row.online = row.device_id in online
-    return rows
+        daten = DeviceOut.model_validate(row).model_dump()
+        daten["online"] = row.device_id in online
+        # Lesbarer Zustand und Trenngrund - die Firmware meldet nur Codes.
+        tel = dict(daten.get("telemetry") or {})
+        if tel.get("scanner"):
+            tel["scanner"] = scanner_info.beschreiben(tel["scanner"])
+        daten["telemetry"] = tel
+        out.append(daten)
+    return out
 
 
 @router.patch("/devices/{device_id}", response_model=DeviceOut)

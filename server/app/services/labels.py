@@ -537,7 +537,9 @@ def _build(layout: str, item: dict, cfg: dict, chars: int) -> list[dict]:
         blocks.append({"t": "row", "k": "MHD", "v": expiry or "-",
                        "underline": True, "keep": True})
         blocks.append({"t": "row", "k": "Menge", "v": _quantity(item) or "1 St."})
-        haushalt = latin1(cfg.get("household") or settings.household)
+        # Der Haushalt des Artikels - seit es mehrere gibt, ist das nicht
+        # mehr eine Einstellung fuer alle.
+        haushalt = latin1(item.get("household") or cfg.get("household") or settings.household)
         if haushalt:
             blocks.append({"t": "row", "k": "Haushalt", "v": haushalt})
         return blocks + _code_blocks(item, cfg)

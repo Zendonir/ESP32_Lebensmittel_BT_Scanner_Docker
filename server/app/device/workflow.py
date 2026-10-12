@@ -29,6 +29,7 @@ from ..models import (
 from ..services import inventory as inv
 from ..services import categories as cat
 from ..services import firmware, labels, openfoodfacts, settings_store
+from ..services import scanner as scanner_info
 from ..services.dates import days_left, shift_iso, to_display, to_iso_date
 from . import protocol as proto
 from .hub import hub
@@ -726,9 +727,16 @@ async def _screen_system(session, sess, sid, status) -> dict:
         {
             "title": "BLE SCANNER",
             "title_color": "#cc9218",
-            "status": "Verbunden" if ble_connected else "Getrennt",
+            "status": scanner_info.zustand(scanner).capitalize(),
             "status_color": "#2eb048" if ble_connected else "#cc9218",
-            "lines": [scanner.get("name") or "kein Gerät gekoppelt"],
+            # Zweite Zeile: verbunden -> wie lange noch; getrennt -> warum.
+            "lines": [
+                scanner.get("name") or "kein Gerät gekoppelt",
+                (f"bleibt {scanner['idle_min']} min nach dem letzten Scan"
+                 if scanner.get("idle_min") else "bleibt verbunden")
+                if ble_connected and "idle_min" in scanner
+                else scanner_info.trenngrund(scanner.get("reason")),
+            ],
             "button": {"id": "__local_ble_toggle", "label": "Verbinden / Trennen", "color": "#4c9eff"},
         },
         {

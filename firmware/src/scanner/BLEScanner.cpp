@@ -12,6 +12,27 @@ static constexpr uint16_t CHR_REPORT = 0x2A4D;
 static constexpr uint16_t SVC_BATTERY = 0x180F;
 static constexpr uint16_t CHR_BATTERY = 0x2A19;
 
+// Verbindungsparameter in BLE-Einheiten (Intervall 1,25 ms, Aufsicht 10 ms).
+//
+// Schnell, solange gesucht, verschluesselt und abonniert wird: jede dieser
+// Abfragen ist ein Hin und Her mit dem Scanner. Mit 50 ms Intervall und
+// Latenz 4 durfte er sich bis zu 250 ms Zeit lassen - je Abfrage, bei rund
+// zwei Dutzend davon. Genau das waren die Sekunden, in denen der Scanner schon
+// "da" war, sich aber noch nicht benutzen liess.
+static constexpr uint16_t FAST_MIN = 12, FAST_MAX = 24, FAST_LATENCY = 0;   // 15-30 ms
+// Sparsam, sobald alles steht - siehe begin(). Die Latenz verzoegert keinen
+// Barcode: sie erlaubt dem Scanner nur, Ereignisse auszulassen, in denen er
+// nichts zu senden hat.
+static constexpr uint16_t SLOW_MIN = 24, SLOW_MAX = 40, SLOW_LATENCY = 4;   // 30-50 ms
+static constexpr uint16_t SUPERVISION = 600;                                  // 6 s
+
+// So lange wird nach dem Verbindungsaufbau hoechstens auf die Verschluesselung
+// gewartet, bevor trotzdem abonniert wird. Mit gespeichertem Schluessel dauert
+// sie wenige Verbindungsereignisse; die Grenze ist nur fuer den Fall, dass der
+// Scanner die Kopplung vergessen hat - dann verschluesselt NimBLE beim
+// Abonnieren eben selbst.
+static constexpr uint32_t SECURE_WAIT_MS = 3000;
+
 static NimBLEClient *client = nullptr;
 static NimBLEAdvertisedDevice targetDevice;
 static bool haveTarget = false;
@@ -50,7 +71,19 @@ static char hidToChar(uint8_t key, bool shift) {
 // NimBLE-Rueckrufe
 // ---------------------------------------------------------------------------
 class ClientCallbacks : public NimBLEClientCallbacks {
-    void onConnect(NimBLEClient *) override { bleScanner._onConnect(); }
+    void onConnect(NimBLEClient *c) override {
+        bleScanner._onConnect();
+        // Sofort verschluesseln, parallel zur Dienstsuche. Bisher geschah das
+        // erst, wenn das Abonnieren mit "Verschluesselung noetig" scheiterte:
+        // ein voller Umweg, und manche Scanner trennen von sich aus, wenn die
+        // Gegenstelle nicht bald verschluesselt. async = true, weil dieser
+        // Rueckruf auf dem NimBLE-Task laeuft und nicht warten darf.
+        c->secureConnection(true);
+    }
+
+    void onAuthenticationComplete(NimBLEConnInfo &info) override {
+        if (info.isEncrypted()) bleScanner._onSecured();
+    }
 
     void onConnectFail(NimBLEClient *, int reason) override {
         log_w("Verbindung zum Scanner fehlgeschlagen (Grund %d)", reason);
@@ -59,7 +92,7 @@ class ClientCallbacks : public NimBLEClientCallbacks {
 
     void onDisconnect(NimBLEClient *, int reason) override {
         log_w("Scanner getrennt (Grund %d)", reason);
-        bleScanner._onDisconnect();
+        bleScanner._onDisconnect(reason);
     }
 };
 static ClientCallbacks clientCallbacks;
@@ -110,29 +143,30 @@ void BLEScanner::begin() {
     }
     client->setClientCallbacks(&clientCallbacks, false);
 
-    // Intervall 30-50 ms, Slave-Latenz 4, Aufsichtszeit 6 s.
+    // Aufgebaut wird schnell (FAST_*), nach dem Abonnieren wird auf sparsam
+    // umgestellt (SLOW_*: 30-50 ms, Latenz 4) - siehe completeSetup().
     //
-    // Die Latenz verzoegert keinen Barcode: sie erlaubt dem Scanner nur, ein
-    // Verbindungsereignis auszulassen, wenn er *nichts* zu senden hat. Sobald
-    // er etwas hat, sendet er sofort. Vorher stand hier 15 ms ohne Latenz -
-    // das zwang den Handscanner, siebzigmal pro Sekunde aufzuwachen, obwohl
-    // er stundenlang nichts zu melden hat. Das kostet dessen Akku und ist ein
-    // Grund, warum solche Geraete die Verbindung von sich aus fallen lassen
-    // (Trenngrund 0x08, Aufsichtszeit abgelaufen).
+    // Sparsam heisst: der Handscanner muss nicht siebzigmal pro Sekunde
+    // aufwachen, obwohl er stundenlang nichts zu melden hat. Das kostet
+    // dessen Akku und ist ein Grund, warum solche Geraete die Verbindung von
+    // sich aus fallen lassen (Trenngrund 0x08, Aufsichtszeit abgelaufen).
     //
-    // Die 6 s Aufsichtszeit (vorher 2) geben Luft, wenn WLAN und BLE sich hier
-    // eine Antenne im 2,4-GHz-Band teilen. Bedingung ist erfuellt:
+    // Die 6 s Aufsichtszeit geben Luft, wenn WLAN und BLE sich hier eine
+    // Antenne im 2,4-GHz-Band teilen. Bedingung ist erfuellt:
     // (1+4) * 50 ms * 2 = 500 ms liegt weit unter 6 s.
-    client->setConnectionParams(24, 40, 4, 600);
+    client->setConnectionParams(FAST_MIN, FAST_MAX, FAST_LATENCY, SUPERVISION);
     client->setConnectTimeout(BLE_CONNECT_TIMEOUT_MS);
 
     _started = true;
     log_i("BLE bereit");
 }
 
-void BLEScanner::_onDisconnect() {
+void BLEScanner::_onDisconnect(int reason) {
     _state = State::Idle;         // auch hier, nicht nur im Fehlerpfad
     _battery = -1;
+    _secured = false;
+    // NimBLE meldet HCI-Gruende mit einem Versatz (BLE_HS_ERR_HCI_BASE).
+    _lastReason = reason >= BLE_HS_ERR_HCI_BASE ? reason - BLE_HS_ERR_HCI_BASE : reason;
 
     // Angefangenen Code wegwerfen. Bricht die Verbindung mitten in einem
     // Barcode ab (Leerlauf-Timeout, Akku leer, Funkloch), blieben die schon
@@ -141,22 +175,32 @@ void BLEScanner::_onDisconnect() {
     // Nummer - und damit ein falsches Produkt im Bestand. Der Rueckruf laeuft
     // auf dem NimBLE-Task, dem _buffer ohnehin allein gehoert.
     _buffer = "";
-    // Kurz durchatmen, dann steht sofort wieder der gerichtete
-    // Verbindungswunsch - der kostet nichts und faengt den Scanner in dem
-    // Moment ein, in dem er sich wieder meldet.
-    _nextTryMs = millis() + 800;
+    // Sofort wieder der gerichtete Verbindungswunsch - der kostet nichts und
+    // faengt den Scanner in dem Moment ein, in dem er sich wieder meldet.
+    // Die kurze Pause laesst NimBLE nur den alten Verbindungsplatz freigeben.
+    _nextTryMs = millis() + 200;
 }
 
 void BLEScanner::_onConnect() {
     // Nur umschalten - die Dienstsuche blockiert und gehoert deshalb in den
     // Hauptloop, nicht in diesen Rueckruf auf dem NimBLE-Task.
+    _secured = false;
+    _linkUpMs = millis();
     _state = State::Discovering;
 }
 
 void BLEScanner::_onConnectFail() {
     _state = State::Idle;
-    _failures++;
-    _nextTryMs = millis() + 3000;
+    // Mit bekannter Kopplung gleich wieder warten: "Verbindung konnte nicht
+    // aufgebaut werden" (0x3E) passiert neben WLAN regelmaessig, und jede
+    // Sekunde Pause ist eine, in der ein gerade eingeschalteter Scanner ins
+    // Leere wirbt. Ohne Kopplung bleibt es bei der Pause.
+    if (NimBLEDevice::getNumBonds() > 0) {
+        _nextTryMs = millis() + 250;
+    } else {
+        _failures++;
+        _nextTryMs = millis() + 3000;
+    }
 }
 
 void BLEScanner::_onBattery(uint8_t level) {
@@ -164,7 +208,7 @@ void BLEScanner::_onBattery(uint8_t level) {
 }
 
 void BLEScanner::_onReport(const uint8_t *data, size_t length) {
-    // Jede Eingabe haelt die Verbindung am Leben - siehe BLE_IDLE_TIMEOUT_MS.
+    // Jede Eingabe haelt die Verbindung am Leben - siehe setIdleTimeout().
     // Bewusst hier und nicht erst beim fertigen Barcode: auch ein halb
     // getippter Code ist Benutzung.
     _lastActivityMs = millis();
@@ -265,10 +309,11 @@ void BLEScanner::startAutoConnect() {
     _state = State::AutoConnect;
     _connectStartedMs = millis();
     client->setConnectTimeout(BLE_HS_FOREVER);
+    client->setConnectionParams(FAST_MIN, FAST_MAX, FAST_LATENCY, SUPERVISION);
 
     // deleteAttributes bewusst true: mit zwischengespeicherten Handles aus
     // einer frueheren Verbindung schlaegt das Abonnieren fehl, wenn der
-    // Scanner seine Handles neu vergibt - dann legen wir in finishConnect()
+    // Scanner seine Handles neu vergibt - dann legen wir in completeSetup()
     // wieder auf (Trenngrund 0x16) und das Ganze beginnt von vorn. Die eine
     // Dienstsuche pro Verbindung ist dagegen billig.
     if (!client->connect(peer, true, true, true)) {
@@ -308,6 +353,7 @@ void BLEScanner::beginConnect() {
     _state = State::Connecting;
     _connectStartedMs = millis();
     client->setConnectTimeout(BLE_CONNECT_TIMEOUT_MS);
+    client->setConnectionParams(FAST_MIN, FAST_MAX, FAST_LATENCY, SUPERVISION);
 
     // asyncConnect = true: kehrt sofort zurueck, das Ergebnis kommt ueber
     // onConnect bzw. onConnectFail.
@@ -319,8 +365,13 @@ void BLEScanner::beginConnect() {
 // Dienstsuche nach erfolgreicher Verbindung. Diese GATT-Abfragen blockieren
 // (die Bibliothek bietet dafuer keine asynchrone Variante), aber sie laufen
 // genau einmal pro Kopplung und nur, wenn wirklich ein Scanner geantwortet
-// hat - nicht mehr bei jedem erfolglosen Suchlauf.
-void BLEScanner::finishConnect() {
+// hat - nicht mehr bei jedem erfolglosen Suchlauf. Mit den schnellen
+// Verbindungsparametern dauert das Ganze Bruchteile einer Sekunde.
+//
+// Gesucht wird, waehrend die Verschluesselung noch laeuft: Dienste und
+// Merkmale aufzulisten braucht keine. Erst das Abonnieren (completeSetup)
+// wartet auf sie.
+void BLEScanner::discoverServices() {
     // Die Dienstsuche ist der einzige Punkt in der Firmware, an dem ein
     // einzelner Loop-Durchlauf laenger als der Watchdog (WDT_TIMEOUT_S)
     // dauern kann: jede GATT-Abfrage wartet auf die Gegenstelle, und bei
@@ -341,12 +392,27 @@ void BLEScanner::finishConnect() {
         backoff(5000);
         return;
     }
+    hid->getCharacteristics(true);   // gleich mitholen, solange verschluesselt wird
+    esp_task_wdt_reset();
+
+    _state = State::Securing;
+    _securingSinceMs = millis();
+}
+
+void BLEScanner::completeSetup() {
+    esp_task_wdt_reset();
+    NimBLERemoteService *hid = client->getService(NimBLEUUID(SVC_HID));   // schon bekannt
+    if (hid == nullptr) {
+        client->disconnect();
+        backoff(5000);
+        return;
+    }
 
     // Ein Scanner meldet mehrere Report-Charakteristiken (Tastatur, Consumer,
     // Vendor). Alle abonnieren, die es erlauben - welche die Barcodes liefert,
     // unterscheidet sich je Modell.
     int subscribed = 0;
-    for (auto &chr : hid->getCharacteristics(true)) {
+    for (auto &chr : hid->getCharacteristics(false)) {
         if (!chr->getUUID().equals(NimBLEUUID(CHR_REPORT))) continue;
         if (!chr->canNotify()) continue;
         if (chr->subscribe(true, notifyCallback)) subscribed++;
@@ -389,13 +455,37 @@ void BLEScanner::finishConnect() {
         if (gapName.length()) name = String(gapName.c_str());
     }
     esp_task_wdt_reset();
+
+    // Alles steht - jetzt auf sparsam umstellen. Auch als Vorgabe setzen:
+    // NimBLE beantwortet einen Parameterwunsch des Scanners mit genau
+    // diesen Werten, und beim naechsten Aufbau stellt startAutoConnect()
+    // wieder auf schnell.
+    client->setConnectionParams(SLOW_MIN, SLOW_MAX, SLOW_LATENCY, SUPERVISION);
+    client->updateConnParams(SLOW_MIN, SLOW_MAX, SLOW_LATENCY, SUPERVISION);
+
     _deviceName = name.isEmpty() ? String(peer.toString().c_str()) : name;
     _address = String(peer.toString().c_str());
     _state = State::Connected;           // Erfolgspfad
     _failures = 0;
-    _lastActivityMs = millis();          // die vollen 10 Minuten ab jetzt
+    _lastActivityMs = millis();          // die volle Verbindungsdauer ab jetzt
     _nextBattMs = millis() + BATTERY_POLL_MS;
-    log_i("Scanner verbunden: %s (%d Reports)", _deviceName.c_str(), subscribed);
+    _setupMs = millis() - _linkUpMs;
+    log_i("Scanner verbunden: %s (%d Reports, %lu ms, %s)", _deviceName.c_str(), subscribed,
+          (unsigned long)_setupMs, _secured ? "verschluesselt" : "noch unverschluesselt");
+}
+
+const char *BLEScanner::stateName() const {
+    if (!_started) return "aus";
+    switch (_state) {
+        case State::Connected:   return "verbunden";
+        case State::AutoConnect: return "wartet";
+        case State::Scanning:    return "sucht";
+        case State::Connecting:
+        case State::Discovering:
+        case State::Securing:    return "verbindet";
+        case State::Idle:        return (int32_t)(_pauseUntilMs - millis()) > 0 ? "pausiert" : "wartet";
+    }
+    return "?";
 }
 
 void BLEScanner::readBatteryNow() {
@@ -456,7 +546,7 @@ void BLEScanner::loop() {
                 // Die wachsende Wartezeit waere hier schaedlich - sie wuerde
                 // genau das Fenster aufreissen, in dem der Scanner
                 // eingeschaltet wird und niemand zuhoert.
-                backoff(500);
+                backoff(200);
             } else {
                 // Noch nichts gekoppelt und nichts gefunden - dann ist auch
                 // nichts da. Hier darf die Wartezeit wachsen.
@@ -469,15 +559,21 @@ void BLEScanner::loop() {
             break;                              // wartet auf onConnect/onConnectFail
 
         case State::Discovering:
-            finishConnect();
+            discoverServices();
+            break;
+
+        case State::Securing:
+            // Die Verschluesselung laeuft seit onConnect - meist ist sie
+            // laengst fertig, wenn die Dienstsuche durch ist.
+            if (_secured || now - _securingSinceMs > SECURE_WAIT_MS) completeSetup();
             break;
 
         case State::Connected:
             // Nach dem letzten Barcode noch eine Weile verbunden bleiben,
             // dann auflegen, damit der Handscanner schlafen kann.
-            if (now - _lastActivityMs > BLE_IDLE_TIMEOUT_MS) {
+            if (_idleTimeoutMs > 0 && now - _lastActivityMs > _idleTimeoutMs) {
                 log_i("Seit %lu Minuten kein Scan - Verbindung wird getrennt",
-                      (unsigned long)(BLE_IDLE_TIMEOUT_MS / 60000));
+                      (unsigned long)(_idleTimeoutMs / 60000));
                 if (client->isConnected()) client->disconnect();
                 _state = State::Idle;
                 _pauseUntilMs = now + BLE_IDLE_COOLDOWN_MS;

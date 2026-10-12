@@ -721,13 +721,16 @@ function deviceCard(d) {
   }
   return `<div class="card">${kopf}
       <div class="telemetry">
-        <div><b>${scanner.connected ? 'verbunden' : 'nicht verbunden'}</b><span>Handscanner</span></div>
+        <div><b>${esc(scanner.state_text || (scanner.connected ? 'verbunden' : 'nicht verbunden'))}</b><span>Handscanner${
+          scanner.connected && scanner.setup_ms ? ` · gekoppelt in ${(scanner.setup_ms / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} s` : ''}</span></div>
         <div><b>${scanner.battery >= 0 ? scanner.battery + ' %' : '–'}</b><span>Scanner-Akku</span></div>
         <div><b>${wlanText(t.rssi)}</b><span>WLAN</span></div>
         <div><b>${t.uptime ? Math.floor(t.uptime / 3600) + ' h' : '–'}</b><span>Läuft seit</span></div>
         <div><b>${t.heap ? Math.round(t.heap / 1024) + ' K' : '–'}</b><span>Speicher frei</span></div>
         <div><b>${t.min_heap ? Math.round(t.min_heap / 1024) + ' K' : '–'}</b><span>Speicher min.</span></div>
       </div>
+      ${!scanner.connected && scanner.reason_text ? `<div class="muted" style="margin-top:8px">
+        Scanner zuletzt getrennt: ${esc(scanner.reason_text)}</div>` : ''}
       <label class="field" style="margin-top:12px">Haushalt
         <select data-dev-haus="${esc(d.device_id)}">
           ${(state.haushalte || []).map((h) => `<option ${h.name === d.household ? 'selected' : ''}>${esc(h.name)}</option>`).join('')}

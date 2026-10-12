@@ -181,20 +181,24 @@
 
 // Der Scanner bleibt nach dem letzten Barcode noch so lange verbunden; jeder
 // Scan setzt die Zeit zurueck. Danach wird getrennt, damit der Handscanner
-// schlafen und seinen Akku schonen kann.
+// schlafen und seinen Akku schonen kann. Nur der Startwert: eingestellt wird
+// die Zeit am Server (System -> Terminal, device_ui.scanner_minutes) und
+// kommt mit der config-Nachricht; 0 heisst dort "nie trennen".
 #define BLE_IDLE_TIMEOUT_MS 600000        // 10 Minuten
 
 // Nach dem Trennen wegen Untaetigkeit kurz nicht neu verbinden. Ein Scanner,
 // der sofort wieder wirbt, haenge sonst augenblicklich wieder dran und das
 // Trennen haette nichts gebracht. Kurz genug, dass es niemand merkt, der den
 // Scanner gerade wieder in die Hand nimmt.
-#define BLE_IDLE_COOLDOWN_MS 15000
+#define BLE_IDLE_COOLDOWN_MS 10000
 
 // So lange darf der Controller unbeaufsichtigt auf den bekannten Scanner
 // warten. Danach einmal regulaer suchen - fuer den Fall, dass die gespeicherte
-// Kopplung nicht mehr stimmt (anderer oder zurueckgesetzter Scanner). Ohne
-// diesen Ausweg waere ein veralteter Eintrag eine Sackgasse.
-#define BLE_AUTOCONNECT_RETRY_MS 180000   // 3 Minuten
+// Kopplung nicht mehr stimmt (anderer oder zurueckgesetzter Scanner, oder einer,
+// der mit wechselnder Adresse wirbt und sich gerichtet nicht finden laesst).
+// Ohne diesen Ausweg waere ein veralteter Eintrag eine Sackgasse; drei Minuten
+// waren dafuer zu lang - so lange stand das Terminal dann ohne Scanner da.
+#define BLE_AUTOCONNECT_RETRY_MS 60000    // 1 Minute
 
 // Gestufte Wiederherstellung, wenn WLAN oder Server dauerhaft nicht
 // erreichbar sind (falsches Passwort nach einem Routertausch, Server-IP hat

@@ -130,6 +130,14 @@ static void onServerMessage(JsonDocument &doc) {
     } else if (type == "config") {
         screen.setBrightness(doc["brightness"] | 80);
         buzzer.setEnabled(doc["beep"] | true);
+        screen.setIdleDim(doc["idle_seconds"] | 0);
+        // Nur uebernehmen, wenn der Server es schickt - ein aelterer kennt
+        // die Einstellung nicht, dann bleibt es beim Startwert.
+        JsonVariant minuten = doc["scanner_minutes"];
+        if (minuten.is<float>() || minuten.is<int>()) {
+            const float m = max(0.0f, minuten.as<float>());
+            bleScanner.setIdleTimeout((uint32_t)(m * 60000.0f));
+        }
 
     } else if (type == "ping") {
         net.sendEvent("pong");
@@ -158,6 +166,13 @@ static void sendTelemetry() {
     scanner["connected"] = bleScanner.isConnected();
     scanner["battery"]   = bleScanner.battery();
     scanner["name"]      = bleScanner.deviceName();
+    // Fuer das System-Panel: was der Scanner gerade tut, warum er zuletzt
+    // getrennt wurde (vom Scanner selbst? Funkloch?) und wie lange die
+    // letzte Kopplung gedauert hat.
+    scanner["state"]     = bleScanner.stateName();
+    scanner["reason"]    = bleScanner.lastReason();
+    scanner["setup_ms"]  = bleScanner.lastSetupMs();
+    scanner["idle_min"]  = bleScanner.idleTimeoutMs() / 60000;
 
     net.send(doc);
 }
@@ -265,6 +280,7 @@ void loop() {
     // --- Barcode ---------------------------------------------------------
     String code;
     if (bleScanner.readCode(code)) {
+        screen.wake();
         buzzer.play("scan");
         sendScan(code);
     }
@@ -277,7 +293,9 @@ void loop() {
     // --- Hardwaretaster ---------------------------------------------------
     // Gleichwertig zur Bedienung am Bildschirm: Zurueck macht dasselbe wie das
     // Wischen, die beiden anderen dasselbe wie das Ziehen in einer Liste.
-    switch (buttons.poll()) {
+    ButtonEvent taste = buttons.poll();
+    if (taste != ButtonEvent::None && screen.wake()) taste = ButtonEvent::None;  // weckt nur
+    switch (taste) {
         case ButtonEvent::Back: {
             JsonDocument doc;
             doc["t"] = "tap";
@@ -292,7 +310,11 @@ void loop() {
     }
 
     // --- Beruehrung -------------------------------------------------------
-    const Gesture gesture = touch.poll(screen.scrollable());
+    Gesture gesture = touch.poll(screen.scrollable());
+    // Ein dunkler Bildschirm wird von der ersten Beruehrung nur geweckt -
+    // sonst loeste man beim Aufwecken blind eine Kachel aus, die man gar
+    // nicht gesehen hat.
+    if (gesture.type != GestureType::None && screen.wake()) gesture.type = GestureType::None;
     switch (gesture.type) {
         case GestureType::Tap: {
             const Action action = screen.handleTouch(gesture.x, gesture.y);

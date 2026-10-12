@@ -435,7 +435,12 @@
             <span class="hint">wirkt sofort auf alle verbundenen Terminals</span></label>
           <label class="field">Bildschirm dunkel nach (s)
             <input data-setting="device_ui.idle_seconds" data-art="int" type="number" min="0" max="3600">
-            <span class="hint">0 = bleibt immer an</span></label>
+            <span class="hint">0 = bleibt immer an · die erste Berührung weckt nur</span></label>
+          <label class="field">Scanner bleibt verbunden (min)
+            <input data-setting="device_ui.scanner_minutes" data-art="int" type="number" min="0" max="1440">
+            <span class="hint">nach dem letzten Scan, danach darf der Scanner schlafen · 0 = immer verbunden
+              (leert seinen Akku schneller). Schaltet der Scanner selbst früher ab, ist das seine eigene
+              Einstellung – der Trenngrund steht unter „Terminals“.</span></label>
           <label class="field check">
             <span class="row tight"><input data-setting="device_ui.beep" type="checkbox"> Ton beim Scannen</span></label>
         </div>
