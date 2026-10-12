@@ -729,6 +729,23 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
             vorschub["form"] = True
         blocks.append(vorschub)
 
+    # Vorschub in kleinen Schritten: ein langer ESC J am Stueck laesst die
+    # Walze auf manchen Etikettenrollen durchdrehen - das Papier bleibt
+    # stehen, und alle folgenden Etiketten stehen falsch. Viele kleine
+    # Schritte greifen. Die Summe bleibt gleich, die Teilung stimmt weiter.
+    schritt = max(0, int(printer_cfg.get("feed_step_dots", 0) or 0))
+    if schritt:
+        zerlegt: list[dict] = []
+        for b in blocks:
+            if b.get("t") == "feed" and not b.get("form") and b.get("dots", 0) > schritt:
+                rest = int(b["dots"])
+                while rest > 0:
+                    zerlegt.append({"t": "feed", "dots": min(schritt, rest)})
+                    rest -= schritt
+            else:
+                zerlegt.append(b)
+        blocks = zerlegt
+
     # Jedem Block seine Hoehe mitgeben.
     #
     # Das ist der Kern der Sache: die Firmware raet den Zeilenabstand nicht

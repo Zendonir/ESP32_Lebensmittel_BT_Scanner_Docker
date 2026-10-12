@@ -98,3 +98,13 @@ def test_weggelassene_zeilen_werden_genannt():
     assert p["weggelassen"], "bei 20 mm passt nicht alles"
     gedruckt = {b.get("k") for b in p["blocks"] if b["t"] == "row"}
     assert not gedruckt & set(p["weggelassen"])
+
+
+def test_vorschub_in_schritten_aendert_die_laenge_nicht():
+    cfg = {"label_layout": "standard", "label_height_mm": 25, "label_feed_edge": "hoehe",
+           "label_sequence": "einfach", "label_gap_mm": 3}
+    am_stueck = labels.render_label(ITEM, cfg)
+    schritte = labels.render_label(ITEM, {**cfg, "feed_step_dots": 8})
+    vorschuebe = [b["dots"] for b in schritte["blocks"] if b["t"] == "feed"]
+    assert vorschuebe and max(vorschuebe) <= 8
+    assert labels.total_dots(schritte["blocks"]) == labels.total_dots(am_stueck["blocks"])

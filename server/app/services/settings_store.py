@@ -85,6 +85,8 @@ DEFAULTS: dict[str, Any] = {
         # "einfach": Rueckzug -> Etikett in label_height_mm -> label_gap_mm leer.
         "label_sequence": "teilung",
         "label_gap_mm": 0,
+        # Vorschub in Schritten zu so vielen Punkten (0 = am Stueck).
+        "feed_step_dots": 0,
         # Nur fuer Layouts, die als Bild gedruckt werden (Hochformat).
         #
         # Welcher Rasterbefehl auf einem namenlosen Drucker masshaltig

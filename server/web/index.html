@@ -251,6 +251,9 @@
         <label class="field">Vorschub danach (mm)
           <input data-setting="printer.label_gap_mm" data-art="float" type="number" min="0" max="50" step="0.5">
           <span class="hint">Leerer Vorschub nach jedem Etikett – nur beim Ablauf „Rückzug → …“</span></label>
+        <label class="field">Vorschub in Schritten (Punkte)
+          <input data-setting="printer.feed_step_dots" data-art="int" type="number" min="0" max="255" step="1">
+          <span class="hint">Dreht die Walze zwischen den Etiketten durch: kleine Schritte, z. B. 8 (= 1 mm). 0 = am Stück</span></label>
         <label class="field">Rückzugsbefehl
           <select data-setting="printer.backfeed_cmd">
             <option value="escj">ESC j (Epson)</option>
