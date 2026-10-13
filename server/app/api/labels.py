@@ -189,6 +189,21 @@ async def test_print(
     sent = await workflow.flush_print_queue(session, target)
     return {"ok": bool(sent), "job": job.id}
 
+@router.get("/ablauf")
+async def ablauf(session: AsyncSession = Depends(get_session)):
+    """Ablauf "Rueckzug -> Etikett -> Vorschub" nachgerechnet, in Millimetern.
+
+    Die Oberflaeche zeigt damit, wie viel Papier ein Etikett verbraucht und
+    ob das zur Rolle passt - aus derselben Rechnung, mit der gedruckt wird.
+    """
+    cfg = await settings_store.get(session, "printer", {})
+    werte = label_service.ablauf_einfach(cfg)
+    mm = {k: round(v / label_service.DOTS_PER_MM, 3) for k, v in werte.items()
+          if isinstance(v, int) and not isinstance(v, bool)}
+    return {**mm, "aus_abstand": werte["aus_abstand"],
+            "aktiv": cfg.get("label_sequence") == "einfach"}
+
+
 @router.get("/eigen")
 async def eigen_aufteilung(session: AsyncSession = Depends(get_session)):
     """Was die eigene Aufteilung anbietet und was gerade eingestellt ist."""

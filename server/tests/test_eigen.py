@@ -108,3 +108,48 @@ def test_vorschub_in_schritten_aendert_die_laenge_nicht():
     vorschuebe = [b["dots"] for b in schritte["blocks"] if b["t"] == "feed"]
     assert vorschuebe and max(vorschuebe) <= 8
     assert labels.total_dots(schritte["blocks"]) == labels.total_dots(am_stueck["blocks"])
+
+
+# ------------------------------------------- Ablauf: Papier je Etikett
+_EINFACH = {"label_layout": "standard", "label_height_mm": 25, "label_feed_edge": "hoehe",
+            "label_sequence": "einfach", "backfeed_dots": 48}
+
+
+def test_vorschub_danach_ergibt_sich_aus_dem_etikettenabstand():
+    """25 mm Hoehe, 6 mm Rueckzug, 32-mm-Rolle: genau 13 mm Vorschub danach -
+    der Wert, der am echten Drucker als einziger funktionierte."""
+    a = labels.ablauf_einfach({**_EINFACH, "label_pitch_mm": 32})
+    assert a["vorschub"] == 13 * 8 and a["papier"] == 32 * 8 and a["aus_abstand"]
+    for hoehe in (22, 25, 28):          # Hoehe aendern: die Teilung bleibt
+        p = labels.render_label(ITEM, {**_EINFACH, "label_pitch_mm": 32, "label_height_mm": hoehe})
+        assert labels.total_dots(p["blocks"]) == 32 * 8
+
+
+def test_ohne_abstand_gilt_der_vorschub_danach():
+    a = labels.ablauf_einfach({**_EINFACH, "label_gap_mm": 12})
+    assert a["papier"] == (25 + 12) * 8 - 48 and not a["aus_abstand"]
+
+
+def test_zu_lange_hoehe_wird_gemeldet():
+    a = labels.ablauf_einfach({**_EINFACH, "label_pitch_mm": 20, "label_height_mm": 30})
+    assert a["vorschub"] == 0 and a["zu_lang"] == (30 - 20) * 8 - 48
+
+
+def test_gedruckter_vorschub_aendert_die_laenge_nicht():
+    cfg = {**_EINFACH, "label_pitch_mm": 32, "backfeed_cmd": "esck", "raster_mode": "esc33"}
+    schnell = labels.render_label(ITEM, cfg)
+    for art, typ in (("leerzeilen", "text"), ("bild", "raster")):
+        p = labels.render_label(ITEM, {**cfg, "feed_mode": art})
+        assert labels.total_dots(p["blocks"]) == labels.total_dots(schnell["blocks"])
+        # Was bleibt an ESC J, ist nur der Rest unter 24 Punkten
+        assert all(b["dots"] < 24 for b in p["blocks"] if b["t"] == "feed")
+        assert any(b["t"] == typ for b in p["blocks"])
+    bild = labels.render_label(ITEM, {**cfg, "feed_mode": "bild"})
+    assert labels.BILD_FAEHIGKEIT in bild["braucht"] and labels.RAW_FAEHIGKEIT in bild["braucht"]
+    for b in bild["blocks"]:
+        if b["t"] == "raster" and b["w"] == labels.LEERBILD_BREITE:
+            import base64
+
+            from app.services import hochformat
+            roh = hochformat.unpackbits(base64.b64decode(b["d"]), 10**6)
+            assert roh == bytes(b["h"]) and b["h"] % 24 == 0

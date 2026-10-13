@@ -600,6 +600,81 @@ def _build(layout: str, item: dict, cfg: dict, chars: int) -> list[dict]:
 
 
 
+# Ein leeres Bild als Vorschub: so schmal wie moeglich (8 Punkte = 1 Byte je
+# Zeile), in ganzen Baendern zu 24 Zeilen - `ESC * 33` druckt nur ganze Baender.
+LEERBILD_BREITE = 8
+LEERBILD_BAND = 24
+
+
+def _leeres_bild(zeilen: int, cfg: dict) -> dict:
+    roh = bytes((LEERBILD_BREITE // 8) * zeilen)
+    return {"t": "raster", "w": LEERBILD_BREITE, "h": zeilen,
+            "mode": cfg.get("raster_mode", "gsv0"), "z": "rle",
+            "d": base64.b64encode(hochformat.packbits(roh)).decode("ascii")}
+
+
+def _vorschub_bloecke(dots: int, art: str, schritt: int, cfg: dict) -> list[dict]:
+    """Einen Vorschub von `dots` Punkten so ausdruecken, wie eingestellt.
+
+    leerzeilen: Zeilen aus einem Leerzeichen, je 24 Punkte - genau die Hoehe
+                der Schrift, die ganze Bewegung ist also Druckbewegung.
+    bild:       ein leeres Rasterbild im eingestellten Bildmodus.
+    Was nicht in ganze 24 Punkte aufgeht (hoechstens 23, unter 3 mm), bleibt
+    ein ESC J - auf Wunsch in Schritten.
+    """
+    out: list[dict] = []
+    rest = dots
+    if art == "leerzeilen":
+        zeilen, rest = divmod(dots, LINE_DOTS)
+        out += [{"t": "text", "v": " ", "align": 0, "h": LINE_DOTS} for _ in range(zeilen)]
+    elif art == "bild":
+        baender, rest = divmod(dots, LEERBILD_BAND)
+        if baender:
+            out.append(_leeres_bild(baender * LEERBILD_BAND, cfg))
+    while rest > 0:
+        stueck = min(schritt, rest) if schritt else rest
+        out.append({"t": "feed", "dots": stueck})
+        rest -= stueck
+    return out
+
+
+def ablauf_einfach(cfg: dict) -> dict:
+    """Rueckzug -> Etikett -> Vorschub: wie viel Papier ein Etikett verbraucht.
+
+    Je Etikett bewegt sich das Papier um  Hoehe + Vorschub danach - Rueckzug.
+    Das muss *genau* der Abstand von einem Etikettanfang zum naechsten sein
+    (Etikett + Luecke). Schon ein Millimeter daneben summiert sich: nach ein
+    paar Etiketten druckt er in die Luecke, und der Rueckzug zieht die Kante
+    des naechsten Etiketts unter die Walze - das rattert und klingt nach
+    Durchdrehen. Genau das ergab "Vorschub danach 12 und 14 gehen nicht,
+    13 geht" bei 25 mm Hoehe und 6 mm Rueckzug auf einer 32-mm-Rolle.
+
+    Ist der Etikettenabstand (`label_pitch_mm`) eingetragen, ergibt sich der
+    Vorschub danach daraus - dann darf man Hoehe und Rueckzug aendern, ohne
+    dass die Etiketten zu wandern beginnen. Sonst gilt `label_gap_mm`.
+    Alles in Punkten (8 je mm).
+    """
+    stack_mm, _ = feed_and_line_mm(cfg)
+    hoehe = int(stack_mm * DOTS_PER_MM)
+    rueckzug = max(0, min(MAX_BACKFEED_DOTS, int(cfg.get("backfeed_dots", 0) or 0)))
+    abstand = int(round(float(cfg.get("label_pitch_mm", 0) or 0) * DOTS_PER_MM))
+    if abstand > 0:
+        vorschub = abstand - hoehe + rueckzug
+    else:
+        vorschub = int(round(float(cfg.get("label_gap_mm", 0) or 0) * DOTS_PER_MM))
+    zu_lang = max(0, -vorschub)       # Hoehe passt nicht in den Abstand
+    vorschub = max(0, vorschub)
+    return {
+        "hoehe": hoehe,
+        "rueckzug": rueckzug,
+        "vorschub": vorschub,
+        "abstand": abstand,
+        "papier": hoehe + vorschub - rueckzug,
+        "zu_lang": zu_lang,
+        "aus_abstand": abstand > 0,
+    }
+
+
 def render_label(item: dict, printer_cfg: dict) -> dict:
     """Etikett als geraeteunabhaengige Feldliste rendern.
 
@@ -640,10 +715,12 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
     budget = pitch + backfeed - dead - SAFETY_DOTS
 
     # Ablauf "einfach": Rueckzug, dann das Etikett in genau der eingestellten
-    # Laenge, dann ein fester Leervorschub. Kein Rechnen mit Totbereich und
-    # Teilung - wer seinen Drucker kennt, stellt die drei Werte direkt ein.
+    # Laenge, dann ein Leervorschub. Kein Rechnen mit dem Totbereich - wer
+    # seinen Drucker kennt, stellt die Werte direkt ein. Wie viel Papier das
+    # je Etikett ergibt, rechnet ablauf_einfach() an einer Stelle aus.
     einfach = printer_cfg.get("label_sequence") == "einfach"
-    luecke = max(0, int(float(printer_cfg.get("label_gap_mm", 0) or 0) * DOTS_PER_MM))
+    ablauf = ablauf_einfach(printer_cfg) if einfach else None
+    luecke = ablauf["vorschub"] if ablauf else 0
     if einfach:
         dead = verloren = 0
         budget = pitch - SAFETY_DOTS
@@ -731,22 +808,24 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
             vorschub["form"] = True
         blocks.append(vorschub)
 
-    # Vorschub in kleinen Schritten: ein langer ESC J am Stueck laesst die
-    # Walze auf manchen Etikettenrollen durchdrehen - das Papier bleibt
-    # stehen, und alle folgenden Etiketten stehen falsch. Viele kleine
-    # Schritte greifen. Die Summe bleibt gleich, die Teilung stimmt weiter.
+    # Wie vorgeschoben wird. ESC J laeuft bei vielen Druckern mit voller
+    # Motorgeschwindigkeit - auf Etikettenrollen dreht die Walze dabei durch,
+    # beim Drucken (langsameres Drucktempo) dagegen nicht. Deshalb laesst sich
+    # der Vorschub auch *drucken*: als Leerzeilen oder als leeres Bild. Und
+    # ein ESC J laesst sich in kleine Schritte zerlegen. Die Summe bleibt in
+    # jedem Fall gleich, die Teilung stimmt weiter.
+    art = printer_cfg.get("feed_mode", "escj")
     schritt = max(0, int(printer_cfg.get("feed_step_dots", 0) or 0))
-    if schritt:
+    if art in ("leerzeilen", "bild") or schritt:
         zerlegt: list[dict] = []
         for b in blocks:
-            if b.get("t") == "feed" and not b.get("form") and b.get("dots", 0) > schritt:
-                rest = int(b["dots"])
-                while rest > 0:
-                    zerlegt.append({"t": "feed", "dots": min(schritt, rest)})
-                    rest -= schritt
+            if b.get("t") == "feed" and not b.get("form") and int(b.get("dots", 0)) > 0:
+                zerlegt += _vorschub_bloecke(int(b["dots"]), art, schritt, printer_cfg)
             else:
                 zerlegt.append(b)
         blocks = zerlegt
+        if art == "bild":
+            noetig.append(BILD_FAEHIGKEIT)
 
     # Jedem Block seine Hoehe mitgeben.
     #
@@ -785,12 +864,16 @@ def render_label(item: dict, printer_cfg: dict) -> dict:
         # das Etikett endet genau an der Perforation.
         "overflow": overflow,
         "weggelassen": weggelassen,
+        # Ablauf "einfach": Papier je Etikett und ob der Etikettenabstand
+        # ueberhaupt reicht - fuer die Anzeige unter Etiketten -> Einrichten.
+        "ablauf": ablauf,
         "blocks": blocks,
     }
     if layout in BILD_LAYOUTS:
         # Der Server prueft das vor dem Senden: ein Terminal ohne diese
         # Faehigkeit bekaeme sonst leere Etiketten statt einer Meldung.
         noetig.insert(0, BILD_FAEHIGKEIT)
+    noetig = list(dict.fromkeys(noetig))   # jede Faehigkeit nur einmal
     if noetig:
         payload["braucht"] = noetig[0] if len(noetig) == 1 else noetig
     return payload

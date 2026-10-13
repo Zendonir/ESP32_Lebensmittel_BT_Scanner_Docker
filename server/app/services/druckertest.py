@@ -133,6 +133,18 @@ TESTS: tuple[Test, ...] = (
          "3 Zeilen à 24 Punkte.", _vorschub(bytes([ESC, 0x33, 24, ESC, 0x64, 3]), 72)),
     Test("vor_lf", "Vorschub", "LF", "1B 33 18 0A 0A 0A",
          "3 Zeilenumbrüche à 24 Punkte.", _vorschub(bytes([ESC, 0x33, 24, 10, 10, 10]), 72)),
+    # Gedruckter Vorschub: laeuft im Drucktempo statt mit voller
+    # Motorgeschwindigkeit - gegen eine Walze, die beim ESC J durchdreht.
+    Test("vor_leerzeilen", "Vorschub", "Leerzeilen", "1B 33 18 + 4 × \" \" 0A",
+         "4 gedruckte Leerzeilen à 24 Punkte – hörbar langsamer als ESC J?",
+         _vorschub(bytes([ESC, 0x33, 24]) + b" \n" * 4, 96)),
+    Test("vor_bild33", "Vorschub", "Leeres Bild ESC * 33", "4 × 1B 2A 21 08 00 …",
+         "Leeres Bild in 4 Bändern à 24 Punkte (Bildmodus B).",
+         _vorschub(bytes([ESC, 0x33, 24]) + (bytes([ESC, 0x2A, 33, 8, 0]) + bytes(24) + b"\n") * 4,
+                   96)),
+    Test("vor_bildgsv0", "Vorschub", "Leeres Bild GS v 0", "1D 76 30 00 01 00 60 00 …",
+         "Leeres Bild mit 96 Zeilen (Bildmodus A).",
+         _vorschub(bytes([GS, 0x76, 0x30, 0, 1, 0, 96, 0]) + bytes(96), 96)),
     Test("ende_gsff", "Etikettenende", "GS FF", "1D 0C",
          "Zum Anfang des nächsten Etiketts (Lückensensor).", _ende(bytes([GS, 0x0C])),
          auffuellen=False),

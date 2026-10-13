@@ -88,8 +88,15 @@ DEFAULTS: dict[str, Any] = {
         # "einfach": Rueckzug -> Etikett in label_height_mm -> label_gap_mm leer.
         "label_sequence": "teilung",
         "label_gap_mm": 0,
+        # Ablauf "einfach": Abstand der Rolle von Etikettanfang zu
+        # Etikettanfang (Etikett + Luecke). Eingetragen ergibt sich der
+        # Vorschub danach daraus (labels.ablauf_einfach); 0 = unbekannt.
+        "label_pitch_mm": 0,
         # Vorschub in Schritten zu so vielen Punkten (0 = am Stueck).
         "feed_step_dots": 0,
+        # Wie vorgeschoben wird: "escj" (ESC J, schnell), "leerzeilen" oder
+        # "bild" (gedruckt, im langsameren Drucktempo - gegen Durchdrehen).
+        "feed_mode": "escj",
         # Nur fuer Layouts, die als Bild gedruckt werden (Hochformat).
         #
         # Welcher Rasterbefehl auf einem namenlosen Drucker masshaltig

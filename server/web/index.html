@@ -174,7 +174,7 @@
           <span class="hint">von Kante zu Kante, ohne Trägerpapier</span></label>
         <label class="field">Höhe (mm)
           <input data-setting="printer.label_height_mm" data-art="float" type="number" min="15" max="110">
-          <span class="hint">vom Anfang eines Etiketts bis zum nächsten, ohne Lücke</span></label>
+          <span class="hint" id="hoehe-hint">von einem Etikettanfang zum nächsten – Etikett + Lücke</span></label>
         <label class="field">Vorschubkante
           <select data-setting="printer.label_feed_edge">
             <option value="hoehe">Höhe läuft durch den Drucker</option>
@@ -248,12 +248,25 @@
             <option value="einfach">Rückzug → Etikett in Höhe → Vorschub</option>
           </select>
           <span class="hint">„Rückzug → …“: erst zurück, dann genau die eingestellte Höhe, dann der Vorschub danach</span></label>
-        <label class="field">Vorschub danach (mm)
-          <input data-setting="printer.label_gap_mm" data-art="float" type="number" min="0" max="50" step="0.5">
-          <span class="hint">Leerer Vorschub nach jedem Etikett – nur beim Ablauf „Rückzug → …“</span></label>
+        <label class="field" data-nur-einfach hidden>Etikettenabstand (mm)
+          <input data-setting="printer.label_pitch_mm" data-art="float" type="number" min="0" max="200" step="0.125">
+          <span class="hint">Anfang eines Etiketts bis Anfang des nächsten (Etikett + Lücke). Genau: 10 Etiketten
+            messen und durch 10 teilen. Eingetragen rechnet sich „Vorschub danach“ selbst aus · 0 = von Hand</span></label>
+        <label class="field" data-nur-einfach hidden>Vorschub danach (mm)
+          <input data-setting="printer.label_gap_mm" data-art="float" type="number" min="0" max="50" step="0.125">
+          <span class="hint" id="gap-hint">Leerer Vorschub nach jedem Etikett</span></label>
+        <div class="notice" id="ablauf-box" data-nur-einfach hidden style="grid-column:1/-1;display:block"></div>
+        <label class="field">Vorschub als
+          <select data-setting="printer.feed_mode">
+            <option value="escj">ESC J – schnell (Standard)</option>
+            <option value="leerzeilen">Leerzeilen drucken – im Drucktempo</option>
+            <option value="bild">leeres Bild drucken – im Drucktempo</option>
+          </select>
+          <span class="hint">Dreht die Walze beim Vorschub durch, beim Drucken aber nicht? Dann den Vorschub
+            drucken lassen. Vorher unter „Einzelne Befehle testen → Vorschub“ ausprobieren.</span></label>
         <label class="field">Vorschub in Schritten (Punkte)
           <input data-setting="printer.feed_step_dots" data-art="int" type="number" min="0" max="255" step="1">
-          <span class="hint">Dreht die Walze zwischen den Etiketten durch: kleine Schritte, z. B. 8 (= 1 mm). 0 = am Stück</span></label>
+          <span class="hint">ESC J in kleinen Schritten, z. B. 8 (= 1 mm). 0 = am Stück</span></label>
         <label class="field">Rückzugsbefehl
           <select data-setting="printer.backfeed_cmd">
             <option value="escj">ESC j (Epson)</option>

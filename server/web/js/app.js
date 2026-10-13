@@ -1082,6 +1082,59 @@ $('#eigen-reset')?.addEventListener('click', () => {
     .then(() => eigenLaden()).then(() => loadLayouts());
 });
 
+// Papier je Etikett im Ablauf "Rueckzug -> Etikett -> Vorschub". Kommt aus
+// derselben Rechnung, mit der gedruckt wird (labels.ablauf_einfach). Steht
+// nicht genau der Etikettenabstand da, wandert jedes Etikett ein Stueck -
+// nach ein paar Etiketten druckt er in die Luecke, und der Rueckzug zieht
+// die Kante unter die Walze. Genau das klang nach Durchdrehen.
+const mmText = (v) => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 3 });
+async function ablaufZeigen() {
+  const box = $('#ablauf-box');
+  if (!box) return;
+  const a = await get('/api/labels/ablauf');
+  const gap = $('[data-setting="printer.label_gap_mm"]');
+  if (gap) {
+    gap.disabled = a.aus_abstand;
+    if (a.aus_abstand) gap.value = mmText(a.vorschub).replace(',', '.');
+  }
+  const gapHint = $('#gap-hint');
+  if (gapHint) {
+    gapHint.textContent = a.aus_abstand
+      ? 'wird aus dem Etikettenabstand berechnet'
+      : 'Leerer Vorschub nach jedem Etikett';
+  }
+  const rechnung = `Höhe ${mmText(a.hoehe)} + Vorschub danach ${mmText(a.vorschub)} − Rückzug ${mmText(a.rueckzug)}
+    = <b>${mmText(a.papier)} mm Papier je Etikett</b>`;
+  let text;
+  if (a.zu_lang > 0) {
+    box.className = 'notice warn';
+    text = `${rechnung}<br>Die Höhe ist ${mmText(a.zu_lang)} mm zu lang für den Etikettenabstand
+      von ${mmText(a.abstand)} mm – das Etikett liefe aufs nächste. Höhe verkleinern oder Rückzug vergrößern.`;
+  } else if (a.aus_abstand) {
+    box.className = 'notice';
+    text = `${rechnung} – passt zum Etikettenabstand. Höhe und Rückzug kannst du jetzt ändern,
+      der Vorschub danach zieht von selbst nach.`;
+  } else {
+    box.className = 'notice warn';
+    text = `${rechnung}<br>Das muss <b>genau</b> der Abstand von einem Etikettanfang zum nächsten sein
+      (Etikett + Lücke). Schon 1 mm daneben summiert sich: nach ein paar Etiketten druckt er in die Lücke,
+      und der Rückzug zieht die Kante unter die Walze – das klingt nach Durchdrehen.
+      <div class="row" style="margin-top:8px"><button class="sm" id="abstand-uebernehmen">
+        ${mmText(a.papier)} mm als Etikettenabstand übernehmen</button>
+        <span class="muted">wenn es so gerade richtig läuft</span></div>`;
+  }
+  box.innerHTML = text;
+  box.style.display = 'block';
+  $('#abstand-uebernehmen')?.addEventListener('click', async (ev) => {
+    const ok = await saveSetting(ev.target, 'printer', { label_pitch_mm: a.papier });
+    if (ok) {
+      fillSettings(state.settings);
+      await loadLayouts();
+      await hochformatHinweise();
+    }
+  });
+}
+
 // Hochformat wird als Bild gedruckt. Dafuer gibt es eigene Einstellungen,
 // das Einzeln-Drehen der Buchstaben wirkt dort nicht - und ein Terminal mit
 // aelterer Firmware kann es gar nicht. Das soll man sehen, bevor die ersten
@@ -1093,6 +1146,18 @@ async function hochformatHinweise() {
   const eigen = drucker.label_layout === 'eigen';
   $$('[data-nur-eigen]').forEach((el) => { el.hidden = !eigen; });
   if (eigen) eigenLaden().catch(() => {});
+
+  // Ablauf "Rueckzug -> Etikett -> Vorschub": eigene Felder und die
+  // Nachrechnung, wie viel Papier ein Etikett verbraucht.
+  const einfach = drucker.label_sequence === 'einfach';
+  $$('[data-nur-einfach]').forEach((el) => { el.hidden = !einfach; });
+  const hoeheHint = $('#hoehe-hint');
+  if (hoeheHint) {
+    hoeheHint.textContent = einfach
+      ? 'bedruckte Länge ab dem Rückzug – der Rest bis zum nächsten Etikett ist „Vorschub danach“'
+      : 'von einem Etikettanfang zum nächsten – Etikett + Lücke';
+  }
+  if (einfach) ablaufZeigen().catch(() => {});
 
   // Was die eingestellten Etiketten vom Terminal verlangen - genau das, was
   // der Server vor dem Senden prueft (workflow.flush_print_queue).
