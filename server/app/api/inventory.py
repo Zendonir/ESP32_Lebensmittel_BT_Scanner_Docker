@@ -20,7 +20,7 @@ from ..schemas import (
 )
 from ..services import inventory as inv
 from ..services import haushalte, openfoodfacts, settings_store
-from ..services.dates import today_iso
+from ..services.dates import shift_iso, today_iso
 
 router = APIRouter(prefix="/api/inventory", tags=["inventar"])
 
@@ -170,15 +170,20 @@ async def delete_item(label: str, session: AsyncSession = Depends(get_session)):
 @router.post("/scan")
 async def scan(req: ScanRequest, request: Request,
                session: AsyncSession = Depends(get_session)):
-    """Denselben Scan-Pfad wie das Geraet ausloesen - fuer Handy-Kamera-Scans.
+    """Ein Scan von der Handy-Kamera.
 
-    Ist ein Geraet angegeben (oder genau eines online), wandert der Code in
-    dessen Workflow; sonst wird nur nachgeschlagen.
+    Eigenes Etikett: auslagern bzw. zurueckbuchen, sofort. Produkt-Barcode:
+    nur nachschlagen - die Angaben (Stueckzahl, MHD, Ort) macht das Handy
+    selbst und legt danach ueber POST /api/labels an.
+
+    Vorher wanderte jeder Produkt-Scan in den Ablauf des ersten Terminals,
+    das online war: man scannte am Handy und musste dann am Terminal
+    weitertippen. Nur mit ausdruecklicher `device_id` geschieht das noch.
     """
     from ..device import workflow
 
     code = req.code.strip()
-    sess_id = req.device_id or (hub.online_ids()[0] if hub.online_ids() else None)
+    sess_id = req.device_id
     if sess_id:
         dev_sess = workflow.session_for(sess_id)
         await workflow.on_scan(session, dev_sess, code)
@@ -216,6 +221,8 @@ async def scan(req: ScanRequest, request: Request,
     return {
         "ok": True,
         "routed_to": None,
+        "code": code,
+        "action": "product",
         "product": None
         if product is None
         else {
@@ -223,6 +230,11 @@ async def scan(req: ScanRequest, request: Request,
             "name": product.name,
             "brand": product.brand,
             "category": product.category,
+            "subcategory": product.subcategory,
+            "amount": product.amount,
+            # Vorschlag fuers MHD, wie am Terminal (shift_iso).
+            "expiry_date": shift_iso(product.default_shelf_days)
+            if product.default_shelf_days else "",
         },
     }
 

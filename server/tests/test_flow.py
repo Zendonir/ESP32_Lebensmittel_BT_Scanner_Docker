@@ -564,3 +564,34 @@ def test_nummernzaehler_laeuft_unabhaengig_von_der_rolle(client):
         "/api/labels", json={"name": "B", "print": False}
     ).json()["labels"][0]
     assert erste != zweite
+
+
+def test_handyscan_eines_produkts_bleibt_am_handy(client, monkeypatch):
+    """Ein Produkt-Scan am Handy geht nicht mehr an ein Terminal.
+
+    Vorher wanderte er in den Ablauf des ersten Terminals, das online war -
+    man scannte am Handy und musste am Terminal weitertippen. Jetzt kommt
+    nur das Nachschlagen zurueck (mit MHD-Vorschlag), und das Handy legt
+    selbst an.
+    """
+    from app.device import workflow
+    from app.device.hub import hub
+    from app.models import Product
+    from app.services import openfoodfacts
+
+    async def nachschlagen(session, code):
+        return Product(barcode=code, name="Sirup", brand="Marke", category="Getränke",
+                       subcategory="", amount="65 ml", default_shelf_days=10)
+
+    async def darf_nicht(*args, **kwargs):
+        raise AssertionError("Handyscan ist am Terminal gelandet")
+
+    monkeypatch.setattr(openfoodfacts, "lookup", nachschlagen)
+    monkeypatch.setattr(hub, "online_ids", lambda: ["terminal-1"])
+    monkeypatch.setattr(workflow, "on_scan", darf_nicht)
+
+    antwort = client.post("/api/inventory/scan", json={"code": "4260644047755"}).json()
+    assert antwort["action"] == "product" and antwort["code"] == "4260644047755"
+    assert antwort["routed_to"] is None
+    assert antwort["product"]["name"] == "Sirup"
+    assert antwort["product"]["expiry_date"] > "2000-01-01"

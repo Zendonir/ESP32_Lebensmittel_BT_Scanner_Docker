@@ -315,14 +315,16 @@ function renderScan() {
       <button class="primary">Senden</button>
     </form>
     <p class="muted" style="margin-top:10px" id="scanhint">
-      Der Code läuft durch denselben Ablauf wie am Terminal: eigenes Etikett = auslagern,
-      Produkt-Barcode = einlagern.</p>
+      Eigenes Etikett = auslagern. Produkt-Barcode = einlagern – Stückzahl, MHD und Ort
+      gibst du danach hier am Handy ein.</p>
     <div id="scanresult"></div></div>`;
 
   document.getElementById('manual').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const code = document.getElementById('code').value.trim();
-    if (code) { await sendScan(code); document.getElementById('code').value = ''; }
+    if (!code) return;
+    document.getElementById('code').value = '';   // vorher: sendScan baut die Ansicht evtl. um
+    await sendScan(code);
   });
 
   if (kamera) startCamera();
@@ -416,9 +418,7 @@ async function sendScan(code) {
   try {
     const res = await post('/api/inventory/scan', { code });
     const box = document.getElementById('scanresult');
-    if (res.routed_to) {
-      toast(`An ${res.routed_to} gesendet`, 'success');
-    } else if (res.action === 'removed' || res.action === 'restored') {
+    if (res.action === 'removed' || res.action === 'restored') {
       // Bewusst kein render(): das wuerde den Scan-Bildschirm neu aufbauen,
       // die Kamera neu starten und die Pause oben zuruecksetzen - das Etikett
       // liefe dann in einer Schleife aus dem Bestand und wieder hinein.
@@ -432,15 +432,123 @@ async function sendScan(code) {
       }
     } else if (res.action === 'unknown_label') {
       toast(`Etikett ${res.label} ist nicht im Bestand`, 'warn');
-    } else if (res.product) {
-      toast(res.product.name || 'Produkt unbekannt');
-      if (box) box.innerHTML = `<div class="card" style="margin-top:12px">
-        <b>${esc(res.product.name || 'Unbekannt')}</b><div class="muted">${esc(res.product.brand)}</div>
-        <div class="mono muted">${esc(res.product.barcode)}</div></div>`;
-    } else {
-      toast('Kein Terminal online, Produkt unbekannt', 'warn');
+    } else if (res.action === 'product') {
+      // Einlagern macht das Handy selbst - wie am Terminal, nur hier.
+      await einlagernFormular(res.code || code, res.product);
+    } else if (res.routed_to) {
+      toast(`${code} an ${res.routed_to} gesendet`, 'success');
     }
   } catch (e) { toast(e.message, 'error'); }
+}
+
+// Einlagern am Handy: dieselben Angaben wie am Terminal (Name, MHD,
+// Stueckzahl, Ort), danach POST /api/labels - derselbe Weg wie die
+// Verwaltung, mit Etikettennummer, Protokoll und Druckauftrag.
+const ORT_KEY = 'ls-mobil-ort';
+function plusTage(tage) {
+  // Lokales Datum, nicht toISOString(): das ist UTC und laege kurz nach
+  // Mitternacht einen Tag zurueck.
+  const d = new Date(); d.setDate(d.getDate() + tage);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+async function einlagernFormular(code, produkt) {
+  stopCamera();
+  const [kategorien, orte] = await Promise.all([get('/api/categories'), get('/api/locations')]);
+  let ort = '';
+  try { ort = localStorage.getItem(ORT_KEY) || ''; } catch { /* privat */ }
+  if (!orte.some((o) => o.name === ort)) ort = (orte.find((o) => o.is_default) || orte[0] || {}).name || '';
+  const p = produkt || {};
+  const opt = (liste, wert) => liste.map((n) => `<option ${n === wert ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const mhdKnoepfe = [['+3 T', 3], ['+1 W', 7], ['+2 W', 14], ['+1 M', 30], ['+3 M', 90], ['+6 M', 180], ['+1 J', 365]];
+
+  view.innerHTML = `<form class="card" id="einlagern" style="display:grid;gap:12px">
+    <div>
+      <div class="muted" style="font-size:13px">Erkannt</div>
+      <div class="mono" style="font-size:20px;letter-spacing:.03em">${esc(code)}</div>
+      ${produkt ? '' : '<div class="muted" style="margin-top:4px">Produkt unbekannt – bitte Namen eingeben.</div>'}
+    </div>
+    <label class="field">Name<input name="name" value="${esc(p.name || '')}" required ${p.name ? '' : 'autofocus'}></label>
+    <label class="field">Marke<input name="brand" value="${esc(p.brand || '')}"></label>
+    <div class="row" style="gap:10px">
+      <label class="field" style="flex:1">Kategorie<select name="category"><option value=""></option>${
+        opt(kategorien.map((k) => k.name), p.category || '')}</select></label>
+      <label class="field" style="flex:1">Sorte<input name="subcategory" list="sorten" value="${esc(p.subcategory || '')}">
+        <datalist id="sorten"></datalist></label>
+    </div>
+    <label class="field">MHD<input name="expiry_date" type="date" value="${esc(p.expiry_date || '')}"></label>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:-4px">
+      ${mhdKnoepfe.map(([t, d]) => `<button type="button" class="sm" data-tage="${d}">${t}</button>`).join('')}
+      <button type="button" class="sm ghost" data-tage="">kein MHD</button>
+    </div>
+    <div class="field" style="display:flex;align-items:center;gap:10px">
+      <span style="flex:1;font-size:12px;color:var(--muted)">Stück / Etiketten</span>
+      <button type="button" class="sm" data-anzahl="-1" style="width:44px">−</button>
+      <input name="count" type="number" min="1" max="20" value="1" inputmode="numeric"
+        style="width:60px;text-align:center;font-size:18px">
+      <button type="button" class="sm" data-anzahl="1" style="width:44px">+</button>
+    </div>
+    <div class="row" style="gap:10px">
+      <label class="field" style="flex:1">Füllmenge je Stück<input name="quantity" type="number" step="any" min="0"
+        placeholder="${esc(p.amount || 'optional')}"></label>
+      <label class="field" style="width:96px">Einheit<select name="unit">
+        <option value=""></option><option>g</option><option>kg</option><option>ml</option><option>l</option><option>St.</option>
+      </select></label>
+    </div>
+    <label class="field">Lagerort<select name="location">${opt(orte.map((o) => o.name), ort)}</select></label>
+    <label class="row tight"><input type="checkbox" name="print" checked> Etikett drucken</label>
+    <div class="row" style="gap:10px">
+      <button type="button" class="ghost" id="abbrechen" style="flex:1">Abbrechen</button>
+      <button class="primary" style="flex:2">Einlagern</button>
+    </div>
+  </form>`;
+
+  const form = document.getElementById('einlagern');
+  const sorten = () => {
+    const k = kategorien.find((x) => x.name === form.category.value);
+    document.getElementById('sorten').innerHTML = (k?.subcategories || [])
+      .map((s) => `<option value="${esc(s)}">`).join('');
+  };
+  sorten();
+  form.category.addEventListener('change', sorten);
+  form.querySelectorAll('[data-tage]').forEach((b) => b.addEventListener('click', () => {
+    form.expiry_date.value = b.dataset.tage === '' ? '' : plusTage(+b.dataset.tage);
+  }));
+  form.querySelectorAll('[data-anzahl]').forEach((b) => b.addEventListener('click', () => {
+    form.count.value = Math.min(20, Math.max(1, (+form.count.value || 1) + +b.dataset.anzahl));
+  }));
+  document.getElementById('abbrechen').addEventListener('click', () => renderScan());
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const knopf = form.querySelector('button.primary');
+    knopf.disabled = true;
+    const menge = parseFloat(form.quantity.value);
+    const body = {
+      name: form.name.value.trim(),
+      barcode: code,
+      brand: form.brand.value.trim(),
+      category: form.category.value,
+      subcategory: form.subcategory.value.trim(),
+      expiry_date: form.expiry_date.value,
+      quantity: menge > 0 && form.unit.value ? menge : 1,
+      unit: menge > 0 ? form.unit.value : '',
+      location: form.location.value,
+      count: Math.min(20, Math.max(1, +form.count.value || 1)),
+      print: form.print.checked,
+    };
+    try {
+      const r = await post('/api/labels', body);
+      try { localStorage.setItem(ORT_KEY, body.location); } catch { /* privat */ }
+      const nummern = r.labels.length > 1 ? `${r.labels[0]} – ${r.labels[r.labels.length - 1]}` : r.labels[0];
+      toast(`${body.name} eingelagert · ${nummern}${body.print ? (r.printed ? ' · druckt' : ' · Druck wartet') : ''}`,
+        'success');
+      navigator.vibrate?.([40, 60, 40]);
+      renderScan();
+    } catch (e) {
+      knopf.disabled = false;
+      toast(e.message, 'error');
+    }
+  });
 }
 
 // -------------------------------------------------------------------- Einkauf
