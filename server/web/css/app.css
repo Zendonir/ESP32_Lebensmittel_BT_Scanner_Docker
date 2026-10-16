@@ -118,6 +118,11 @@ main { padding: 18px; max-width: 1400px; margin: 0 auto; }
 /* -------------------------------------------------------------------- Formen */
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .row.tight { gap: 6px; }
+/* Ein Haekchen ist nie so breit wie ein Textfeld. Ohne das zog eine Regel
+   wie ".msearch input { width: 100% }" das Kaestchen auf volle Breite, und
+   der Text daneben rutschte in die naechste Zeile. */
+input[type="checkbox"], input[type="radio"] { width: auto; flex: none; margin: 0; }
+label.row { flex-wrap: nowrap; }
 label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 
 input, select, textarea {
