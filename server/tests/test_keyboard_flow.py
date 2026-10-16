@@ -88,11 +88,12 @@ def test_lagerort_laesst_sich_am_geraet_nur_waehlen():
 
 
 def test_lagerort_verfaellt_nach_ruhe_und_wird_neu_erfragt():
-    """Nach einer halben Stunde Ruhe steht zuerst wieder der Lagerort an.
+    """Nach einer halben Stunde ohne Erfassen gilt der Lagerort nicht mehr.
 
     Sonst laeuft der naechste Einkauf stillschweigend in den Schrank von
     vorhin - ein Fehler, den man erst bemerkt, wenn man das Etikett am
-    falschen Regal sucht.
+    falschen Regal sucht. Gezaehlt wird ab dem letzten Erfassen; blosses
+    Antippen haelt den Ort nicht am Leben.
     """
     async def scenario():
         from datetime import timedelta
@@ -104,21 +105,88 @@ def test_lagerort_verfaellt_nach_ruhe_und_wird_neu_erfragt():
         sess.stack = [workflow.HOME]
 
         async with session_scope() as session:
-            # Frisch bedient: nichts verfaellt.
-            sess.touch()
+            sess.erfasst()
             assert await workflow.expire_location(session, sess) is False
             assert sess.location == "Kühlschrank"
 
-            # Eine Minute ueber der Ruhezeit.
-            sess.last_action = utcnow() - timedelta(
+            # Eine Minute ueber der Zeit - Antippen dazwischen zaehlt nicht.
+            sess.last_erfasst = utcnow() - timedelta(
                 seconds=workflow.LOCATION_IDLE_SECONDS + 60
             )
+            sess.touch()
             assert await workflow.expire_location(session, sess) is True
             assert sess.location == ""
-            assert sess.current == workflow.LOCATIONS
-
-            # Danach faengt die Ruhezeit von vorn an, statt bei jedem weiteren
-            # Tipp erneut auszuloesen.
+            # Danach ist nichts mehr zu verwerfen.
             assert await workflow.expire_location(session, sess) is False
+
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())
+
+
+def test_scan_ohne_gueltigen_ort_fragt_und_laeuft_danach_weiter(monkeypatch):
+    """Scan nach langer Pause: erst Ortswahl mit eigenem Ton, dann der Scan."""
+    from datetime import timedelta
+
+    from app.device import protocol as proto
+    from app.device.hub import hub
+    from app.models import utcnow
+    from app.services import openfoodfacts
+
+    gesendet = []
+
+    async def senden(device_id, msg):
+        gesendet.append(msg)
+
+    async def nachschlagen(session, code):
+        return None
+
+    monkeypatch.setattr(hub, "send_to", senden)
+    monkeypatch.setattr(openfoodfacts, "lookup", nachschlagen)
+
+    async def scenario():
+        sess = workflow.session_for("kbtest6")
+        sess.location = "Kühlschrank"
+        sess.stack = [workflow.HOME]
+        sess.last_erfasst = utcnow() - timedelta(seconds=workflow.LOCATION_IDLE_SECONDS + 5)
+
+        async with session_scope() as session:
+            await workflow.on_scan(session, sess, "4000000000017")
+            assert sess.current == workflow.LOCATIONS
+            assert sess.pending == "scan:4000000000017"
+            assert proto.beep("ort") in gesendet
+
+            # Ort waehlen: der gemerkte Scan laeuft weiter (unbekanntes Produkt).
+            await workflow.on_tap(session, sess, "loc:Keller")
+            assert sess.location == "Keller" and sess.pending == ""
+            assert sess.current == workflow.UNKNOWN
+            assert sess.draft.barcode == "4000000000017"
+            assert sess.erfasst_vor() < 5
+
+            # Gleich noch ein Scan: kein erneutes Fragen.
+            gesendet.clear()
+            sess.reset()
+            await workflow.on_scan(session, sess, "4000000000024")
+            assert sess.current == workflow.UNKNOWN
+            assert proto.beep("ort") not in gesendet
+
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())
+
+
+def test_ortswahl_abbrechen_verwirft_den_gemerkten_scan(monkeypatch):
+    from app.device.hub import hub
+
+    async def senden(device_id, msg):
+        return None
+
+    monkeypatch.setattr(hub, "send_to", senden)
+
+    async def scenario():
+        sess = workflow.session_for("kbtest7")
+        sess.location = ""
+        sess.stack = [workflow.HOME]
+        async with session_scope() as session:
+            await workflow.on_scan(session, sess, "4000000000031")
+            assert sess.pending
+            await workflow.on_tap(session, sess, "back")
+            assert sess.pending == "" and sess.current == workflow.HOME
 
     asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())

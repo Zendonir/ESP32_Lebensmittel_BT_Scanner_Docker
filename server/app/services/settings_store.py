@@ -26,6 +26,10 @@ DEFAULTS: dict[str, Any] = {
         # So lange bleibt der Handscanner nach dem letzten Barcode verbunden.
         # 0 = das Terminal trennt nie (leert den Akku des Scanners schneller).
         "scanner_minutes": 10,
+        # So lange gilt der gewaehlte Lagerort nach dem letzten Erfassen
+        # (Einlagern oder Ort waehlen). Danach fragt der naechste Scan neu.
+        # 0 = gilt, bis man ihn von Hand aendert.
+        "location_minutes": 30,
     },
     "printer": {
         "enabled": True,

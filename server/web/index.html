@@ -379,6 +379,10 @@
           <label class="field">Bildschirm dunkel nach (s)
             <input data-setting="device_ui.idle_seconds" data-art="int" type="number" min="0" max="3600">
             <span class="hint">0 = bleibt immer an · mit verbundenem Scanner bleibt er an · die erste Berührung weckt nur</span></label>
+          <label class="field">Lagerort gilt (min)
+            <input data-setting="device_ui.location_minutes" data-art="int" type="number" min="0" max="1440">
+            <span class="hint">nach dem letzten Einlagern oder Ortswechsel · danach fragt der nächste Scan
+              nach dem Ort (mit Ton) · 0 = gilt, bis man ihn ändert</span></label>
           <label class="field">Scanner bleibt verbunden (min)
             <input data-setting="device_ui.scanner_minutes" data-art="int" type="number" min="0" max="1440">
             <span class="hint">nach dem letzten Scan, danach darf der Scanner schlafen · 0 = immer verbunden

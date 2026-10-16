@@ -18,7 +18,7 @@ Geraet -> Server
 Server -> Geraet
     screen      siehe screen()
     toast       {text, level}
-    beep        {pattern}
+    beep        {pattern}   ok · scan · print · warn · error · ort (Lagerort waehlen)
     print       {job, chars, blocks}
     config      {brightness, beep, idle_seconds}
     ping        {}

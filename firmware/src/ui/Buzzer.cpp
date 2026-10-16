@@ -33,6 +33,10 @@ void Buzzer::play(const String &pattern) {
         add(700, 120); add(0, 70); add(700, 120);
     } else if (pattern == "scan") {
         add(1800, 45);
+    } else if (pattern == "ort") {
+        // Lagerort waehlen: drei steigende Toene, deutlich anders als
+        // Scan und OK - man soll hinschauen.
+        add(880, 120); add(1320, 120); add(1760, 260);
     } else if (pattern == "print") {
         add(1200, 70); add(0, 40); add(1600, 90);
     } else {  // ok

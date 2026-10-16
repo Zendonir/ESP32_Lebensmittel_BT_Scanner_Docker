@@ -199,6 +199,7 @@ cd firmware && pio run --target upload # flashen
 | Kategorie/Lagerort umbenannt, Artikel fallen aus dem Filter | Namen stehen an Artikeln als Text. Umbenennen nur ueber `inventory.rename_category()`/`rename_location()`, die Artikel, Vorlagen, Produkte und Terminals nachziehen |
 | `?` statt Anfuehrungszeichen oder Strich auf Etikett/Terminal | Beide kennen nur Latin-1. Text zur Hardware laeuft durch `services/zeichen.py` (in `render_label` und `protocol.screen`/`toast`) - neue Wege zur Hardware ebenso |
 | Druckereinstellung in der Oberflaeche geaendert, wirkt nicht | Steht sie in `settings_store.FEST`? Baudrate 9600, 32 Zeichen, Aufteilung `eigen`, Ablauf `einfach` ohne Etikettenabstand, ESC K, Bildmodus B gelten fest und schlagen Gespeichertes. Einstellbar sind nur Breite, Etikettenhoehe, Code, Zeilen, Rueckzug, Nachlauf (`label_gap_mm`) und Vorschub als |
+| Lagerort verfaellt / Scan fragt nach dem Ort | Gezaehlt wird ab dem letzten **Erfassen** (Einlagern oder Ort waehlen, `DeviceSession.erfasst()`), nicht ab dem letzten Antippen; Dauer `device_ui.location_minutes`. Gefragt wird erst, wenn eingelagert werden soll (`ort_erfragen`, Ton `ort`); der Scan wartet in `sess.pending` und laeuft nach der Wahl weiter |
 | Ein haengender Browser friert das Terminal ein | Jeder Sendevorgang hat eine Zeitgrenze (`hub.SEND_TIMEOUT_S`) |
 
 ## Entwicklungsregeln
