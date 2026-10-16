@@ -89,6 +89,7 @@
   <h1 id="m-title">Inventar</h1>
   <span class="pill" id="m-count">–</span>
   <a class="linkbtn" href="/?desktop=1" title="Zur vollen Verwaltung">🖥️ Verwaltung</a>
+  <a class="linkbtn" href="/logout" data-nur-anmeldung hidden title="Abmelden">⏻</a>
 </header>
 
 <div id="m-view"></div>
@@ -571,6 +572,12 @@ liveConnect((msg) => {
 
 render();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+</script>
+<script>
+  // "Abmelden" nur, wenn eine Anmeldung gilt (UI_PASSWORD gesetzt).
+  if (document.querySelector('meta[name="anmeldung"]')) {
+    document.querySelectorAll('[data-nur-anmeldung]').forEach((el) => { el.hidden = false; });
+  }
 </script>
 </body>
 </html>

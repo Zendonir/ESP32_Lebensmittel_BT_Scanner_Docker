@@ -130,7 +130,8 @@ Alles über Umgebungsvariablen in der `.env` (Vorlage: `.env.example`):
 | Variable | Bedeutung | Standard |
 |---|---|---|
 | `DEVICE_TOKEN` | **Pflicht.** Anmeldung der Terminals | `change-me` |
-| `UI_PASSWORD` | Passwortschutz Web-Interface (leer = offen im LAN) | – |
+| `UI_PASSWORD` | Passwort fürs Web-Interface, Anmeldung über `/login` (leer = offen im LAN). **Pflicht, sobald die Seite über einen Reverse Proxy aus dem Netz erreichbar ist** | – |
+| `UI_USER` | Optionaler Benutzername zur Anmeldung (leer = nur das Passwort zählt) | – |
 | `DATABASE_URL` | SQLite oder `postgresql+asyncpg://…` | SQLite in `/data` |
 | `HOUSEHOLD` | Haushaltsname auf dem Etikett | `Standard` |
 | `LABEL_PREFIX` | Präfix der Etikettennummern | `LEB` |
@@ -150,6 +151,20 @@ Vorwarnzeit der Oberfläche) stehen unter **System → Einstellungen** und liege
 in der Datenbank – ein Neustart des Containers ändert daran nichts.
 
 ---
+
+### Über einen Reverse Proxy veröffentlichen
+
+* `UI_PASSWORD` setzen – ohne Passwort steht die Seite jedem offen. Ein neues
+  Passwort meldet alle angemeldeten Browser ab.
+* Angemeldet wird über `/login`; mit „angemeldet bleiben“ hält die Anmeldung
+  ein Jahr (Cookie `lm_anmeldung`, nur per HTTPS übertragen, wenn der Proxy
+  `X-Forwarded-Proto: https` mitschickt). Nach fünf Fehlversuchen ist eine
+  Adresse 15 Minuten gesperrt (`X-Forwarded-For` wird dafür ausgewertet).
+* Der Proxy muss **WebSockets** durchreichen (`/ws/ui` für die Live-Anzeige,
+  `/ws/device` für die Terminals). Die Terminals selbst sollten im LAN direkt
+  auf den Container zeigen; sie melden sich mit `DEVICE_TOKEN` an, nicht mit
+  dem Web-Passwort.
+* Die Handykamera zum Scannen braucht HTTPS – hinter dem Proxy ist das erfüllt.
 
 ## Projektstruktur
 

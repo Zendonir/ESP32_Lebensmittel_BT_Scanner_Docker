@@ -47,6 +47,8 @@ class Settings:
     )
     # Optionales Passwort fuer das Web-Interface ("" = offen im LAN).
     ui_password: str = field(default_factory=lambda: os.getenv("UI_PASSWORD", ""))
+    # Optionaler Benutzername dazu ("" = nur das Passwort zaehlt).
+    ui_user: str = field(default_factory=lambda: os.getenv("UI_USER", ""))
 
     # --- Haushalt / Etiketten ------------------------------------------
     household: str = field(

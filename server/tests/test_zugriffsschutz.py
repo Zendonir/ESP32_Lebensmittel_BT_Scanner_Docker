@@ -51,11 +51,74 @@ def test_settings_ist_eingefroren():
 
 
 def test_ohne_passwort_kein_zugriff(client):
+    antwort = client.get("/api/inventory")
+    assert antwort.status_code == 401
+    # Kein WWW-Authenticate: sonst oeffnet der Browser sein eigenes Fenster
+    # statt der Login-Seite.
+    assert "www-authenticate" not in antwort.headers
+    seite = client.get("/h/1/mobile?x=1", follow_redirects=False)
+    assert seite.status_code == 303
+    assert seite.headers["location"] == "/login?weiter=%2Fh%2F1%2Fmobile%3Fx%3D1"
+
+
+def _neu(client):
+    from app.services import anmeldung
+
+    anmeldung._fehlversuche.clear()
+    client.cookies.clear()
+
+
+def test_login_setzt_ein_cookie_das_ein_jahr_haelt(client):
+    from app.services import anmeldung
+
+    _neu(client)
+    antwort = client.post("/login", data={"passwort": PASSWORT, "bleiben": "1",
+                                          "weiter": "/h/1/"}, follow_redirects=False)
+    assert antwort.status_code == 303 and antwort.headers["location"] == "/h/1/"
+    kopf = antwort.headers["set-cookie"]
+    assert anmeldung.COOKIE in kopf and "HttpOnly" in kopf and "Max-Age=31536000" in kopf
+    assert client.get("/api/inventory").status_code == 200
+    # Abmelden loescht es wieder.
+    client.get("/logout")
     assert client.get("/api/inventory").status_code == 401
-    assert client.get("/").status_code == 401
+
+
+def test_falsches_passwort_und_sperre_nach_fehlversuchen(client):
+    from app.services import anmeldung
+
+    _neu(client)
+    for _ in range(anmeldung.MAX_FEHLVERSUCHE):
+        assert client.post("/login", data={"passwort": "falsch"}).status_code == 401
+    # Jetzt hilft auch das richtige nicht mehr - bis das Fenster vorbei ist.
+    assert client.post("/login", data={"passwort": PASSWORT}).status_code == 429
+    _neu(client)
+
+
+def test_login_springt_nicht_auf_fremde_seiten(client):
+    _neu(client)
+    for boese in ("https://example.com/", "//example.com/", "/\\example.com"):
+        antwort = client.post("/login", data={"passwort": PASSWORT, "weiter": boese},
+                              follow_redirects=False)
+        assert antwort.headers["location"] == "/"
+    _neu(client)
+
+
+def test_neues_passwort_meldet_alle_ab(client):
+    from app.services import anmeldung
+
+    wert = anmeldung.cookie_wert(3600)
+    assert anmeldung.cookie_gueltig(wert)
+    object.__setattr__(settings, "ui_password", "anderes")
+    try:
+        assert not anmeldung.cookie_gueltig(wert)
+    finally:
+        object.__setattr__(settings, "ui_password", PASSWORT)
+    assert not anmeldung.cookie_gueltig("9999999999.gefaelscht")
+    assert not anmeldung.cookie_gueltig(f"{int(__import__('time').time()) - 5}.x")
 
 
 def test_mit_passwort_zugriff(client):
+    # HTTP Basic gilt weiter - fuer Skripte und curl.
     antwort = client.get("/api/inventory", auth=("egal", PASSWORT))
     assert antwort.status_code == 200
 

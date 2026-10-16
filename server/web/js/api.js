@@ -18,6 +18,12 @@ export async function api(path, options = {}) {
   }
   const res = await fetch(path, opts);
   if (res.status === 204) return null;
+  // Abgemeldet (Cookie abgelaufen, Passwort geaendert): zur Login-Seite und
+  // danach genau hierher zurueck.
+  if (res.status === 401 && document.querySelector('meta[name="anmeldung"]')) {
+    location.href = `/login?weiter=${encodeURIComponent(location.pathname + location.search)}`;
+    throw new Error('Anmeldung erforderlich');
+  }
 
   const text = await res.text();
   let data = null;

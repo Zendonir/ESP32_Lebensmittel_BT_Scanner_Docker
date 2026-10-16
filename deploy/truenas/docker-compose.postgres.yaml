@@ -41,6 +41,7 @@ services:
       LABEL_PAPER_CHARS: "32"
       LOG_LEVEL: "INFO"
       UI_PASSWORD: ""
+      UI_USER: ""
 
       EXPIRY_WARN_DAYS: "3"
       EXPIRY_CHECK_HOUR: "8"

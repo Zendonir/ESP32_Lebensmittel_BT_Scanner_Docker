@@ -11,21 +11,20 @@ import json
 import logging
 import os
 import re
-import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import parse_qs, quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .api import catalog, firmware, haushalte as haushalte_api, inventory, labels, system
 from .config import settings
 from .db import init_db, session_scope
 from .device import routes as device_routes
-from .services import haushalte, scheduler, seed, updates
+from .services import anmeldung, haushalte, scheduler, seed, updates
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -104,6 +103,9 @@ def _seite(datei: str, medientyp: str = "text/html; charset=utf-8",
     """
     text = (WEB_DIR / datei).read_text("utf-8")
     text = text.replace("/static/", f"{ASSET_PREFIX}{_asset_version()}/")
+    if anmeldung.aktiv() and datei.endswith(".html"):
+        # Die Oberflaeche zeigt dann "Abmelden".
+        text = text.replace("<head>", '<head>\n  <meta name="anmeldung" content="1">', 1)
     if haushalt:
         hid, name = haushalt
         basis = f"/h/{hid}"
@@ -192,27 +194,109 @@ app = FastAPI(
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # --------------------------------------------------------------------------
-# Optionaler Passwortschutz fuer das Web-Interface.
+# Optionaler Passwortschutz fuer das Web-Interface (UI_PASSWORD).
 # Die Geraeteverbindung authentifiziert sich getrennt ueber DEVICE_TOKEN, damit
 # ein UI-Passwortwechsel nicht alle Terminals aussperrt.
+#
+# Angemeldet wird ueber die Seite /login; das Cookie haelt ein Jahr (siehe
+# services/anmeldung.py). Die API antwortet ohne Anmeldung mit 401 *ohne*
+# WWW-Authenticate - sonst oeffnete der Browser wieder sein eigenes Fenster
+# statt der Login-Seite. Seiten leiten auf /login um.
 # --------------------------------------------------------------------------
-_basic = HTTPBasic(auto_error=False)
+async def require_ui_auth(request: Request):
+    if not anmeldung.angemeldet(request):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Anmeldung erforderlich")
 
 
-async def require_ui_auth(credentials: HTTPBasicCredentials | None = Depends(_basic)):
-    if not settings.ui_password:
-        return
-    if credentials is None or not secrets.compare_digest(
-        credentials.password, settings.ui_password
-    ):
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED,
-            "Anmeldung erforderlich",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+async def require_ui_page(request: Request):
+    if not anmeldung.angemeldet(request):
+        ziel = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        raise HTTPException(status.HTTP_303_SEE_OTHER, "Anmeldung erforderlich",
+                            headers={"Location": f"/login?weiter={quote(ziel, safe='')}"})
 
 
 _guard = [Depends(require_ui_auth)]
+
+
+def _login_seite(weiter: str, fehler: str = "", code: int = 200) -> Response:
+    feld_user = ('<label>Benutzer<input name="benutzer" autocomplete="username" required '
+                 'autocapitalize="off"></label>') if settings.ui_user else ""
+    meldung = f'<p class="fehler">{html.escape(fehler)}</p>' if fehler else ""
+    seite = f"""<!doctype html><html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Anmelden · Lebensmittel-Scanner</title>
+<link rel="stylesheet" href="{ASSET_PREFIX}{_asset_version()}/css/app.css">
+<style>
+ body{{display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}}
+ form{{max-width:360px;width:100%;margin:16px;padding:24px;border-radius:16px;background:var(--surface);
+   border:1px solid var(--border);box-shadow:var(--shadow)}}
+ label{{display:block;margin:12px 0 0;font-size:14px;color:var(--muted)}}
+ label input:not([type=checkbox]){{display:block;width:100%;box-sizing:border-box;margin-top:4px;font-size:17px}}
+ .bleiben{{display:flex;gap:8px;align-items:center;color:var(--text)}}
+ button{{width:100%;margin-top:18px;font-size:17px}}
+ .fehler{{color:var(--danger,#f04640);margin:12px 0 0}}
+</style></head><body>
+<form method="post" action="/login">
+<h1 style="margin:0 0 4px">Lebensmittel-Scanner</h1>
+<p class="muted" style="margin:0">Bitte anmelden.</p>
+{meldung}
+<input type="hidden" name="weiter" value="{html.escape(weiter, quote=True)}">
+{feld_user}
+<label>Passwort<input type="password" name="passwort" autocomplete="current-password" required autofocus></label>
+<label class="bleiben"><input type="checkbox" name="bleiben" value="1" checked> angemeldet bleiben</label>
+<button class="primary" type="submit">Anmelden</button>
+</form></body></html>"""
+    return Response(seite, status_code=code, media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.get("/login", include_in_schema=False)
+async def login_form(request: Request, weiter: str = "/"):
+    weiter = anmeldung.sicheres_ziel(weiter)
+    if anmeldung.angemeldet(request):
+        return RedirectResponse(weiter, status_code=303)
+    return _login_seite(weiter)
+
+
+@app.post("/login", include_in_schema=False)
+async def login(request: Request):
+    felder = parse_qs((await request.body()).decode("utf-8", "replace"))
+    wert = lambda name: (felder.get(name) or [""])[0]  # noqa: E731
+    weiter = anmeldung.sicheres_ziel(wert("weiter"))
+    if not anmeldung.aktiv():
+        return RedirectResponse(weiter, status_code=303)
+
+    wer = anmeldung.adresse(request)
+    if anmeldung.gesperrt(wer):
+        log.warning("Anmeldung gesperrt fuer %s (zu viele Fehlversuche)", wer)
+        return _login_seite(weiter, "Zu viele Fehlversuche – bitte in 15 Minuten erneut.", 429)
+    if not anmeldung.zugangsdaten_stimmen(wert("benutzer"), wert("passwort")):
+        anmeldung.fehlversuch(wer)
+        log.warning("Fehlgeschlagene Anmeldung von %s", wer)
+        return _login_seite(weiter, "Benutzer oder Passwort falsch.", 401)
+
+    anmeldung.erfolg(wer)
+    bleiben = wert("bleiben") == "1"
+    antwort = RedirectResponse(weiter, status_code=303)
+    antwort.set_cookie(
+        anmeldung.COOKIE,
+        anmeldung.cookie_wert(anmeldung.BLEIBEN_S if bleiben else anmeldung.KURZ_S),
+        max_age=anmeldung.BLEIBEN_S if bleiben else None,
+        httponly=True,
+        samesite="lax",
+        secure=anmeldung.per_https(request),
+        path="/",
+    )
+    return antwort
+
+
+@app.post("/logout", include_in_schema=False)
+@app.get("/logout", include_in_schema=False)
+async def logout():
+    antwort = RedirectResponse("/login", status_code=303)
+    antwort.delete_cookie(anmeldung.COOKIE, path="/")
+    return antwort
 
 app.include_router(inventory.router, dependencies=_guard)
 app.include_router(catalog.router, dependencies=_guard)
@@ -274,7 +358,7 @@ if WEB_DIR.is_dir():
         return row.id, row.name
 
     @app.get("/", include_in_schema=False)
-    async def index(request: Request, _: None = Depends(require_ui_auth)):
+    async def index(request: Request, _: None = Depends(require_ui_page)):
         # Mehrere Haushalte: erst waehlen. `?alle` ist die Verwaltung ueber
         # alle Haushalte hinweg (und der Weg zurueck fuer alte Lesezeichen).
         if "alle" not in request.query_params and "desktop" not in request.query_params:
@@ -286,11 +370,11 @@ if WEB_DIR.is_dir():
 
     @app.get("/h/{hid}", include_in_schema=False)
     @app.get("/h/{hid}/", include_in_schema=False)
-    async def haushalt_index(hid: int, _: None = Depends(require_ui_auth)):
+    async def haushalt_index(hid: int, _: None = Depends(require_ui_page)):
         return _seite("index.html", haushalt=await _haushalt_oder_404(hid))
 
     @app.get("/h/{hid}/mobile", include_in_schema=False)
-    async def haushalt_mobile(hid: int, _: None = Depends(require_ui_auth)):
+    async def haushalt_mobile(hid: int, _: None = Depends(require_ui_page)):
         return _seite("mobile.html", haushalt=await _haushalt_oder_404(hid))
 
     @app.get("/h/{hid}/manifest.json", include_in_schema=False)
@@ -308,7 +392,7 @@ if WEB_DIR.is_dir():
                             headers={"Cache-Control": "no-cache"})
 
     @app.get("/mobile", include_in_schema=False)
-    async def mobile(request: Request, _: None = Depends(require_ui_auth)):
+    async def mobile(request: Request, _: None = Depends(require_ui_page)):
         if "alle" not in request.query_params:
             async with session_scope() as session:
                 liste = await haushalte.alle(session)

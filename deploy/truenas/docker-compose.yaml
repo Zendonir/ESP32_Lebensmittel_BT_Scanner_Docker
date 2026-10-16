@@ -53,8 +53,11 @@ services:
       LABEL_PAPER_CHARS: "32"        # 32 = 58-mm-Papier, 48 = 80-mm-Papier
       LOG_LEVEL: "INFO"
 
-      # Passwortschutz des Web-Interface. Leer = im LAN frei zugaenglich.
+      # Passwortschutz des Web-Interface (Anmeldeseite /login, bleibt ein
+      # Jahr angemeldet). Leer = im LAN frei zugaenglich. Ueber einen Reverse
+      # Proxy veroeffentlicht unbedingt setzen. UI_USER ist optional.
       UI_PASSWORD: ""
+      UI_USER: ""
 
       # --- Update-Knopf in der Weboberflaeche --------------------------------
       # Leer lassen, wenn Watchtower nicht laeuft - dann erklaert der Knopf

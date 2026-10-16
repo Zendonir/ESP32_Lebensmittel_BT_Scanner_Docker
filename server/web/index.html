@@ -44,6 +44,7 @@
   <span class="muted" id="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">verbinde…</span></span>
   <button class="sm ghost" id="theme-toggle" title="Design wechseln">◐</button>
   <a href="/mobile"><button class="sm ghost">Mobil</button></a>
+  <a href="/logout" data-nur-anmeldung hidden><button class="sm ghost" title="Abmelden">Abmelden</button></a>
 </header>
 
 <main>
@@ -448,5 +449,11 @@
 
 <div id="toasts"></div>
 <script src="/static/js/app.js" type="module"></script>
+<script>
+  // "Abmelden" nur, wenn eine Anmeldung gilt (UI_PASSWORD gesetzt).
+  if (document.querySelector('meta[name="anmeldung"]')) {
+    document.querySelectorAll('[data-nur-anmeldung]').forEach((el) => { el.hidden = false; });
+  }
+</script>
 </body>
 </html>
