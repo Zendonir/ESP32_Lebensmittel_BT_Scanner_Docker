@@ -47,13 +47,20 @@ void DisplayCanvas::setTextFont(uint8_t font) {
 #endif
 }
 
+// Text wird immer durchsichtig gezeichnet, `bg` bleibt unbenutzt.
+//
+// Mit Hintergrundfarbe fuellt eine GFX-Schrift hinter jedem Zeichen ein
+// Kaestchen in voller Zeilenhoehe (yAdvance) - hoeher als eine Pille. Unten
+// ragte es als Stufe aus der Lagerort- und der WLAN-Pille heraus. Noetig ist
+// der Hintergrund nicht: jedes Bild wird von fillSprite() an komplett neu
+// gezeichnet, es gibt keinen alten Text zu ueberdecken.
 void DisplayCanvas::setTextColor(uint16_t fg, uint16_t bg) {
+    (void)bg;
 #if defined(BOARD_WAVESHARE_35B)
     _fg = fg;
-    _bg = bg;
-    if (_canvas) _canvas->setTextColor(fg, bg);
+    if (_canvas) _canvas->setTextColor(fg);
 #else
-    _sprite.setTextColor(fg, bg);
+    _sprite.setTextColor(fg);
 #endif
 }
 
@@ -131,7 +138,7 @@ void DisplayCanvas::drawString(const String &text, int16_t x, int16_t y) {
     const String out = toLatin1(text);
     _canvas->setFont(fontFor(_font));
     _canvas->setTextSize(1);
-    _canvas->setTextColor(_fg, _bg);
+    _canvas->setTextColor(_fg);
 
     // Bei einer GFX-Schrift ist die Cursorposition die Grundlinie, nicht die
     // linke obere Ecke; bx/by geben den Versatz dorthin an. Ohne diese

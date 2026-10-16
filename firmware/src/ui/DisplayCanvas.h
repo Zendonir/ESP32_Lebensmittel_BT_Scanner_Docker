@@ -55,7 +55,6 @@ private:
     Arduino_GFX *_panel = nullptr;
     Arduino_Canvas *_canvas = nullptr;
     uint16_t _fg = 0xFFFF;
-    uint16_t _bg = 0;
 #else
     TFT_eSPI _tft;
     TFT_eSprite _sprite{&_tft};
