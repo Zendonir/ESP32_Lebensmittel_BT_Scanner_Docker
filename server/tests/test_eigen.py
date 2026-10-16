@@ -141,8 +141,11 @@ def test_gedruckter_vorschub_aendert_die_laenge_nicht():
     for art, typ in (("leerzeilen", "text"), ("bild", "raster")):
         p = labels.render_label(ITEM, {**cfg, "feed_mode": art})
         assert labels.total_dots(p["blocks"]) == labels.total_dots(schnell["blocks"])
-        # Was bleibt an ESC J, ist nur der Rest unter 24 Punkten
-        assert all(b["dots"] < 24 for b in p["blocks"] if b["t"] == "feed")
+        # Kein ESC J mehr, auch nicht fuer den Rest unter 24 Punkten - der
+        # lief sonst als schneller Ruck am Ende des Etiketts hinterher.
+        assert not [b for b in p["blocks"] if b["t"] == "feed"]
+        rest = [b for b in p["blocks"] if b.get("vorschub") and b["t"] == "text" and b["h"] < 24]
+        assert all(b["v"] == " " for b in rest)
         assert any(b["t"] == typ for b in p["blocks"])
     bild = labels.render_label(ITEM, {**cfg, "feed_mode": "bild"})
     assert labels.BILD_FAEHIGKEIT in bild["braucht"] and labels.RAW_FAEHIGKEIT in bild["braucht"]

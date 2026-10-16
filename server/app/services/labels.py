@@ -163,6 +163,10 @@ def block_dots(block: dict) -> int:
     """Hoehe eines Blocks in Punkten - dieselbe Rechnung wie in der Firmware."""
     kind = block.get("t")
     if kind == "text":
+        if block.get("vorschub"):
+            # Gedruckter Vorschub: eine Leerzeile mit genau dem Rest als
+            # Zeilenabstand (siehe _vorschub_bloecke).
+            return int(block.get("h", LINE_DOTS))
         return LINE_DOTS_LARGE if block.get("large") else LINE_DOTS
     if kind == "row":
         return LINE_DOTS
@@ -681,8 +685,10 @@ def _vorschub_bloecke(dots: int, art: str, schritt: int, cfg: dict) -> list[dict
     leerzeilen: Zeilen aus einem Leerzeichen, je 24 Punkte - genau die Hoehe
                 der Schrift, die ganze Bewegung ist also Druckbewegung.
     bild:       ein leeres Rasterbild im eingestellten Bildmodus.
-    Was nicht in ganze 24 Punkte aufgeht (hoechstens 23, unter 3 mm), bleibt
-    ein ESC J - auf Wunsch in Schritten.
+    Was nicht in ganze 24 Punkte aufgeht (hoechstens 23), wird ebenfalls
+    gedruckt: eine Leerzeile, deren Zeilenabstand genau der Rest ist. Frueher
+    blieb der Rest ein ESC J - und genau der lief am Ende jedes Etiketts als
+    kurzer schneller Ruck hinterher.
     """
     out: list[dict] = []
     rest = dots
@@ -693,6 +699,9 @@ def _vorschub_bloecke(dots: int, art: str, schritt: int, cfg: dict) -> list[dict
         baender, rest = divmod(dots, LEERBILD_BAND)
         if baender:
             out.append(_leeres_bild(baender * LEERBILD_BAND, cfg))
+    if art in ("leerzeilen", "bild") and rest > 0:
+        out.append({"t": "text", "v": " ", "align": 0, "h": rest})
+        rest = 0
     # Gedruckt, aber Vorschub: die Vorschau darf das nicht als Inhalt zaehlen,
     # sonst "passt nicht" jedes Etikett. Die Firmware uebergeht das Merkmal.
     for b in out:
