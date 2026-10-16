@@ -1135,6 +1135,24 @@ async function ablaufZeigen() {
   });
 }
 
+// Die eingemessenen Befehle stehen zugeklappt - damit man trotzdem sieht,
+// was gilt, eine Zeile mit den aktuellen Werten.
+function befehleKurz(drucker) {
+  const el = $('#befehle-kurz');
+  if (!el) return;
+  const wahl = (key) => {
+    const sel = $(`[data-setting="printer.${key}"]`);
+    const opt = sel && [...sel.options].find((o) => o.value === String(drucker[key] ?? ''));
+    return opt ? opt.textContent.split(' – ')[0].split(' (')[0] : '–';
+  };
+  el.textContent = [
+    `Ablauf: ${wahl('label_sequence')}`,
+    `Rückzug: ${wahl('backfeed_cmd')}`,
+    `Ende: ${wahl('label_end')}`,
+    `Bildmodus: ${wahl('raster_mode')}`,
+  ].join(' · ');
+}
+
 // Hochformat wird als Bild gedruckt. Dafuer gibt es eigene Einstellungen,
 // das Einzeln-Drehen der Buchstaben wirkt dort nicht - und ein Terminal mit
 // aelterer Firmware kann es gar nicht. Das soll man sehen, bevor die ersten
@@ -1158,6 +1176,9 @@ async function hochformatHinweise() {
       : 'von einem Etikettanfang zum nächsten – Etikett + Lücke';
   }
   if (einfach) ablaufZeigen().catch(() => {});
+  $$('[data-nur-teilung]').forEach((el) => { el.hidden = einfach; });
+  $$('[data-nur-escj]').forEach((el) => { el.hidden = (drucker.feed_mode || 'escj') !== 'escj'; });
+  befehleKurz(drucker);
 
   // Was die eingestellten Etiketten vom Terminal verlangen - genau das, was
   // der Server vor dem Senden prueft (workflow.flush_print_queue).
