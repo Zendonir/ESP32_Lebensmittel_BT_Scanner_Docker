@@ -28,7 +28,7 @@ from ..models import (
 )
 from ..services import inventory as inv
 from ..services import categories as cat
-from ..services import firmware, labels, openfoodfacts, settings_store
+from ..services import firmware, haltbarkeit, ki, labels, openfoodfacts, settings_store
 from ..services import scanner as scanner_info
 from ..services.dates import days_left, shift_iso, to_display, to_iso_date
 from . import protocol as proto
@@ -1161,7 +1161,8 @@ async def _tap_tmpl_product(session, sess, item) -> None:
     draft.name = tpl.name
     draft.category = tpl.category
     draft.unit = tpl.unit
-    draft.expiry_date = shift_iso(tpl.shelf_days) if tpl.shelf_days else ""
+    draft.expiry_date = (await haltbarkeit.vorschlag(
+        session, ort=sess.location, kategorie=tpl.category, eigene_tage=tpl.shelf_days))["datum"]
     draft.quantity = 1.0
 
     if tpl.brands:
@@ -1256,7 +1257,11 @@ async def _save_draft(session: AsyncSession, sess: DeviceSession) -> None:
     pk = await geraet_pk(session, sess.device_id)
     for job in jobs:
         job.device_pk = pk
+    produkt = await inv.produkt_merken(session, barcode=draft.barcode, name=draft.name,
+                                       brand=draft.brand, category=draft.category,
+                                       subcategory=draft.subcategory)
     await session.commit()
+    ki.im_hintergrund(produkt.id if produkt else None)
 
     sess.last_result = [
         f"{len(items)} Etikett(en)",
@@ -1358,10 +1363,12 @@ async def _scan_barcode(session, sess, code) -> None:
         draft.brand = product.brand
         draft.category = product.category
         draft.subcategory = product.subcategory
-        draft.expiry_date = (
-            shift_iso(product.default_shelf_days) if product.default_shelf_days else ""
-        )
+        # Je nach Lagerart des Orts: im Gefrierschrank haelt dasselbe Produkt
+        # Monate, im Kuehlschrank Tage (services/haltbarkeit.py).
+        draft.expiry_date = (await haltbarkeit.vorschlag(
+            session, ort=sess.location, kategorie=product.category, produkt=product))["datum"]
         sess.draft = draft
+        ki.im_hintergrund(product.id)
         sess.stack = [HOME, _after_product(sess)]
     else:
         await inv.log_event(

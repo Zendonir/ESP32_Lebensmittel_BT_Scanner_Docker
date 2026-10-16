@@ -393,3 +393,28 @@ async def product_for_barcode(session: AsyncSession, barcode: str) -> Product | 
     return (
         await session.execute(select(Product).where(Product.barcode == barcode))
     ).scalar_one_or_none()
+
+
+async def produkt_merken(session: AsyncSession, *, barcode: str, name: str, brand: str = "",
+                         category: str = "", subcategory: str = "") -> Product | None:
+    """Was beim Einlagern zu einem Barcode eingegeben wurde, fuers naechste Mal merken.
+
+    Kannte OpenFoodFacts das Produkt nicht, stand es bisher nach jedem Scan
+    wieder als "unbekannt" da. Gefuellt wird nur, was fehlt - ein Name aus
+    OpenFoodFacts wird nicht von einer Abkuerzung ueberschrieben.
+    """
+    barcode, name = (barcode or "").strip(), (name or "").strip()
+    if not barcode or not name:
+        return None
+    row = await product_for_barcode(session, barcode)
+    if row is None:
+        row = Product(barcode=barcode, source="manual")
+        session.add(row)
+    for feld, wert in (("name", name), ("brand", brand), ("category", category),
+                       ("subcategory", subcategory)):
+        if wert and not getattr(row, feld):
+            setattr(row, feld, wert.strip())
+    if row.source == "unknown":
+        row.source = "manual"
+    await session.flush()
+    return row

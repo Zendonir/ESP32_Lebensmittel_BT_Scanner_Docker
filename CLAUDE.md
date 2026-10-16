@@ -204,6 +204,8 @@ cd firmware && pio run --target upload # flashen
 | Etikett druckt beim falschen Haushalt / gar nicht | Ziel bestimmt `workflow.druckziel()`: gewaehltes Terminal, sonst das eine verbundene des Haushalts, sonst fest am ersten Terminal des Haushalts (`PrintJob.device_pk`, druckt beim Reconnect). Mehrere verbundene: `POST /api/labels` antwortet 409 mit Auswahl. `flush_print_queue` holt nur fest zugeordnete und offene Auftraege des eigenen Haushalts (`PrintJob.household`) |
 | `/api/health` 401 / Container "unhealthy" | Der Healthcheck kennt kein Passwort - `system.public_router` liegt ohne Anmeldung und sagt dann nur `{"status": "ok"}` |
 | Live-Anzeige ueber den Reverse Proxy tot, Log zeigt `GET /ws/ui … 404` | Der Proxy reicht den WebSocket-Upgrade nicht durch (Nginx Proxy Manager: "Websockets Support") |
+| MHD-Vorschlag passt nicht zum Lagerort | Rechnet `services/haltbarkeit.vorschlag()`: Lagerart des Orts (`Location.kind`: raum/kuehl/tiefkuehl), dann Produkt (`Product.haltbarkeit`) vor eigenen Tagen (nicht im Gefrierschrank) vor Kategorie (`Category.haltbarkeit`, Vorgabe `STANDARD`). Terminal, Handy und Verwaltung nutzen dieselbe Funktion |
+| KI-Vorschlag kommt nicht | `services/ki.py` braucht `ANTHROPIC_API_KEY` in der Umgebung und `ki.aktiv`. Terminal fragt im Hintergrund (`ki.im_hintergrund`) und merkt es am Produkt – wirkt ab dem naechsten Scan; das Handy fragt direkt (`POST /api/ki/vorschlag`) |
 | Ein haengender Browser friert das Terminal ein | Jeder Sendevorgang hat eine Zeitgrenze (`hub.SEND_TIMEOUT_S`) |
 
 ## Entwicklungsregeln

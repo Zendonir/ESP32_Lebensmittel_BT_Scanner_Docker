@@ -138,7 +138,12 @@ async def create_labels(body: LabelCreate, request: Request,
     )
     for job in jobs:
         job.device_pk = pk
+    produkt = await inv.produkt_merken(session, barcode=body.barcode, name=body.name,
+                                       brand=body.brand, category=body.category,
+                                       subcategory=body.subcategory)
     await session.commit()
+    from ..services import ki
+    ki.im_hintergrund(produkt.id if produkt else None)
 
     printed = False
     if jobs:

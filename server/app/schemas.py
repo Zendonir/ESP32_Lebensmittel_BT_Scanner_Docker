@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
@@ -14,11 +15,16 @@ class ORMModel(BaseModel):
 
 
 # --------------------------------------------------------------------- Stammdaten
+Lagerart = Literal["", "raum", "kuehl", "tiefkuehl"]
+
+
 class CategoryIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     color: str = "#1e88e5"
     icon: str = ""
     sort_order: int = 0
+    # None = unveraendert lassen (aelterer Browser schickt das Feld nicht).
+    haltbarkeit: dict | None = None   # bereinigt in services/haltbarkeit.bereinigen()
 
 
 class CategoryOut(ORMModel):
@@ -27,6 +33,7 @@ class CategoryOut(ORMModel):
     color: str
     icon: str
     sort_order: int
+    haltbarkeit: dict | None = None
 
     # Fest hinterlegt, nicht gespeichert: die Oberflaeche soll die Sorten
     # anbieten koennen, ohne die Liste ein zweites Mal zu fuehren.
@@ -45,6 +52,7 @@ class LocationIn(BaseModel):
     # Fehlt sie (aelterer Browser), bleibt die Farbe, wie sie ist - bzw. beim
     # Anlegen kommt die naechste aus seed.ORT_FARBEN.
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    kind: Lagerart | None = None
 
 
 class LocationOut(ORMModel):
@@ -53,6 +61,7 @@ class LocationOut(ORMModel):
     is_default: bool
     sort_order: int
     color: str
+    kind: str = ""
 
 
 class ProductIn(BaseModel):
@@ -76,6 +85,7 @@ class ProductOut(ORMModel):
     nutriscore: str
     image_url: str
     default_shelf_days: int
+    haltbarkeit: dict | None = None
     source: str
     fetched_at: datetime | None
 

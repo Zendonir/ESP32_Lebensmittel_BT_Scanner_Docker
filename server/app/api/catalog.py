@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +23,7 @@ from ..schemas import (
 )
 from ..device import workflow
 from ..services import inventory as inv
-from ..services import openfoodfacts, seed
+from ..services import haltbarkeit, openfoodfacts, seed
 
 router = APIRouter(prefix="/api", tags=["stammdaten"])
 
@@ -37,7 +38,9 @@ async def list_categories(session: AsyncSession = Depends(get_session)):
 
 @router.post("/categories", response_model=CategoryOut, status_code=201)
 async def create_category(body: CategoryIn, session: AsyncSession = Depends(get_session)):
-    row = Category(**body.model_dump())
+    daten = body.model_dump(exclude_none=True)
+    daten["haltbarkeit"] = haltbarkeit.bereinigen(daten.get("haltbarkeit"))
+    row = Category(**daten)
     session.add(row)
     try:
         await session.commit()
@@ -56,8 +59,8 @@ async def update_category(
     if row is None:
         raise HTTPException(404, "Kategorie unbekannt")
     old_name = row.name
-    for key, value in body.model_dump().items():
-        setattr(row, key, value)
+    for key, value in body.model_dump(exclude_none=True).items():
+        setattr(row, key, haltbarkeit.bereinigen(value) if key == "haltbarkeit" else value)
     try:
         await session.flush()
     except IntegrityError:
@@ -96,6 +99,8 @@ async def create_location(body: LocationIn, session: AsyncSession = Depends(get_
     if not daten.get("color"):
         anzahl = (await session.execute(select(func.count()).select_from(Location))).scalar_one()
         daten["color"] = seed.ort_farbe(anzahl)
+    if daten.get("kind") is None:
+        daten["kind"] = haltbarkeit.art_raten(daten["name"])
     row = Location(**daten)
     session.add(row)
     try:
@@ -239,6 +244,54 @@ async def delete_sorte(
 
 
 # -------------------------------------------------------------------- Produkte
+# ------------------------------------------------------------ Haltbarkeit / KI
+@router.get("/lagerarten")
+async def lagerarten():
+    return haltbarkeit.ARTEN
+
+
+@router.get("/haltbarkeit/vorschlag")
+async def mhd_vorschlag(ort: str = "", kategorie: str = "", barcode: str = "",
+                        session: AsyncSession = Depends(get_session)):
+    """MHD-Vorschlag fuer Ort + Kategorie (+ Produkt) - dieselbe Rechnung wie am Terminal."""
+    produkt = await inv.product_for_barcode(session, barcode) if barcode else None
+    return await haltbarkeit.vorschlag(session, ort=ort, kategorie=kategorie, produkt=produkt)
+
+
+@router.get("/ki")
+async def ki_status(session: AsyncSession = Depends(get_session)):
+    from ..services import ki
+
+    return {"verfuegbar": ki.verfuegbar(), "aktiv": await ki.aktiv(session), "modell": ki.MODELL}
+
+
+class _KiFrage(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    brand: str = ""
+    barcode: str = ""
+
+
+@router.post("/ki/vorschlag")
+async def ki_vorschlag(body: _KiFrage, session: AsyncSession = Depends(get_session)):
+    """Vorschlag fuer Kategorie, Sorte und Haltbarkeit. Mit Barcode wird er gemerkt."""
+    from ..services import ki
+
+    if not await ki.aktiv(session):
+        raise HTTPException(503, "KI ist nicht eingerichtet (ANTHROPIC_API_KEY fehlt) oder aus")
+    produkt = await inv.product_for_barcode(session, body.barcode) if body.barcode else None
+    if produkt is not None:
+        if not produkt.name:
+            produkt.name = body.name.strip()
+            produkt.brand = produkt.brand or body.brand.strip()
+        vorschlag = await ki.produkt_anreichern(session, produkt)
+        await session.commit()
+    else:
+        vorschlag = await ki.vorschlagen(body.name, body.brand, await ki._kategorien(session))
+    if vorschlag is None:
+        raise HTTPException(502, "Die KI hat keinen Vorschlag geliefert")
+    return vorschlag
+
+
 @router.get("/products", response_model=list[ProductOut])
 async def list_products(
     session: AsyncSession = Depends(get_session),

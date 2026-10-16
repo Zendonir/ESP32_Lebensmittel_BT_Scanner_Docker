@@ -530,11 +530,36 @@ document.addEventListener('click', async (ev) => {
   } catch (e) { toast(e.message, 'error'); }
 });
 
+// Lagerarten - Schluessel wie im Server (services/haltbarkeit.ARTEN).
+const ARTEN = { raum: 'Raumtemperatur', kuehl: 'Kühlschrank', tiefkuehl: 'Gefrierschrank' };
+const ART_ICON = { raum: '🏠', kuehl: '❄️', tiefkuehl: '🧊' };
+const artAusText = (text) => Object.keys(ARTEN).find((k) => ARTEN[k] === text) || 'raum';
+const haltbarkeitText = (h) => Object.keys(ARTEN)
+  .map((k) => `${ART_ICON[k]} ${h && h[k] ? `${h[k]} T` : '–'}`).join(' · ');
+const haltbarkeitFelder = (h) => Object.keys(ARTEN).map((k) => ({
+  name: `h_${k}`, label: `Tage im ${ARTEN[k] === 'Raumtemperatur' ? 'Vorrat (Raumtemperatur)' : ARTEN[k]}`,
+  value: (h && h[k]) || 0, type: 'number',
+}));
+const haltbarkeitAus = (v) => Object.fromEntries(Object.keys(ARTEN).map((k) => [k, +v[`h_${k}`] || 0]));
+
+async function kiStatusZeigen() {
+  const el = $('#ki-status');
+  if (!el) return;
+  try {
+    const k = await get('/api/ki');
+    el.textContent = k.verfuegbar
+      ? `eingerichtet (Modell ${k.modell}) · gefragt wird nur mit Produktname und Marke`
+      : 'nicht eingerichtet: ANTHROPIC_API_KEY in der Umgebung des Containers setzen';
+  } catch { el.textContent = ''; }
+}
+
 async function loadCatalogPage() {
   loadHaushalte().catch((e) => toast(e.message, 'error'));
   await loadCatalogData();
   $('#cat-body').innerHTML = state.categories.map((c) => `<tr>
     <td><span class="swatch" style="background:${esc(c.color)}"></span>${esc(c.name)}
+      <div class="muted" style="font-size:12px;margin-top:4px" title="Haltbarkeit je Lagerart">
+        ${haltbarkeitText(c.haltbarkeit)}</div>
       ${(c.subcategories || []).length ? `<div class="tag-list" style="margin-top:6px">${
         c.subcategories.map((s) => `<span class="tag">${esc(s)}</span>`).join('')}</div>` : ''}</td>
     <td class="right">
@@ -543,6 +568,7 @@ async function loadCatalogPage() {
 
   $('#loc-body').innerHTML = state.locations.map((l) => `<tr>
     <td><span class="swatch" style="background:${esc(l.color || '#1c222a')}"></span>${esc(l.name)}
+      <span class="pill">${ART_ICON[l.kind] || ''} ${esc(ARTEN[l.kind] || 'ohne Lagerart')}</span>
       ${l.is_default ? '<span class="pill ok">Standard</span>' : ''}</td>
     <td class="right">
       <button class="sm" data-loc-edit="${l.id}">Ändern</button>
@@ -576,8 +602,15 @@ document.addEventListener('click', async (ev) => {
       const v = await modal('Kategorie', [
         { name: 'name', label: 'Name', value: cat.name },
         { name: 'color', label: 'Farbe', value: cat.color, type: 'color' },
+        ...haltbarkeitFelder(cat.haltbarkeit),
       ]);
-      if (v) { await put(`/api/categories/${cat.id}`, { ...cat, ...v }); await loadCatalogPage(); }
+      if (v) {
+        await put(`/api/categories/${cat.id}`, {
+          name: v.name, color: v.color, icon: cat.icon, sort_order: cat.sort_order,
+          haltbarkeit: haltbarkeitAus(v),
+        });
+        await loadCatalogPage();
+      }
     } else if (t.dataset.locDel) {
       if (!confirm('Lagerort löschen?')) return;
       await del(`/api/locations/${t.dataset.locDel}`); await loadCatalogPage();
@@ -586,9 +619,14 @@ document.addEventListener('click', async (ev) => {
       const v = await modal('Lagerort', [
         { name: 'name', label: 'Name', value: loc.name },
         { name: 'color', label: 'Farbe', value: loc.color || '#4c9eff', type: 'color' },
+        { name: 'kind', label: 'Lagerart – bestimmt das MHD', value: ARTEN[loc.kind] || 'Raumtemperatur',
+          options: Object.values(ARTEN) },
         { name: 'is_default', label: 'Standard', value: loc.is_default, type: 'checkbox' },
       ]);
-      if (v) { await put(`/api/locations/${loc.id}`, { ...loc, ...v, is_default: !!v.is_default }); await loadCatalogPage(); }
+      if (v) {
+        await put(`/api/locations/${loc.id}`, { ...loc, ...v, kind: artAusText(v.kind), is_default: !!v.is_default });
+        await loadCatalogPage();
+      }
     } else if (t.dataset.prodDel) {
       await del(`/api/products/${t.dataset.prodDel}`); await loadProducts();
     }
@@ -599,8 +637,13 @@ $('#cat-new').addEventListener('click', async () => {
   const v = await modal('Neue Kategorie', [
     { name: 'name', label: 'Name', value: '' },
     { name: 'color', label: 'Farbe', value: '#1e88e5', type: 'color' },
+    ...haltbarkeitFelder({}),
   ]);
-  if (v) { await post('/api/categories', { ...v, icon: '', sort_order: state.categories.length }); await loadCatalogPage(); }
+  if (v) {
+    await post('/api/categories', { name: v.name, color: v.color, icon: '', sort_order: state.categories.length,
+      haltbarkeit: haltbarkeitAus(v) });
+    await loadCatalogPage();
+  }
 });
 
 $('#loc-new').addEventListener('click', async () => {
@@ -608,9 +651,14 @@ $('#loc-new').addEventListener('click', async () => {
     { name: 'name', label: 'Name', value: '' },
     { name: 'color', label: 'Farbe', value: ['#4c9eff', '#26c6da', '#8d6e63', '#7e57c2', '#5c6bc0',
       '#ec407a', '#78909c', '#26a69a'][state.locations.length % 8], type: 'color' },
+    { name: 'kind', label: 'Lagerart – bestimmt das MHD', value: 'Raumtemperatur', options: Object.values(ARTEN) },
     { name: 'is_default', label: 'Standard', value: false, type: 'checkbox' },
   ]);
-  if (v) { await post('/api/locations', { ...v, is_default: !!v.is_default, sort_order: state.locations.length }); await loadCatalogPage(); }
+  if (v) {
+    await post('/api/locations', { ...v, kind: artAusText(v.kind), is_default: !!v.is_default,
+      sort_order: state.locations.length });
+    await loadCatalogPage();
+  }
 });
 
 // --------------------------------------------------------------------- Einkauf
@@ -862,6 +910,7 @@ $('#sim-form').addEventListener('submit', async (ev) => {
 // ---------------------------------------------------------------------- System
 
 async function loadSystem() {
+  kiStatusZeigen().catch(() => {});
   const [info, settings, events] = await Promise.all([
     get('/api/system'), get('/api/settings'), get('/api/events?limit=60'),
   ]);

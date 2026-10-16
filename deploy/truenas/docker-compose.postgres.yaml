@@ -42,6 +42,7 @@ services:
       LOG_LEVEL: "INFO"
       UI_PASSWORD: ""
       UI_USER: ""
+      ANTHROPIC_API_KEY: ""
 
       EXPIRY_WARN_DAYS: "3"
       EXPIRY_CHECK_HOUR: "8"

@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Category, Location, Template
+from . import haltbarkeit
 from . import inventory as inv
 
 log = logging.getLogger(__name__)
@@ -115,16 +116,28 @@ async def run(session: AsyncSession) -> None:
 
     if await _empty(session, Category):
         for index, (name, color) in enumerate(CATEGORIES):
-            session.add(Category(name=name, color=color, sort_order=index))
+            session.add(Category(name=name, color=color, sort_order=index,
+                                 haltbarkeit=dict(haltbarkeit.STANDARD.get(name, {}))))
         seeded.append("Kategorien")
 
     if await _empty(session, Location):
         for index, (name, is_default) in enumerate(LOCATIONS):
             session.add(Location(name=name, is_default=is_default, sort_order=index,
-                                 color=ort_farbe(index)))
+                                 color=ort_farbe(index), kind=haltbarkeit.art_raten(name)))
         seeded.append("Lagerorte")
     elif await _ortfarben_nachtragen(session):
         seeded.append("Farben der Lagerorte")
+
+    # Bestaende von vor den Lagerarten: Art aus dem Namen, Haltbarkeit der
+    # bekannten Kategorien aus der Vorgabe. Was schon gesetzt ist, bleibt.
+    for row in (await session.execute(select(Location))).scalars().all():
+        if not row.kind:
+            row.kind = haltbarkeit.art_raten(row.name)
+            seeded.append(f"Lagerart {row.name}")
+    for row in (await session.execute(select(Category))).scalars().all():
+        if not row.haltbarkeit and row.name in haltbarkeit.STANDARD:
+            row.haltbarkeit = dict(haltbarkeit.STANDARD[row.name])
+            seeded.append(f"Haltbarkeit {row.name}")
 
     if await _empty(session, Template):
         for index, (name, category, days, unit, sorten) in enumerate(TEMPLATES):

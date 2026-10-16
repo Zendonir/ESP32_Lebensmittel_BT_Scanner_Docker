@@ -132,6 +132,8 @@ Alles über Umgebungsvariablen in der `.env` (Vorlage: `.env.example`):
 | `DEVICE_TOKEN` | **Pflicht.** Anmeldung der Terminals | `change-me` |
 | `UI_PASSWORD` | Passwort fürs Web-Interface, Anmeldung über `/login` (leer = offen im LAN). **Pflicht, sobald die Seite über einen Reverse Proxy aus dem Netz erreichbar ist** | – |
 | `UI_USER` | Optionaler Benutzername zur Anmeldung (leer = nur das Passwort zählt) | – |
+| `ANTHROPIC_API_KEY` | Optional: KI-Vorschläge für neue Produkte (Kategorie, Sorte, Haltbarkeit je Lagerart). Abschaltbar unter System | – |
+| `KI_MODEL` | Modell dafür | `claude-opus-5-5` |
 | `DATABASE_URL` | SQLite oder `postgresql+asyncpg://…` | SQLite in `/data` |
 | `HOUSEHOLD` | Haushaltsname auf dem Etikett | `Standard` |
 | `LABEL_PREFIX` | Präfix der Etikettennummern | `LEB` |

@@ -31,6 +31,10 @@ DEFAULTS: dict[str, Any] = {
         # 0 = gilt, bis man ihn von Hand aendert.
         "location_minutes": 30,
     },
+    # KI-Vorschlaege fuer neue Produkte (services/ki.py). Wirkt nur, wenn
+    # ANTHROPIC_API_KEY in der Umgebung steht - der Schluessel gehoert nicht
+    # hierher.
+    "ki": {"aktiv": True},
     "printer": {
         "enabled": True,
         "baud": 9600,

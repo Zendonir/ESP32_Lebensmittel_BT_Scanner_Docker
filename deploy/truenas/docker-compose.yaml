@@ -59,6 +59,9 @@ services:
       UI_PASSWORD: ""
       UI_USER: ""
 
+      # Optional: KI-Vorschlaege fuer neue Produkte (Claude API). Leer = aus.
+      ANTHROPIC_API_KEY: ""
+
       # --- Update-Knopf in der Weboberflaeche --------------------------------
       # Leer lassen, wenn Watchtower nicht laeuft - dann erklaert der Knopf
       # nur, was einzurichten waere. Siehe watchtower.yaml.

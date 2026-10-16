@@ -51,6 +51,9 @@ class Category(Base, TimestampMixin):
     color: Mapped[str] = mapped_column(String(16), default="#1e88e5")
     icon: Mapped[str] = mapped_column(String(32), default="")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    # Haltbarkeit in Tagen je Lagerart: {"raum": 30, "kuehl": 7, "tiefkuehl": 90}.
+    # 0 oder fehlend = kein Vorschlag (MHD bleibt leer). Siehe services/haltbarkeit.py.
+    haltbarkeit: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class Household(Base, TimestampMixin):
@@ -77,6 +80,9 @@ class Location(Base, TimestampMixin):
     # Farbe wie bei den Kategorien - Kachel am Terminal, Punkt in den Listen.
     # Leer in Bestaenden von vor der Spalte; seed.run() vergibt dann eine.
     color: Mapped[str] = mapped_column(String(16), default="")
+    # Lagerart: "raum" | "kuehl" | "tiefkuehl" - bestimmt, welche Haltbarkeit
+    # fuers MHD gilt. Leer in alten Bestaenden; seed.run() raet aus dem Namen.
+    kind: Mapped[str] = mapped_column(String(16), default="")
 
 
 class Product(Base, TimestampMixin):
@@ -99,6 +105,9 @@ class Product(Base, TimestampMixin):
     nutriscore: Mapped[str] = mapped_column(String(4), default="")
     image_url: Mapped[str] = mapped_column(String(512), default="")
     default_shelf_days: Mapped[int] = mapped_column(Integer, default=0)
+    # Haltbarkeit dieses Produkts je Lagerart, wie bei der Kategorie. Geht ihr
+    # vor. Kommt von Hand oder als KI-Vorschlag (services/ki.py).
+    haltbarkeit: Mapped[dict] = mapped_column(JSON, default=dict)
     source: Mapped[str] = mapped_column(String(32), default="manual")  # off|manual
     fetched_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
