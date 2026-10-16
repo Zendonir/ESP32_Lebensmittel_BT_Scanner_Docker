@@ -996,11 +996,10 @@ async function loadLayouts() {
   const rows = await get('/api/labels/layouts');
   const chosen = state.settings?.printer?.label_layout || 'standard';
 
-  box.innerHTML = rows.map((l) => `<div class="layout ${l.name === chosen ? 'active' : ''} ${l.passt ? '' : 'zu-gross'}"
-      data-layout="${esc(l.name)}" role="button" tabindex="0" aria-pressed="${l.name === chosen}">
+  // Es gibt nur noch die eigene Aufteilung (settings_store.FEST) - hier
+  // steht nur ihre Vorschau, ohne Auswahl.
+  box.innerHTML = rows.filter((l) => l.name === chosen).map((l) => `<div class="layout ${l.passt ? '' : 'zu-gross'}">
     <div class="paper">${l.svg}</div>
-    <div class="who">${esc(l.title || l.name)}${l.name === chosen ? ' <span class="pill ok">gewählt</span>' : ''}</div>
-    <div class="why">${esc(l.description)}</div>
     <div class="fill">${l.passt
       ? `passt · braucht ${fmtMm(l.mm)} mm`
       : `<b>passt nicht</b> · braucht ${fmtMm(l.mm)} mm`}</div>
@@ -1092,65 +1091,19 @@ async function ablaufZeigen() {
   const box = $('#ablauf-box');
   if (!box) return;
   const a = await get('/api/labels/ablauf');
-  const gap = $('[data-setting="printer.label_gap_mm"]');
-  if (gap) {
-    gap.disabled = a.aus_abstand;
-    if (a.aus_abstand) gap.value = mmText(a.vorschub).replace(',', '.');
-  }
-  const gapHint = $('#gap-hint');
-  if (gapHint) {
-    gapHint.textContent = a.aus_abstand
-      ? 'wird aus dem Etikettenabstand berechnet'
-      : 'Leerer Vorschub nach jedem Etikett';
-  }
-  const rechnung = `Höhe ${mmText(a.hoehe)} + Vorschub danach ${mmText(a.vorschub)} − Rückzug ${mmText(a.rueckzug)}
-    = <b>${mmText(a.papier)} mm Papier je Etikett</b>`;
-  let text;
+  // Nur zum Ablesen: wie viel Papier ein Etikett verbraucht. Stimmt die
+  // Zahl nicht mit dem Abstand der Rolle, wandert jedes Etikett - dann am
+  // Nachlauf oder Rueckzug drehen.
+  let text = `Höhe ${mmText(a.hoehe)} + Nachlauf ${mmText(a.vorschub)} − Rückzug ${mmText(a.rueckzug)}
+    = <b>${mmText(a.papier)} mm Papier je Etikett</b> – soll so groß sein wie der Abstand von
+    Etikettanfang zu Etikettanfang auf der Rolle.`;
+  box.className = 'notice';
   if (a.zu_lang > 0) {
     box.className = 'notice warn';
-    text = `${rechnung}<br>Die Höhe ist ${mmText(a.zu_lang)} mm zu lang für den Etikettenabstand
-      von ${mmText(a.abstand)} mm – das Etikett liefe aufs nächste. Höhe verkleinern oder Rückzug vergrößern.`;
-  } else if (a.aus_abstand) {
-    box.className = 'notice';
-    text = `${rechnung} – passt zum Etikettenabstand. Höhe und Rückzug kannst du jetzt ändern,
-      der Vorschub danach zieht von selbst nach.`;
-  } else {
-    box.className = 'notice warn';
-    text = `${rechnung}<br>Das muss <b>genau</b> der Abstand von einem Etikettanfang zum nächsten sein
-      (Etikett + Lücke). Schon 1 mm daneben summiert sich: nach ein paar Etiketten druckt er in die Lücke,
-      und der Rückzug zieht die Kante unter die Walze – das klingt nach Durchdrehen.
-      <div class="row" style="margin-top:8px"><button class="sm" id="abstand-uebernehmen">
-        ${mmText(a.papier)} mm als Etikettenabstand übernehmen</button>
-        <span class="muted">wenn es so gerade richtig läuft</span></div>`;
+    text += `<br>Die Höhe ist ${mmText(a.zu_lang)} mm zu lang – das Etikett liefe aufs nächste.`;
   }
   box.innerHTML = text;
   box.style.display = 'block';
-  $('#abstand-uebernehmen')?.addEventListener('click', async (ev) => {
-    const ok = await saveSetting(ev.target, 'printer', { label_pitch_mm: a.papier });
-    if (ok) {
-      fillSettings(state.settings);
-      await loadLayouts();
-      await hochformatHinweise();
-    }
-  });
-}
-
-// Die eingemessenen Befehle stehen zugeklappt - damit man trotzdem sieht,
-// was gilt, eine Zeile mit den aktuellen Werten.
-function befehleKurz(drucker) {
-  const el = $('#befehle-kurz');
-  if (!el) return;
-  const wahl = (key) => {
-    const sel = $(`[data-setting="printer.${key}"]`);
-    const opt = sel && [...sel.options].find((o) => o.value === String(drucker[key] ?? ''));
-    return opt ? opt.textContent.split(' – ')[0].split(' (')[0] : '–';
-  };
-  el.textContent = [
-    `Ablauf: ${wahl('label_sequence')}`,
-    `Rückzug: ${wahl('backfeed_cmd')}`,
-    `Ende: ${wahl('label_end')}`,
-    `Bildmodus: ${wahl('raster_mode')}`,
-  ].join(' · ');
 }
 
 // Hochformat wird als Bild gedruckt. Dafuer gibt es eigene Einstellungen,
@@ -1176,9 +1129,6 @@ async function hochformatHinweise() {
       : 'von einem Etikettanfang zum nächsten – Etikett + Lücke';
   }
   if (einfach) ablaufZeigen().catch(() => {});
-  $$('[data-nur-teilung]').forEach((el) => { el.hidden = einfach; });
-  $$('[data-nur-escj]').forEach((el) => { el.hidden = (drucker.feed_mode || 'escj') !== 'escj'; });
-  befehleKurz(drucker);
 
   // Was die eingestellten Etiketten vom Terminal verlangen - genau das, was
   // der Server vor dem Senden prueft (workflow.flush_print_queue).

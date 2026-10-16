@@ -198,6 +198,7 @@ cd firmware && pio run --target upload # flashen
 | Neue Einstellung in der Oberflaeche | Feld mit `data-setting="bereich.schluessel"` (und `data-art="int"`/`"float"` fuer Zahlen) - es speichert sich beim Aendern selbst. Kein eigener Speichern-Knopf; `test_oberflaeche.py` prueft, dass der Schluessel in `settings_store.DEFAULTS` steht |
 | Kategorie/Lagerort umbenannt, Artikel fallen aus dem Filter | Namen stehen an Artikeln als Text. Umbenennen nur ueber `inventory.rename_category()`/`rename_location()`, die Artikel, Vorlagen, Produkte und Terminals nachziehen |
 | `?` statt Anfuehrungszeichen oder Strich auf Etikett/Terminal | Beide kennen nur Latin-1. Text zur Hardware laeuft durch `services/zeichen.py` (in `render_label` und `protocol.screen`/`toast`) - neue Wege zur Hardware ebenso |
+| Druckereinstellung in der Oberflaeche geaendert, wirkt nicht | Steht sie in `settings_store.FEST`? Baudrate 9600, 32 Zeichen, Aufteilung `eigen`, Ablauf `einfach` ohne Etikettenabstand, ESC K, Bildmodus B gelten fest und schlagen Gespeichertes. Einstellbar sind nur Breite, Etikettenhoehe, Code, Zeilen, Rueckzug, Nachlauf (`label_gap_mm`) und Vorschub als |
 | Ein haengender Browser friert das Terminal ein | Jeder Sendevorgang hat eine Zeitgrenze (`hub.SEND_TIMEOUT_S`) |
 
 ## Entwicklungsregeln

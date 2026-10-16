@@ -60,7 +60,12 @@ def _run(coro):
     (115200, set(), "failed"),          # alte Firmware kann nicht umschalten
     (115200, {"raster2", "baud"}, "sent"),
 ])
-def test_andere_baudrate_nur_an_terminals_die_umschalten(baud, caps, erwartet):
+def test_andere_baudrate_nur_an_terminals_die_umschalten(baud, caps, erwartet, monkeypatch):
+    # Die Baudrate steht fest auf 9600 (settings_store.FEST). Die Pruefung
+    # der Faehigkeiten bleibt trotzdem, falls das wieder einstellbar wird.
+    monkeypatch.setitem(settings_store.FEST, "printer",
+                        {k: v for k, v in settings_store.FEST["printer"].items() if k != "baud"})
+
     async def scenario():
         await init_db()
         async with session_scope() as session:

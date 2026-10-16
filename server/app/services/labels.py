@@ -693,6 +693,10 @@ def _vorschub_bloecke(dots: int, art: str, schritt: int, cfg: dict) -> list[dict
         baender, rest = divmod(dots, LEERBILD_BAND)
         if baender:
             out.append(_leeres_bild(baender * LEERBILD_BAND, cfg))
+    # Gedruckt, aber Vorschub: die Vorschau darf das nicht als Inhalt zaehlen,
+    # sonst "passt nicht" jedes Etikett. Die Firmware uebergeht das Merkmal.
+    for b in out:
+        b["vorschub"] = True
     while rest > 0:
         stueck = min(schritt, rest) if schritt else rest
         out.append({"t": "feed", "dots": stueck})

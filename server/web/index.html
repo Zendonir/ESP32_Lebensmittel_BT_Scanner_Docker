@@ -167,27 +167,20 @@
       <p class="muted" style="margin:6px 0 0">Einmal für jede neue Etikettensorte oder
         einen neuen Drucker. Jede Änderung wird sofort gespeichert.</p>
 
-      <h3><span class="step">1</span> Größe und Aussehen</h3>
+      <h3><span class="step">1</span> Etikett</h3>
       <div class="settings-grid">
         <label class="field">Breite (mm)
           <input data-setting="printer.label_width_mm" data-art="float" type="number" min="20" max="110">
           <span class="hint">von Kante zu Kante, ohne Trägerpapier</span></label>
-        <label class="field">Höhe (mm)
+        <label class="field">Etikettenhöhe (mm)
           <input data-setting="printer.label_height_mm" data-art="float" type="number" min="15" max="110">
-          <span class="hint" id="hoehe-hint">von einem Etikettanfang zum nächsten – Etikett + Lücke</span></label>
-        <label class="field">Vorschubkante
-          <select data-setting="printer.label_feed_edge">
-            <option value="hoehe">Höhe läuft durch den Drucker</option>
-            <option value="breite">Breite läuft durch den Drucker</option>
-          </select>
-          <span class="hint">welche Kante zuerst herauskommt – gibt die Rolle vor</span></label>
+          <span class="hint">die Höhe des Etiketts selbst</span></label>
         <label class="field">Code
           <select data-setting="printer.label_code">
-            <option value="auto">automatisch</option>
             <option value="code128">Strichcode (flach)</option>
             <option value="qr">QR-Code (quadratisch)</option>
           </select>
-          <span class="hint">automatisch = Strichcode, er spart Höhe. Im Hochformat immer QR.</span></label>
+          <span class="hint">der Strichcode spart Höhe</span></label>
         <label class="field">Codegröße
           <select data-setting="printer.label_code_size">
             <option value="klein">klein</option>
@@ -195,123 +188,53 @@
             <option value="gross">groß</option>
           </select>
           <span class="hint">kleiner lässt mehr Platz für Text</span></label>
-        <label class="field" data-nur-hochformat hidden>Hochformat liegt
-          <select data-setting="printer.label_portrait_turn">
-            <option value="links">Oberkante links</option>
-            <option value="rechts">Oberkante rechts</option>
-          </select>
-          <span class="hint">steht das Etikett beim Lesen auf dem Kopf, die andere Seite wählen</span></label>
       </div>
-      <div class="notice warn" id="hochformat-firmware" hidden>
-        <span id="hochformat-firmware-text"></span>
-      </div>
-      <p class="muted" style="margin:14px 0 0">Aufteilung wählen – die Vorschau zeigt, was
-        auf dein Etikett passt:</p>
-      <div id="layout-picker" class="layouts"></div>
-      <div id="eigen-editor" data-nur-eigen hidden style="margin-top:12px">
-        <div style="margin-bottom:6px"><b>Eigene Aufteilung</b> – von oben nach unten.
-          <span class="muted">Leere Angaben fallen auf dem Etikett weg. Passt nicht alles,
-          wird von unten gekürzt; MHD und Code bleiben immer.</span></div>
-        <div id="eigen-zeilen"></div>
-        <div class="row" style="gap:8px;margin-top:8px">
-          <button class="ghost" id="eigen-neu">+ Zeile</button>
-          <button class="ghost" id="eigen-reset">Vorschlag wiederherstellen</button>
+      <div class="eigen-bereich" style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;align-items:flex-start">
+        <div id="layout-picker" class="layouts" style="flex:0 0 auto"></div>
+        <div id="eigen-editor" style="flex:1 1 420px">
+          <div style="margin-bottom:6px"><b>Zeilen</b> – von oben nach unten.
+            <span class="muted">Leere Angaben fallen weg. Passt nicht alles,
+            wird von unten gekürzt; MHD und Code bleiben immer.</span></div>
+          <div id="eigen-zeilen"></div>
+          <div class="row" style="gap:8px;margin-top:8px">
+            <button class="ghost" id="eigen-neu">+ Zeile</button>
+            <button class="ghost" id="eigen-reset">Vorschlag wiederherstellen</button>
+          </div>
         </div>
       </div>
 
       <h3><span class="step">2</span> Papierlauf</h3>
       <div class="settings-grid">
         <label class="field">Rückzug (Punkte)
-          <input data-setting="printer.backfeed_dots" data-art="int" type="number" min="0" max="100" step="8">
-          <span class="hint">vor jedem Etikett zurück, 8 Punkte = 1 mm · 0 = aus</span></label>
-        <label class="field" data-nur-einfach hidden>Etikettenabstand (mm)
-          <input data-setting="printer.label_pitch_mm" data-art="float" type="number" min="0" max="200" step="0.125">
-          <span class="hint">Anfang eines Etiketts bis Anfang des nächsten (Etikett + Lücke). Genau: 10 Etiketten
-            messen und durch 10 teilen. Eingetragen rechnet sich „Vorschub danach“ selbst aus · 0 = von Hand</span></label>
-        <label class="field" data-nur-einfach hidden>Vorschub danach (mm)
+          <input data-setting="printer.backfeed_dots" data-art="int" type="number" min="0" max="100" step="1">
+          <span class="hint">vor jedem Etikett zurück · 8 Punkte = 1 mm</span></label>
+        <label class="field">Nachlauf (mm)
           <input data-setting="printer.label_gap_mm" data-art="float" type="number" min="0" max="50" step="0.125">
-          <span class="hint" id="gap-hint">Leerer Vorschub nach jedem Etikett</span></label>
+          <span class="hint">leerer Vorschub nach jedem Etikett</span></label>
         <label class="field">Vorschub als
           <select data-setting="printer.feed_mode">
-            <option value="leerzeilen">Leerzeilen drucken – im Drucktempo</option>
-            <option value="bild">leeres Bild drucken – im Drucktempo</option>
-            <option value="escj">ESC J – schnell</option>
+            <option value="leerzeilen">Leerzeilen drucken</option>
+            <option value="bild">leeres Bild drucken</option>
           </select>
-          <span class="hint">gedruckt läuft die Walze langsamer und dreht nicht durch</span></label>
-        <label class="field" data-nur-escj hidden>Vorschub in Schritten (Punkte)
-          <input data-setting="printer.feed_step_dots" data-art="int" type="number" min="0" max="255" step="1">
-          <span class="hint">ESC J in kleinen Schritten, z. B. 8 (= 1 mm). 0 = am Stück</span></label>
-        <label class="field" data-nur-teilung hidden>Totbereich (mm)
-          <input data-setting="printer.label_dead_zone_mm" data-art="float" type="number" min="0" max="20" step="0.5">
-          <span class="hint">Messstreifen Punkt 5: unbedruckter Streifen am Etikettenanfang</span></label>
-        <div class="notice" id="ablauf-box" data-nur-einfach hidden style="grid-column:1/-1;display:block"></div>
+          <span class="hint">beides im Drucktempo – die Walze dreht nicht durch</span></label>
+        <div class="notice" id="ablauf-box" style="grid-column:1/-1;display:block"></div>
       </div>
       <div class="row" style="margin-top:12px">
         <button id="test-print" class="primary">Testetikett drucken</button>
+        <label class="row tight" style="margin-left:12px"><input data-setting="printer.enabled" type="checkbox">
+          beim Einlagern drucken</label>
       </div>
+      <p class="muted" style="margin:10px 0 0">Ablauf je Etikett: Rückzug → Etikett in der eingestellten Höhe → Nachlauf.
+        Fest eingestellt: 9600 Baud · 32 Zeichen je Zeile · Rückzug mit ESC K · Bildmodus B (ESC * 33).</p>
 
-      <h3><span class="step">3</span> Drucker</h3>
-      <div class="settings-grid">
-        <label class="field check">
-          <span class="row tight"><input data-setting="printer.enabled" type="checkbox"> beim Einlagern drucken</span>
-          <span class="hint">aus: Artikel werden erfasst, aber kein Etikett gedruckt</span></label>
-        <label class="field">Zeichen je Zeile
-          <input data-setting="printer.paper_chars" data-art="int" type="number" min="24" max="64">
-          <span class="hint">Breite des Druckkopfs: 58-mm-Drucker 32, 80-mm-Drucker 48</span></label>
-        <label class="field">Baudrate
-          <select data-setting="printer.baud" data-art="int">
-            <option value="9600">9600 (Werkseinstellung)</option>
-            <option value="19200">19200</option>
-            <option value="38400">38400</option>
-            <option value="57600">57600</option>
-            <option value="115200">115200</option>
-          </select>
-          <span class="hint">Muss zum Drucker passen – steht auf seiner Selbsttestseite
-            (beim Einschalten FEED gedrückt halten). Falscher Wert = Zeichensalat.</span></label>
-      </div>
-
-      <details id="drucker-befehle" style="margin-top:16px">
-        <summary><b>Druckerbefehle</b> – einmal eingemessen, danach nicht mehr anfassen
-          <div class="muted" id="befehle-kurz" style="margin-top:4px"></div></summary>
-        <div class="settings-grid" style="margin-top:12px">
-          <label class="field">Ablauf
-            <select data-setting="printer.label_sequence">
-              <option value="einfach">Rückzug → Etikett in Höhe → Vorschub</option>
-              <option value="teilung">Teilung (Totbereich wird gerechnet)</option>
-            </select>
-            <span class="hint">„Rückzug → …“: erst zurück, dann genau die eingestellte Höhe, dann der Vorschub danach</span></label>
-          <label class="field">Rückzugsbefehl
-            <select data-setting="printer.backfeed_cmd">
-              <option value="esck">ESC K</option>
-              <option value="escj">ESC j (Epson)</option>
-            </select>
-            <span class="hint">der Test, bei dem die Oberkanten 4 mm auseinander lagen</span></label>
-          <label class="field">Etikettenende
-            <select data-setting="printer.label_end">
-              <option value="feed">berechneter Vorschub</option>
-              <option value="formfeed">Drucker sucht die Lücke</option>
-            </select>
-            <span class="hint">„sucht die Lücke“ nur mit Lückensensor (Messstreifen Punkt 4)</span></label>
-          <label class="field">Bildmodus
-            <select data-setting="printer.raster_mode">
-              <option value="esc33">B – ESC * 33</option>
-              <option value="gsv0">A – GS v 0</option>
-              <option value="esc0">C – ESC * 0</option>
-            </select>
-            <span class="hint">das Quadrat, das genau 9 × 9 mm misst (Messstreifen Punkt 2) – nur fürs Hochformat</span></label>
-        </div>
-
-        <h3 style="margin-top:16px">Neu einmessen</h3>
-        <p class="muted" style="margin:0 0 10px">Nur für einen anderen Drucker: Der Messstreifen zeigt,
-          wo er wirklich druckt. Mit dem Lineal nachmessen und die Werte oben eintragen.</p>
-        <div class="row">
+      <details id="drucker-werkzeuge" style="margin-top:14px">
+        <summary><b>Drucker testen</b> – nur für einen anderen Drucker</summary>
+        <div class="row" style="margin-top:10px">
           <button id="calibrate" class="ghost">Messstreifen drucken</button>
         </div>
         <div id="calibration-guide" hidden style="margin-top:12px"></div>
         <details id="drucker-tests" style="margin-top:12px">
           <summary><b>Einzelne Befehle testen</b> – je Knopf ein Etikett</summary>
-          <p class="muted" style="margin:8px 0">Welchen Befehl der Drucker für Rückzug, Vorschub oder das
-            Etikettenende versteht. Auf jedem Test-Etikett steht, was du nachmessen sollst.</p>
           <div id="drucker-tests-liste"></div>
           <p id="drucker-tests-status" class="muted" style="margin:8px 0 0"></p>
         </details>

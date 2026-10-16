@@ -184,3 +184,36 @@ def test_menge_und_ort_in_einer_zeile():
     assert _texte(p) == ["2 Port.=Truhe"]
     p = labels.render_label({**ITEM, "location": ""}, _cfg([{"feld": "menge_ort"}]))
     assert _texte(p) == ["Menge=2 Port."]
+
+
+def test_festgelegte_druckerwerte_gelten_auch_gegen_gespeicherte():
+    import asyncio
+
+    from app.db import init_db, session_scope
+    from app.services import settings_store
+
+    async def scenario():
+        await init_db()
+        async with session_scope() as session:
+            await settings_store.put(session, "printer", {
+                "baud": 115200, "label_layout": "klassisch", "label_sequence": "teilung",
+                "label_pitch_mm": 32, "backfeed_cmd": "escj", "paper_chars": 48})
+            cfg = await settings_store.get(session, "printer")
+            neu = await settings_store.merge(session, "printer", {"baud": 19200})
+            await session.rollback()
+        return cfg, neu
+
+    cfg, neu = asyncio.get_event_loop_policy().new_event_loop().run_until_complete(scenario())
+    for c in (cfg, neu):
+        assert c["baud"] == 9600 and c["paper_chars"] == 32
+        assert c["label_layout"] == "eigen" and c["label_sequence"] == "einfach"
+        assert c["label_pitch_mm"] == 0 and c["backfeed_cmd"] == "esck"
+
+
+def test_gedruckter_vorschub_zaehlt_in_der_vorschau_nicht_als_inhalt():
+    cfg = {**_cfg([{"feld": "name", "stil": "text"}]), "label_sequence": "einfach",
+           "label_height_mm": 25, "label_gap_mm": 13, "feed_mode": "leerzeilen"}
+    p = labels.render_label(ITEM, cfg)
+    leer = [b for b in p["blocks"] if b["t"] == "text" and b["v"] == " "]
+    assert leer and all(b["vorschub"] for b in leer)
+    assert _texte(p)[0] == "Gulasch"

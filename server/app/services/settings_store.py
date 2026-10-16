@@ -112,6 +112,28 @@ DEFAULTS: dict[str, Any] = {
 }
 
 
+# Werte, die fuer diesen Drucker feststehen (eingemessen, siehe CLAUDE.md).
+# Sie stehen nicht mehr in der Oberflaeche und gelten unabhaengig davon, was
+# gespeichert ist - eine alte Einstellung (Teilung, ESC j, Abstand 32 mm)
+# soll nicht unsichtbar weiterwirken. Etikett ist immer die eigene
+# Aufteilung, der Ablauf immer Rueckzug -> Etikett in Hoehe -> Nachlauf,
+# den Nachlauf stellt man von Hand ein (kein Etikettenabstand).
+FEST: dict[str, dict[str, Any]] = {
+    "printer": {
+        "baud": 9600,
+        "paper_chars": 32,
+        "label_layout": "eigen",
+        "label_feed_edge": "hoehe",
+        "label_sequence": "einfach",
+        "label_pitch_mm": 0,
+        "label_dead_zone_mm": 0,
+        "label_end": "feed",
+        "backfeed_cmd": "esck",
+        "raster_mode": "esc33",
+    },
+}
+
+
 def _mit_vorgaben(key: str, wert: Any) -> Any:
     """Gespeicherten Bereich mit den Vorgaben auffuellen.
 
@@ -124,7 +146,7 @@ def _mit_vorgaben(key: str, wert: Any) -> Any:
     """
     vorgabe = DEFAULTS.get(key)
     if isinstance(vorgabe, dict) and isinstance(wert, dict):
-        return {**vorgabe, **wert}
+        return {**vorgabe, **wert, **FEST.get(key, {})}
     if isinstance(wert, dict):
         return dict(wert)
     if isinstance(wert, list):
@@ -157,7 +179,7 @@ async def merge(session: AsyncSession, key: str, patch: dict) -> dict:
     current = await get(session, key, {})
     if not isinstance(current, dict):
         current = {}
-    merged = {**DEFAULTS.get(key, {}), **current, **patch}
+    merged = {**DEFAULTS.get(key, {}), **current, **patch, **FEST.get(key, {})}
     await put(session, key, merged)
     return merged
 
