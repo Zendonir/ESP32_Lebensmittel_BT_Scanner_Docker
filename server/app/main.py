@@ -218,34 +218,65 @@ async def require_ui_page(request: Request):
 _guard = [Depends(require_ui_auth)]
 
 
-def _login_seite(weiter: str, fehler: str = "", code: int = 200) -> Response:
-    feld_user = ('<label>Benutzer<input name="benutzer" autocomplete="username" required '
-                 'autocapitalize="off"></label>') if settings.ui_user else ""
-    meldung = f'<p class="fehler">{html.escape(fehler)}</p>' if fehler else ""
-    seite = f"""<!doctype html><html lang="de"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+def _login_seite(weiter: str, fehler: str = "", code: int = 200, benutzer: str = "") -> Response:
+    """Die Anmeldeseite. Ein Benutzerfeld nur, wenn UI_USER gesetzt ist."""
+    feld_user = (
+        '<label class="feld"><span>Benutzer</span>'
+        f'<input name="benutzer" value="{html.escape(benutzer, quote=True)}" '
+        'autocomplete="username" autocapitalize="off" spellcheck="false" required '
+        f'{"" if benutzer else "autofocus"}></label>'
+    ) if settings.ui_user else ""
+    fokus_pw = "" if settings.ui_user and not benutzer else "autofocus"
+    meldung = f'<div class="fehler" role="alert">{html.escape(fehler)}</div>' if fehler else ""
+    seite = f"""<!doctype html><html lang="de" data-theme=""><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#1e88e5">
 <title>Anmelden · Lebensmittel-Scanner</title>
+<link rel="manifest" href="/manifest.json">
 <link rel="stylesheet" href="{ASSET_PREFIX}{_asset_version()}/css/app.css">
+<script>try{{var t=localStorage.getItem('ls-theme');if(t&&t!=='auto')document.documentElement.dataset.theme=t;}}catch(e){{}}</script>
 <style>
- body{{display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}}
- form{{max-width:360px;width:100%;margin:16px;padding:24px;border-radius:16px;background:var(--surface);
-   border:1px solid var(--border);box-shadow:var(--shadow)}}
- label{{display:block;margin:12px 0 0;font-size:14px;color:var(--muted)}}
- label input:not([type=checkbox]){{display:block;width:100%;box-sizing:border-box;margin-top:4px;font-size:17px}}
- .bleiben{{display:flex;gap:8px;align-items:center;color:var(--text)}}
- button{{width:100%;margin-top:18px;font-size:17px}}
- .fehler{{color:var(--danger,#f04640);margin:12px 0 0}}
+ html,body{{height:100%}}
+ body{{margin:0;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;
+   background:radial-gradient(1200px 600px at 50% -10%,color-mix(in srgb,var(--primary) 22%,transparent),transparent),var(--bg)}}
+ .karte{{width:100%;max-width:380px;background:var(--surface);border:1px solid var(--border);
+   border-radius:20px;box-shadow:var(--shadow);padding:32px 28px 26px}}
+ .logo{{width:64px;height:64px;border-radius:18px;margin:0 auto 14px;display:flex;align-items:center;
+   justify-content:center;font-size:34px;background:color-mix(in srgb,var(--primary) 16%,var(--surface))}}
+ h1{{font-size:22px;margin:0;text-align:center}}
+ .unter{{text-align:center;color:var(--muted);margin:4px 0 22px}}
+ .feld{{display:block;margin:0 0 14px}}
+ .feld span{{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}}
+ .feld input{{width:100%;box-sizing:border-box;font-size:17px;padding:12px 14px;border-radius:12px}}
+ .pw{{position:relative}}
+ .pw input{{padding-right:48px}}
+ .zeigen{{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:none;
+   width:38px;height:38px;font-size:18px;cursor:pointer;color:var(--muted);padding:0}}
+ .bleiben{{display:flex;gap:10px;align-items:center;margin:4px 0 20px;cursor:pointer;user-select:none}}
+ .bleiben input{{width:18px;height:18px;margin:0}}
+ .los{{width:100%;font-size:17px;padding:13px;border-radius:12px}}
+ .fehler{{background:color-mix(in srgb,var(--danger) 14%,var(--surface));color:var(--danger);
+   border:1px solid color-mix(in srgb,var(--danger) 40%,transparent);border-radius:12px;padding:10px 12px;
+   margin:0 0 16px;font-size:14px;animation:wackeln .35s}}
+ @keyframes wackeln{{20%,60%{{transform:translateX(-6px)}}40%,80%{{transform:translateX(6px)}}}}
+ .fuss{{text-align:center;color:var(--muted);font-size:12px;margin-top:18px}}
 </style></head><body>
-<form method="post" action="/login">
-<h1 style="margin:0 0 4px">Lebensmittel-Scanner</h1>
-<p class="muted" style="margin:0">Bitte anmelden.</p>
-{meldung}
-<input type="hidden" name="weiter" value="{html.escape(weiter, quote=True)}">
-{feld_user}
-<label>Passwort<input type="password" name="passwort" autocomplete="current-password" required autofocus></label>
-<label class="bleiben"><input type="checkbox" name="bleiben" value="1" checked> angemeldet bleiben</label>
-<button class="primary" type="submit">Anmelden</button>
+<form class="karte" method="post" action="/login">
+ <div class="logo" aria-hidden="true">🥫</div>
+ <h1>Lebensmittel-Scanner</h1>
+ <p class="unter">Bitte anmelden, um fortzufahren.</p>
+ {meldung}
+ <input type="hidden" name="weiter" value="{html.escape(weiter, quote=True)}">
+ {feld_user}
+ <label class="feld"><span>Passwort</span>
+  <div class="pw"><input id="pw" type="password" name="passwort" autocomplete="current-password" required {fokus_pw}>
+  <button class="zeigen" type="button" aria-label="Passwort anzeigen"
+   onclick="var f=document.getElementById('pw');f.type=f.type==='password'?'text':'password';f.focus()">👁</button></div>
+ </label>
+ <label class="bleiben"><input type="checkbox" name="bleiben" value="1" checked> Angemeldet bleiben</label>
+ <button class="primary los" type="submit">Anmelden</button>
+ <div class="fuss">Die Anmeldung gilt auf diesem Gerät ein Jahr.</div>
 </form></body></html>"""
     return Response(seite, status_code=code, media_type="text/html; charset=utf-8",
                     headers={"Cache-Control": "no-store"})
@@ -270,11 +301,13 @@ async def login(request: Request):
     wer = anmeldung.adresse(request)
     if anmeldung.gesperrt(wer):
         log.warning("Anmeldung gesperrt fuer %s (zu viele Fehlversuche)", wer)
-        return _login_seite(weiter, "Zu viele Fehlversuche – bitte in 15 Minuten erneut.", 429)
+        return _login_seite(weiter, "Zu viele Fehlversuche – bitte in 15 Minuten erneut.", 429,
+                            benutzer=wert("benutzer"))
     if not anmeldung.zugangsdaten_stimmen(wert("benutzer"), wert("passwort")):
         anmeldung.fehlversuch(wer)
         log.warning("Fehlgeschlagene Anmeldung von %s", wer)
-        return _login_seite(weiter, "Benutzer oder Passwort falsch.", 401)
+        text = "Benutzer oder Passwort falsch." if settings.ui_user else "Passwort falsch."
+        return _login_seite(weiter, text, 401, benutzer=wert("benutzer"))
 
     anmeldung.erfolg(wer)
     bleiben = wert("bleiben") == "1"

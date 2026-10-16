@@ -175,3 +175,19 @@ def test_geraetesocket_braucht_das_geraetetoken(client):
         with client.websocket_connect("/ws/device?id=x&token=falsch"):
             pass
     assert fehler.value.code == 4401
+
+
+def test_login_fragt_nur_nach_dem_benutzer_wenn_es_einen_gibt(client):
+    _neu(client)
+    seite = client.get("/login").text
+    assert 'name="passwort"' in seite and 'name="benutzer"' not in seite
+    object.__setattr__(settings, "ui_user", "sven")
+    try:
+        seite = client.get("/login").text
+        assert 'name="benutzer"' in seite
+        assert client.post("/login", data={"benutzer": "anna", "passwort": PASSWORT}).status_code == 401
+        assert client.post("/login", data={"benutzer": "sven", "passwort": PASSWORT},
+                           follow_redirects=False).status_code == 303
+    finally:
+        object.__setattr__(settings, "ui_user", "")
+        _neu(client)

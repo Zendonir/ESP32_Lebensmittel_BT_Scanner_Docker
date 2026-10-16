@@ -1,7 +1,7 @@
 // Minimaler Service Worker: nur der App-Rahmen wird gecacht, niemals Daten.
 // Ein Cache mit Inventardaten waere schlimmer als gar keiner - man wuerde
 // Artikel auslagern, die es laengst nicht mehr gibt.
-const CACHE = 'ls-shell-v2';
+const CACHE = 'ls-shell-v3';
 const SHELL = ['/mobile', '/static/css/app.css', '/static/js/api.js', '/manifest.json'];
 
 self.addEventListener('install', (event) => {
@@ -18,12 +18,14 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  if (event.request.method !== 'GET' || url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws/')) {
+  if (event.request.method !== 'GET' || url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws/')
+      || url.pathname === '/login' || url.pathname === '/logout') {
     return; // Netz-only: Daten kommen immer frisch vom Server.
   }
   event.respondWith(
     fetch(event.request)
       .then((res) => {
+        if (res.redirected || !res.ok) return res;   // z. B. /mobile -> /login
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(event.request, copy)).catch(() => {});
         return res;
