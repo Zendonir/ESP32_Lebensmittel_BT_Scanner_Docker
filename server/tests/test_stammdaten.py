@@ -134,3 +134,14 @@ async def test_bewusst_angelegtes_ziel_bleibt_unberuehrt():
         namen = set((await s.execute(select(Category.name))).scalars())
         assert {"Getraenke", "Getränke"} <= namen
     await engine.dispose()
+
+
+def test_lagerort_hat_eine_farbe_und_behaelt_sie_beim_umbenennen(client):
+    loc = client.post("/api/locations", json={"name": _eindeutig("Truhe")}).json()
+    assert loc["color"].startswith("#") and len(loc["color"]) == 7
+    r = client.put(f"/api/locations/{loc['id']}", json={"name": _eindeutig("Truhe")})
+    assert r.json()["color"] == loc["color"]
+    r = client.put(f"/api/locations/{loc['id']}", json={"name": r.json()["name"], "color": "#ff0000"})
+    assert r.json()["color"] == "#ff0000"
+    assert client.put(f"/api/locations/{loc['id']}",
+                      json={"name": "x", "color": "rot"}).status_code == 422

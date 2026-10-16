@@ -93,7 +93,7 @@ async function loadDashboard() {
     ? expiring.map((i) => `<tr>
         <td class="name">${esc(i.display_name || i.name)}</td>
         <td>${fmtDate(i.expiry_date)} ${daysPill(i.days_left)}</td>
-        <td>${esc(i.location)}</td>
+        <td>${ortMitFarbe(i.location)}</td>
         <td class="right"><button class="sm" data-remove="${esc(i.label)}">Auslagern</button></td>
       </tr>`).join('')
     : '<tr><td colspan="4" class="muted">Nichts läuft demnächst ab.</td></tr>';
@@ -106,6 +106,13 @@ async function loadDashboard() {
 
   $('#dash-cat').innerHTML = barList(stats.by_category, state.categories);
   $('#dash-loc').innerHTML = barList(stats.by_location, []);
+}
+
+// Lagerort mit seinem Farbpunkt (Stammdaten -> Lagerorte).
+function ortMitFarbe(name) {
+  if (!name) return '';
+  const farbe = state.locations.find((l) => l.name === name)?.color;
+  return `${farbe ? `<span class="swatch" style="background:${esc(farbe)}"></span>` : ''}${esc(name)}`;
 }
 
 function barList(map, categories) {
@@ -144,7 +151,7 @@ async function loadInventory() {
     <td>${fmtDate(i.expiry_date)}</td>
     <td>${daysPill(i.days_left)}</td>
     <td>${i.quantity % 1 === 0 ? i.quantity : i.quantity.toFixed(1)} ${esc(i.unit)}</td>
-    <td>${esc(i.location)}</td>
+    <td>${ortMitFarbe(i.location)}</td>
     <td class="right">
       <button class="sm" data-edit="${esc(i.label)}">Ändern</button>
       <button class="sm" data-reprint="${esc(i.label)}">Druck</button>
@@ -535,7 +542,8 @@ async function loadCatalogPage() {
       <button class="sm danger" data-cat-del="${c.id}">Löschen</button></td></tr>`).join('');
 
   $('#loc-body').innerHTML = state.locations.map((l) => `<tr>
-    <td>${esc(l.name)} ${l.is_default ? '<span class="pill ok">Standard</span>' : ''}</td>
+    <td><span class="swatch" style="background:${esc(l.color || '#1c222a')}"></span>${esc(l.name)}
+      ${l.is_default ? '<span class="pill ok">Standard</span>' : ''}</td>
     <td class="right">
       <button class="sm" data-loc-edit="${l.id}">Ändern</button>
       <button class="sm danger" data-loc-del="${l.id}">Löschen</button></td></tr>`).join('');
@@ -577,6 +585,7 @@ document.addEventListener('click', async (ev) => {
       const loc = state.locations.find((l) => l.id === +t.dataset.locEdit);
       const v = await modal('Lagerort', [
         { name: 'name', label: 'Name', value: loc.name },
+        { name: 'color', label: 'Farbe', value: loc.color || '#4c9eff', type: 'color' },
         { name: 'is_default', label: 'Standard', value: loc.is_default, type: 'checkbox' },
       ]);
       if (v) { await put(`/api/locations/${loc.id}`, { ...loc, ...v, is_default: !!v.is_default }); await loadCatalogPage(); }
@@ -597,6 +606,8 @@ $('#cat-new').addEventListener('click', async () => {
 $('#loc-new').addEventListener('click', async () => {
   const v = await modal('Neuer Lagerort', [
     { name: 'name', label: 'Name', value: '' },
+    { name: 'color', label: 'Farbe', value: ['#4c9eff', '#26c6da', '#8d6e63', '#7e57c2', '#5c6bc0',
+      '#ec407a', '#78909c', '#26a69a'][state.locations.length % 8], type: 'color' },
     { name: 'is_default', label: 'Standard', value: false, type: 'checkbox' },
   ]);
   if (v) { await post('/api/locations', { ...v, is_default: !!v.is_default, sort_order: state.locations.length }); await loadCatalogPage(); }

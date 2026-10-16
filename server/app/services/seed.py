@@ -36,6 +36,27 @@ LOCATIONS = [
     ("Keller", False),
 ]
 
+# Farben fuer Lagerorte, der Reihe nach vergeben. Kalt blau, warm erdig -
+# und deutlich von den gruen/orange/rot der MHD-Ampel verschieden.
+ORT_FARBEN = ["#4c9eff", "#26c6da", "#8d6e63", "#7e57c2", "#5c6bc0", "#ec407a",
+              "#78909c", "#26a69a"]
+
+
+def ort_farbe(index: int) -> str:
+    return ORT_FARBEN[index % len(ORT_FARBEN)]
+
+
+async def _ortfarben_nachtragen(session: AsyncSession) -> int:
+    """Lagerorte aus der Zeit vor der Farbspalte bekommen eine Farbe."""
+    rows = (await session.execute(
+        select(Location).order_by(Location.sort_order, Location.id))).scalars().all()
+    n = 0
+    for index, row in enumerate(rows):
+        if not row.color:
+            row.color = ort_farbe(index)
+            n += 1
+    return n
+
 TEMPLATES = [
     # (Name, Kategorie, Haltbarkeit Tage, Einheit, Sorten nutzen)
     ("Aufschnitt", "Fleisch & Fisch", 5, "g", False),
@@ -99,8 +120,11 @@ async def run(session: AsyncSession) -> None:
 
     if await _empty(session, Location):
         for index, (name, is_default) in enumerate(LOCATIONS):
-            session.add(Location(name=name, is_default=is_default, sort_order=index))
+            session.add(Location(name=name, is_default=is_default, sort_order=index,
+                                 color=ort_farbe(index)))
         seeded.append("Lagerorte")
+    elif await _ortfarben_nachtragen(session):
+        seeded.append("Farben der Lagerorte")
 
     if await _empty(session, Template):
         for index, (name, category, days, unit, sorten) in enumerate(TEMPLATES):

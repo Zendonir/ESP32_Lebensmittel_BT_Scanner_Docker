@@ -335,8 +335,10 @@ async def _screen_locations(session, sess, sid, status) -> dict:
         {
             "id": f"loc:{row.name}",
             "label": row.name,
+            # Die Farbe des Orts, wie in der Web-Oberflaeche. Welcher gerade
+            # gilt, steht als "aktiv" darunter.
             "sub": "aktiv" if row.name == sess.location else "",
-            "color": "#2eb048" if row.name == sess.location else "#1c222a",
+            "color": row.color or "#1c222a",
         }
         for row in rows
     ]

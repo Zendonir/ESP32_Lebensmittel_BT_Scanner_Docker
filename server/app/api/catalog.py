@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +22,7 @@ from ..schemas import (
 )
 from ..device import workflow
 from ..services import inventory as inv
-from ..services import openfoodfacts
+from ..services import openfoodfacts, seed
 
 router = APIRouter(prefix="/api", tags=["stammdaten"])
 
@@ -92,7 +92,11 @@ async def list_locations(session: AsyncSession = Depends(get_session)):
 
 @router.post("/locations", response_model=LocationOut, status_code=201)
 async def create_location(body: LocationIn, session: AsyncSession = Depends(get_session)):
-    row = Location(**body.model_dump())
+    daten = body.model_dump()
+    if not daten.get("color"):
+        anzahl = (await session.execute(select(func.count()).select_from(Location))).scalar_one()
+        daten["color"] = seed.ort_farbe(anzahl)
+    row = Location(**daten)
     session.add(row)
     try:
         await session.flush()
@@ -114,7 +118,7 @@ async def update_location(
     if row is None:
         raise HTTPException(404, "Lagerort unbekannt")
     old_name = row.name
-    for key, value in body.model_dump().items():
+    for key, value in body.model_dump(exclude_none=True).items():
         setattr(row, key, value)
     try:
         await session.flush()

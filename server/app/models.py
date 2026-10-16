@@ -74,6 +74,9 @@ class Location(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100), unique=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    # Farbe wie bei den Kategorien - Kachel am Terminal, Punkt in den Listen.
+    # Leer in Bestaenden von vor der Spalte; seed.run() vergibt dann eine.
+    color: Mapped[str] = mapped_column(String(16), default="")
 
 
 class Product(Base, TimestampMixin):

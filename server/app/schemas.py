@@ -42,6 +42,9 @@ class LocationIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     is_default: bool = False
     sort_order: int = 0
+    # Fehlt sie (aelterer Browser), bleibt die Farbe, wie sie ist - bzw. beim
+    # Anlegen kommt die naechste aus seed.ORT_FARBEN.
+    color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
 
 
 class LocationOut(ORMModel):
@@ -49,6 +52,7 @@ class LocationOut(ORMModel):
     name: str
     is_default: bool
     sort_order: int
+    color: str
 
 
 class ProductIn(BaseModel):
