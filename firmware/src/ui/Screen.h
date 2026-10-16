@@ -49,6 +49,9 @@ public:
     // Bildschirm war dunkel und ist jetzt nur aufgewacht - die Beruehrung,
     // die ihn geweckt hat, soll dann nichts weiter ausloesen.
     bool wake();
+    // Solange gesetzt, dunkelt der Bildschirm nicht ab (Scanner verbunden).
+    // Faellt es weg, beginnt die Zeit bis zum Abdunkeln von vorn.
+    void setKeepAwake(bool on);
 
     // Muss regelmaessig laufen: blendet Meldungen aus, zeichnet die Uhr.
     void loop();
@@ -140,6 +143,7 @@ private:
 
     uint16_t _dimAfterS  = 0;
     uint32_t _lastWakeMs = 0;
+    bool     _keepAwake  = false;
     bool     _dimmed     = false;
 };
 

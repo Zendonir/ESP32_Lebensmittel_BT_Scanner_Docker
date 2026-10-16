@@ -72,6 +72,12 @@ bool Screen::wake() {
     return true;
 }
 
+void Screen::setKeepAwake(bool on) {
+    if (on == _keepAwake) return;
+    _keepAwake = on;
+    wake();
+}
+
 // ---------------------------------------------------------------------------
 uint16_t Screen::parseColor(const char *hex, uint16_t fallback) {
     if (!hex || hex[0] != '#' || strlen(hex) < 7) return fallback;
@@ -131,7 +137,7 @@ void Screen::showBoot(const String &line1, const String &line2) {
 }
 
 void Screen::loop() {
-    if (_dimAfterS && !_dimmed && millis() - _lastWakeMs > (uint32_t)_dimAfterS * 1000UL) {
+    if (_dimAfterS && !_dimmed && !_keepAwake && millis() - _lastWakeMs > (uint32_t)_dimAfterS * 1000UL) {
         _dimmed = true;
         ledcWrite(LCD_BL, 0);
     }

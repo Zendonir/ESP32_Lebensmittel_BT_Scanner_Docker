@@ -401,6 +401,10 @@ void loop() {
     static bool lastScannerState = false;
     if (bleScanner.isConnected() != lastScannerState) {
         lastScannerState = bleScanner.isConnected();
+        // Mit verbundenem Scanner bleibt der Bildschirm an: wer den Scanner
+        // in der Hand hat, will sehen, was er scannt. Nach dem Trennen
+        // dunkelt er nach der eingestellten Zeit wieder ab.
+        screen.setKeepAwake(lastScannerState);
         lastTelemetry = millis();
         sendTelemetry();
     }
