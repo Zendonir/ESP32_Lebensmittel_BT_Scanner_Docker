@@ -234,10 +234,20 @@ async def list_events(
     return (await session.execute(stmt)).scalars().all()
 
 
-@router.get("/health")
-async def health(session: AsyncSession = Depends(get_session)):
+# Ohne Anmeldung erreichbar: der Docker-Healthcheck kennt kein Passwort.
+# Mit gesetztem UI_PASSWORD antwortete er sonst mit 401, und der Container
+# galt als "unhealthy". Ohne Anmeldung verraet die Antwort nur "ok".
+public_router = APIRouter(prefix="/api", tags=["system"])
+
+
+@public_router.get("/health")
+async def health(request: Request, session: AsyncSession = Depends(get_session)):
     """Fuer Docker-Healthcheck und Monitoring."""
+    from ..services import anmeldung
+
     await session.execute(select(1))
+    if not anmeldung.angemeldet(request):
+        return {"status": "ok"}
     return {
         "status": "ok",
         "uptime": int(time.time() - _STARTED),

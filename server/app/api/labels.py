@@ -89,11 +89,38 @@ async def list_layouts(session: AsyncSession = Depends(get_session)):
     return out
 
 
+async def _terminal_name(session: AsyncSession, device_id: str) -> str:
+    from ..models import Device
+
+    name = (await session.execute(
+        select(Device.name).where(Device.device_id == device_id))).scalar_one_or_none()
+    return name or device_id
+
+
+@router.get("/terminals")
+async def druck_terminals(request: Request, session: AsyncSession = Depends(get_session)):
+    """Verbundene Terminals, an denen dieser Haushalt drucken kann.
+
+    Die Handyansicht fragt nur nach, wenn es mehr als eines ist.
+    """
+    haushalt = await haushalte.aus_anfrage(request, session)
+    ids = workflow.terminals_fuer(haushalt) if haushalt else hub.online_ids()
+    return [{"device_id": d, "name": await _terminal_name(session, d)} for d in ids]
+
+
 @router.post("", response_model=LabelCreateResult, status_code=201)
 async def create_labels(body: LabelCreate, request: Request,
                         session: AsyncSession = Depends(get_session)):
     """Derselbe Weg wie der Geraete-Workflow - eine Implementierung, zwei Aufrufer."""
     haushalt = await haushalte.aus_anfrage(request, session)
+    # Gedruckt wird am Terminal des Haushalts. Sind mehrere verbunden und
+    # keines gewaehlt, wird gefragt - vor dem Anlegen, damit nichts doppelt
+    # entsteht, wenn die Oberflaeche danach mit der Wahl wiederkommt.
+    online = workflow.terminals_fuer(haushalt)
+    if body.print and not body.device_id and len(online) > 1:
+        raise HTTPException(409, {"frage": "terminal", "terminals": [
+            {"device_id": d, "name": await _terminal_name(session, d)} for d in online]})
+    target, pk = await workflow.druckziel(session, haushalt or "", body.device_id)
     items, jobs = await inv.add_items(
         session,
         name=body.name,
@@ -109,13 +136,15 @@ async def create_labels(body: LabelCreate, request: Request,
         want_print=body.print,
         household=haushalt or "",
     )
+    for job in jobs:
+        job.device_pk = pk
     await session.commit()
 
     printed = False
     if jobs:
-        # Gedruckt wird am Terminal des eigenen Haushalts, wenn eines da ist.
-        target = body.device_id or workflow.terminal_fuer(haushalt) or (
-            hub.online_ids()[0] if hub.online_ids() else None)
+        # Ohne Haushalt (Verwaltung ueber alle) wie bisher: irgendein Terminal.
+        if target is None and not haushalt and hub.online_ids():
+            target = hub.online_ids()[0]
         if target:
             printed = await workflow.flush_print_queue(session, target) > 0
 
@@ -159,14 +188,18 @@ async def reprint(
         },
         printer_cfg,
     )
-    job = PrintJob(label=item.label, payload=payload, status="queued")
+    target, pk = await workflow.druckziel(session, item.household or "", device_id)
+    job = PrintJob(label=item.label, payload=payload, status="queued",
+                   household=item.household or "", device_pk=pk)
     session.add(job)
     # Ein Nachdruck verbraucht ein Etikett wie jeder andere Druck auch.
     await label_service.consume_roll(session, 1)
     await inv.log_event(session, "print", label=item.label, name=item.name)
     await session.commit()
 
-    target = device_id or (hub.online_ids()[0] if hub.online_ids() else None)
+    if target is None and pk is None:
+        target = workflow.terminal_fuer(item.household) or (
+            hub.online_ids()[0] if hub.online_ids() else None)
     sent = await workflow.flush_print_queue(session, target) if target else 0
     return {"ok": True, "job": job.id, "sent": bool(sent)}
 

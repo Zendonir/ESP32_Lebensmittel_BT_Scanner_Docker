@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -210,15 +210,50 @@ def _eigener_haushalt(sess: DeviceSession) -> tuple:
     return (InventoryItem.household == sess.household,) if sess.household else ()
 
 
+def terminals_fuer(haushalt: str | None) -> list[str]:
+    """Verbundene Terminals dieses Haushalts."""
+    if not haushalt:
+        return []
+    return [d for d in hub.online_ids()
+            if (s := _sessions.get(d)) is not None and s.household == haushalt]
+
+
 def terminal_fuer(haushalt: str | None) -> str | None:
     """Ein verbundenes Terminal dieses Haushalts - zum Drucken aus dem Web."""
-    if not haushalt:
+    liste = terminals_fuer(haushalt)
+    return liste[0] if liste else None
+
+
+async def geraet_pk(session: AsyncSession, device_id: str | None) -> int | None:
+    if not device_id:
         return None
-    for device_id in hub.online_ids():
-        sess = _sessions.get(device_id)
-        if sess is not None and sess.household == haushalt:
-            return device_id
-    return None
+    return (await session.execute(
+        select(Device.id).where(Device.device_id == device_id))).scalar_one_or_none()
+
+
+async def druckziel(session: AsyncSession, haushalt: str,
+                    device_id: str | None = None) -> tuple[str | None, int | None]:
+    """Wo ein Etikett aus Web oder Handy gedruckt wird: (online-Terminal, fest an).
+
+    Ausdruecklich gewaehlt gilt das gewaehlte. Sonst das eine verbundene
+    Terminal des Haushalts. Ist keines verbunden, wartet der Auftrag fest am
+    ersten Terminal dieses Haushalts - er druckt, sobald es wieder da ist,
+    und nicht beim Nachbarn, der zufaellig online ist. Kennt der Haushalt gar
+    kein Terminal, bleibt er offen (jedes Terminal darf ihn drucken).
+    Bei mehreren verbundenen entscheidet der Aufrufer (Nachfrage).
+    """
+    if device_id:
+        return (device_id if device_id in hub.online_ids() else None,
+                await geraet_pk(session, device_id))
+    online = terminals_fuer(haushalt)
+    if len(online) == 1:
+        return online[0], await geraet_pk(session, online[0])
+    if not online and haushalt:
+        pk = (await session.execute(
+            select(Device.id).where(Device.household == haushalt).order_by(Device.id)
+        )).scalars().first()
+        return None, pk
+    return None, None
 
 
 def haushalt_umbenannt(alt: str, neu: str) -> None:
@@ -1217,6 +1252,10 @@ async def _save_draft(session: AsyncSession, sess: DeviceSession) -> None:
         want_print=True,
         household=sess.household,
     )
+    # Am Terminal erfasst = an diesem Terminal gedruckt.
+    pk = await geraet_pk(session, sess.device_id)
+    for job in jobs:
+        job.device_pk = pk
     await session.commit()
 
     sess.last_result = [
@@ -1420,10 +1459,23 @@ async def flush_print_queue(
             await session.commit()
             return 0
 
+    # Nur, was an dieses Terminal gehoert: fest zugeordnete Auftraege, und
+    # offene seines Haushalts (oder ohne Haushalt, oder eines Haushalts ohne
+    # eigenes Terminal). Vorher druckte jedes Terminal alles, was in der
+    # Schlange lag - auch die Etiketten des Nachbarhaushalts.
+    pk = await geraet_pk(session, device_id)
+    haushalt = session_for(device_id).household
+    mit_terminal = select(Device.household).where(Device.household != "")
+    gehoert_hierher = or_(
+        PrintJob.device_pk == pk if pk is not None else false(),
+        and_(PrintJob.device_pk.is_(None),
+             or_(PrintJob.household == "", PrintJob.household == haushalt,
+                 PrintJob.household.not_in(mit_terminal))),
+    )
     jobs = (
         await session.execute(
             select(PrintJob)
-            .where(PrintJob.status.in_(offen))
+            .where(PrintJob.status.in_(offen), gehoert_hierher)
             .order_by(PrintJob.id)
             .limit(platz)
         )

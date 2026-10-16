@@ -237,6 +237,9 @@ class PrintJob(Base):
         ForeignKey("devices.id", ondelete="CASCADE"), nullable=True
     )
     label: Mapped[str] = mapped_column(String(32), default="")
+    # Haushalt des Artikels. Ein Auftrag ohne festes Terminal (device_pk)
+    # druckt nur an einem Terminal dieses Haushalts - nicht beim Nachbarn.
+    household: Mapped[str] = mapped_column(String(100), default="")
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
     # queued | sent | done | failed

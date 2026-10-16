@@ -135,7 +135,8 @@ async def add_items(
                 },
                 printer_cfg,
             )
-            job = PrintJob(label=number, payload=payload, status="queued")
+            job = PrintJob(label=number, payload=payload, status="queued",
+                           household=household or "")
             session.add(job)
             jobs.append(job)
 

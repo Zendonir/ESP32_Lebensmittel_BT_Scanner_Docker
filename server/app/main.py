@@ -234,6 +234,7 @@ def _login_seite(weiter: str, fehler: str = "", code: int = 200, benutzer: str =
 <meta name="theme-color" content="#1e88e5">
 <title>Anmelden · Lebensmittel-Scanner</title>
 <link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="{ASSET_PREFIX}{_asset_version()}/css/app.css">
 <script>try{{var t=localStorage.getItem('ls-theme');if(t&&t!=='auto')document.documentElement.dataset.theme=t;}}catch(e){{}}</script>
 <style>
@@ -324,6 +325,19 @@ async def login(request: Request):
     return antwort
 
 
+# Kleines Symbol fuer den Browser-Reiter - fehlte bisher (404 im Log).
+_FAVICON = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+            '<rect width="64" height="64" rx="14" fill="#1e88e5"/>'
+            '<text x="32" y="45" font-size="38" text-anchor="middle">🥫</text></svg>')
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+@app.get("/favicon.svg", include_in_schema=False)
+async def favicon():
+    return Response(_FAVICON, media_type="image/svg+xml",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.post("/logout", include_in_schema=False)
 @app.get("/logout", include_in_schema=False)
 async def logout():
@@ -340,6 +354,7 @@ app.include_router(haushalte_api.router, dependencies=_guard)
 # Beide ohne _guard - sie melden sich ueber DEVICE_TOKEN an, nicht ueber
 # das Web-Passwort, das die Terminals gar nicht kennen.
 app.include_router(firmware.public_router)
+app.include_router(system.public_router)   # /api/health fuer den Healthcheck
 app.include_router(device_routes.router)  # WebSockets, eigene Authentifizierung
 
 

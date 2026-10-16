@@ -72,6 +72,7 @@ _ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("devices", "household", "VARCHAR(100) DEFAULT ''"),
     ("events", "household", "VARCHAR(100) DEFAULT ''"),
     ("locations", "color", "VARCHAR(16) DEFAULT ''"),
+    ("print_jobs", "household", "VARCHAR(100) DEFAULT ''"),
 )
 
 
