@@ -153,3 +153,34 @@ def test_gedruckter_vorschub_aendert_die_laenge_nicht():
             from app.services import hochformat
             roh = hochformat.unpackbits(base64.b64decode(b["d"]), 10**6)
             assert roh == bytes(b["h"]) and b["h"] % 24 == 0
+
+
+def test_name_marke_ohne_marke_gross_mit_marke_zwei_kleine_zeilen():
+    ohne = labels.render_label(ITEM, _cfg([{"feld": "name_marke", "stil": "gross"}]))
+    gross = [b for b in ohne["blocks"] if b["t"] == "text"]
+    assert [b["v"] for b in gross] == ["Gulasch - Rind"] and gross[0]["large"]
+
+    mit = labels.render_label({**ITEM, "brand": "Hausmarke"},
+                              _cfg([{"feld": "name_marke", "stil": "gross"}]))
+    zeilen = [b for b in mit["blocks"] if b["t"] == "text"]
+    assert [b["v"] for b in zeilen] == ["Gulasch - Rind", "Hausmarke"]
+    assert not any(b.get("large") for b in zeilen) and zeilen[0]["bold"]
+    # Zwei kleine Zeilen sind nicht hoeher als eine grosse.
+    assert sum(labels.block_dots(b) for b in zeilen) == labels.block_dots(gross[0])
+
+
+def test_eingelagert_und_mhd_teilen_sich_eine_zeile():
+    p = labels.render_label(ITEM, _cfg([{"feld": "daten", "unterstrichen": True}]))
+    zeile = next(b for b in p["blocks"] if b["t"] == "row")
+    assert (zeile["k"], zeile["v"]) == ("Ein 11.10.2026", "MHD 24.12.2026")
+    assert zeile["keep"] and zeile["underline"]
+    # Schmales Papier: Jahr zweistellig, damit es in die Zeile passt.
+    [eng] = labels._kombi_daten(ITEM, {}, 24, "zeile", False)
+    assert (eng["k"], eng["v"]) == ("Ein 11.10.26", "MHD 24.12.26")
+
+
+def test_menge_und_ort_in_einer_zeile():
+    p = labels.render_label(ITEM, _cfg([{"feld": "menge_ort"}]))
+    assert _texte(p) == ["2 Port.=Truhe"]
+    p = labels.render_label({**ITEM, "location": ""}, _cfg([{"feld": "menge_ort"}]))
+    assert _texte(p) == ["Menge=2 Port."]

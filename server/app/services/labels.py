@@ -424,14 +424,17 @@ def _feld_werte(item: dict, cfg: dict) -> dict[str, tuple[str, str]]:
 EIGEN_FELDER: dict[str, str] = {
     "name": "Lebensmittelname",
     "name_sorte": "Name mit Sorte",
+    "name_marke": "Name + Marke (zwei Zeilen, falls Marke da)",
     "subcategory": "Sorte",
     "category": "Kategorie",
     "brand": "Marke",
     "expiry_date": "MHD",
     "added_date": "Einlagerungsdatum",
+    "daten": "Eingelagert + MHD (eine Zeile)",
     "count": "Stückzahl",
     "quantity": "Menge mit Einheit",
     "location": "Ort",
+    "menge_ort": "Menge + Ort (eine Zeile)",
     "household": "Haushalt",
     "label": "Etikettennummer",
     "linie": "— Trennlinie —",
@@ -452,6 +455,62 @@ EIGEN_STANDARD: list[dict] = [
     {"feld": "added_date", "stil": "zeile"},
     {"feld": "code", "stil": "zeile"},
 ]
+
+
+# Kombinierte Felder: zwei Angaben, die sich eine Zeile teilen oder sich je
+# nach Artikel anders setzen. Auf einem 30-mm-Etikett ist jede gesparte Zeile
+# 3 mm - das ist der ganze Zweck.
+def _kurzdatum(wert: str) -> str:
+    """`16.10.2026` -> `16.10.26`, wenn die Zeile sonst nicht passt."""
+    return wert[:6] + wert[8:] if len(wert) == 10 and wert[2] == "." else wert
+
+
+def _kombi_name_marke(item: dict, cfg: dict, chars: int, stil: str, _u: bool) -> list[dict]:
+    # Ohne Marke wie ein gewoehnlicher Name im gewaehlten Stil (Vorgabe gross).
+    # Mit Marke zwei normale Zeilen: zusammen so hoch wie ein grosser Name,
+    # aber mit einer Angabe mehr.
+    name = _title(item) or "Unbekanntes Produkt"
+    marke = item.get("brand", "")
+    align = 0 if stil == "links" else 1
+    if not marke:
+        if stil in ("gross", "zeile"):
+            return _title_blocks(name, chars, large=True)
+        return [{"t": "text", "v": name, "align": align, "bold": stil != "text"}]
+    # Ein ueberlanger Name darf zwei Zeilen nehmen - abgeschnitten waere er
+    # wertlos. Die Marke ist Beiwerk und bleibt bei einer.
+    return [*({"t": "text", "v": z, "align": align, "bold": True} for z in _wrap(name, chars)[:2]),
+            {"t": "text", "v": _wrap(marke, chars)[0], "align": align, "bold": False}]
+
+
+def _kombi_daten(item: dict, cfg: dict, chars: int, _s: str, unterstrichen: bool) -> list[dict]:
+    mhd = to_display(item.get("expiry_date", ""))
+    ein = to_display(item.get("added_date", ""))
+    if not ein:
+        zeile = {"t": "row", "k": "MHD", "v": mhd or "-"}
+    else:
+        k, v = f"Ein {ein}", f"MHD {mhd or '-'}"
+        if len(k) + len(v) + 1 > chars:
+            k, v = f"Ein {_kurzdatum(ein)}", f"MHD {_kurzdatum(mhd) or '-'}"
+        zeile = {"t": "row", "k": k, "v": v}
+    zeile.update(underline=unterstrichen, keep=True)
+    return [zeile]
+
+
+def _kombi_menge_ort(item: dict, cfg: dict, chars: int, _s: str, unterstrichen: bool) -> list[dict]:
+    menge, ort = _quantity(item), item.get("location", "")
+    if menge and ort:
+        return [{"t": "row", "k": menge, "v": ort, "underline": unterstrichen}]
+    if menge or ort:
+        return [{"t": "row", "k": "Menge" if menge else "Ort", "v": menge or ort,
+                 "underline": unterstrichen}]
+    return []
+
+
+KOMBI = {
+    "name_marke": _kombi_name_marke,
+    "daten": _kombi_daten,
+    "menge_ort": _kombi_menge_ort,
+}
 
 
 def _eigen(item: dict, cfg: dict, chars: int) -> list[dict]:
@@ -478,6 +537,9 @@ def _eigen(item: dict, cfg: dict, chars: int) -> list[dict]:
             if not code_gesetzt:
                 blocks += _code_blocks(item, cfg)
                 code_gesetzt = True
+            continue
+        if feld in KOMBI:
+            blocks += KOMBI[feld](item, cfg, chars, stil, bool(zeile.get("unterstrichen")))
             continue
         if feld not in werte:
             continue
