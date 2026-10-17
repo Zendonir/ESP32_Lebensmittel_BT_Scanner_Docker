@@ -48,8 +48,8 @@ static void enableAudioPower() {
     delay(20);
 }
 
-// Registerfolge unveraendert aus dem Vorgaengerprojekt: 48 kHz, 16 Bit,
-// I2S-Standard, MCLK = 256 x fs = 12,288 MHz. Die Werte stammen aus der
+// Registerfolge aus dem Vorgaengerprojekt: 48 kHz, 16 Bit, I2S-Standard,
+// MCLK = 256 x fs = 12,288 MHz (auf der 3.5B aus BCLK, siehe unten). Die Werte stammen aus der
 // Koeffiziententabelle des ESP-BSP - an einzelnen Registern zu drehen fuehrt
 // zuverlaessig zu Rauschen oder Stille.
 static void es8311_init() {
@@ -58,8 +58,17 @@ static void es8311_init() {
     es_write(0x00, 0x80);   // CSM_ON
     delay(10);
 
-    es_write(0x01, 0x3F);
+#if I2S_MCLK >= 0
+    es_write(0x01, 0x3F);   // Takt vom MCLK-Pin (12,288 MHz)
     es_write(0x02, 0x00);
+#else
+    // Ohne MCLK-Leitung: Takt aus BCLK. Bei 48 kHz, 16 Bit Stereo sind das
+    // 32 x fs = 1,536 MHz; der Eintrag {1536000, 48000} der Tabelle setzt den
+    // Vervielfacher auf 8x und kommt so wieder auf 256 x fs. Alle uebrigen
+    // Teiler sind dieselben wie mit MCLK.
+    es_write(0x01, 0xBF);
+    es_write(0x02, 0x18);
+#endif
     es_write(0x03, 0x10);
     es_write(0x04, 0x10);
     es_write(0x05, 0x00);
@@ -138,7 +147,7 @@ bool Audio::begin() {
     }
 
     i2s_pin_config_t pins = {};
-    pins.mck_io_num   = I2S_MCLK;
+    pins.mck_io_num   = I2S_MCLK;   // -1: kein MCLK ausgeben (3.5B)
     pins.bck_io_num   = I2S_BCLK;
     pins.ws_io_num    = I2S_LRCK;
     pins.data_out_num = I2S_DOUT;

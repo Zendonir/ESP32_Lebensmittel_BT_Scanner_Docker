@@ -130,8 +130,10 @@ cd firmware && pio run --target upload # flashen
   `getBondedAddress(0)` nach einem Scannerwechsel womöglich auf das alte Gerät.
 * Töne laufen über den **ES8311-Codec**, nicht über einen Piezo – das Board
   hat keinen. Dazu gehören die Spannungsschienen des AXP2101, die I2S-Takte
-  und die Endstufe am Expander (EXIO7). Auf der 3.5B ist die Belegung
-  ungeklärt (GPIO12 liegt dort am Display), deshalb `AUDIO_ENABLED 0`.
+  und die Endstufe am Expander (EXIO7). Auf der 3.5B läge MCLK auf GPIO44 –
+  das ist dort der Drucker. Der Codec taktet sich deshalb aus BCLK
+  (`I2S_MCLK -1`, Register 0x01/0x02 in `Audio.cpp`); GPIO44 nie als MCLK
+  ausgeben.
 * Umlaute auf dem Drucker gehen über `toCp1252()`; der Drucker kennt kein UTF-8.
 
 ## Bekannte Fallstricke
@@ -174,6 +176,7 @@ cd firmware && pio run --target upload # flashen
 | Messstreifen faellt in die Etikettenluecken | Ein Test je Etikett, jedes Stueck auf genau eine Teilung aufgefuellt (`calibration.build(stack_mm=…)`). Die Zeilenstrecke richtet sich nach der Etikettenhoehe, der Sollwert steht im Druck und in `anleitung()` |
 | Namenloser Drucker, kein Datenblatt | Nicht raten: `POST /api/labels/calibrate` druckt einen Messstreifen, der Zeilenabstand, Rastergeometrie, Rueckzug und Lueckensensor mit dem Lineal ablesbar macht (`services/calibration.py`) |
 | Umlaute tanzen in der Zeile | Hinting staucht Zeichen mit Aufsatz; `gen_gfx_font.py` zieht die Grundlinie nach |
+| "Kuhlschrank" statt "Kühlschrank" auf dem Terminal | Umlautpunkte waren in 16 px je ein Pixel. `gen_gfx_font.py` bringt sie auf 2x2 (`_punkte_verstaerken`) - Schriften nach einer Aenderung neu erzeugen |
 | Kamera-Scan geht am iPhone nicht | Safari hat kein `BarcodeDetector` (ZXing springt ein) **und** braucht HTTPS |
 | Terminal steht nach einem Netzausfall dauerhaft in der Einrichtung | Das selbsttaetig geoeffnete Portal schliesst sich wieder (`Net::stopPortal`); von Hand geoeffnet bleibt es offen |
 | Barcode falsch, mit Zeichen davor | `_buffer` wird auf jedem Trennpfad geleert - ein abgebrochener Code klebte sonst vorn am naechsten |

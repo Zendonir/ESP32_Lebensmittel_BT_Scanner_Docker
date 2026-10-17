@@ -76,22 +76,15 @@
 // AUDIO_ENABLED 0 schaltet den ganzen Zweig ab; die Firmware laeuft dann
 // unveraendert, nur eben stumm.
 #if defined(BOARD_WAVESHARE_35B)
-// Die 3.5B hat dieselben Bausteine (ES8311, AXP2101, TCA9554), nur ist ihre
-// I2S-Belegung nicht dokumentiert. Aus dem Handbuch laesst sich eingrenzen:
-// belegt sind 0 (BOOT), 1-5 (LCD QSPI), 6 (Beleuchtung), 7/8 (I2C),
-// 12 (LCD CS), 19/20 (USB), 26-37 (Flash und PSRAM), 43/44 (UART); auf der
-// Stiftleiste liegen 9, 10, 11, 17, 18, 21, 38-42 und 45-48. Uebrig bleiben
-// genau 13, 14, 15 und 16 - und das ist exakt die Belegung der 3.5
-// (BCLK 13, DIN 14, LRCK 15, DOUT 16).
+// Die 3.5B hat dieselben Bausteine (ES8311, AXP2101, TCA9554) und laut
+// Herstellerbeispiel (04_es8311_example) dieselbe I2S-Belegung wie die 3.5:
+// BCLK 13, LRCK 15, DOUT 16, DIN 14 - nur MCLK liegt auf GPIO44.
 //
-// Offen bleibt der Takt: auf der 3.5 ist MCLK GPIO12, das ist hier die
-// Auswahlleitung des Displays. Die 3.5B muss den Codec also ohne eigenen
-// MCLK betreiben (Takt aus SCLK), was eine andere Registerfolge braucht als
-// die portierte. Das laesst sich nicht erraten, deshalb bleibt es aus.
-//
-// Zum Freischalten fehlt genau eine Angabe aus dem Schaltplan: ob und an
-// welchem Pin MCLK liegt. Danach hier eintragen und AUDIO_ENABLED auf 1.
-#define AUDIO_ENABLED 0
+// GPIO44 ist hier aber der Drucker (PRINTER_TX). Der Codec bekommt deshalb
+// keinen eigenen MCLK, sondern leitet seinen Takt aus BCLK ab (I2S_MCLK -1,
+// ES8311-Register 0x01 Bit 7). Der MCLK-Eingang des Codecs ist dann
+// abgeschaltet; was der Drucker auf der Leitung sendet, stoert ihn nicht.
+#define AUDIO_ENABLED 1
 #define I2S_MCLK -1
 #define I2S_BCLK 13
 #define I2S_LRCK 15

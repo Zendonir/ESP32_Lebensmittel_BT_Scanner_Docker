@@ -23,6 +23,7 @@ Groesse dazukommt oder sich die Schriftart aendert.
 from __future__ import annotations
 
 import sys
+import unicodedata
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -47,6 +48,54 @@ def _render(font, char: str, advance: int, ascent: int, descent: int, size_px: i
     if mode == "L":
         canvas = canvas.point(lambda value: 255 if value >= 128 else 0)
     return canvas, canvas.getbbox(), pad
+
+
+def _punkte_verstaerken(char, canvas):
+    """Umlautpunkte auf mindestens 2x2 Pixel bringen.
+
+    In den kleinen Groessen rastert FreeType die Punkte von "ü" und "Ö" als je
+    ein einzelnes Pixel. Auf dem Panel ist das nicht mehr zu sehen - aus
+    "Kühlschrank" wurde fuer das Auge "Kuhlschrank". Gemeint ist nur der
+    Aufsatz: alles oberhalb der ersten Leerzeile der Glyphe.
+    """
+    zerlegt = unicodedata.normalize("NFD", char)
+    if len(zerlegt) != 2 or zerlegt[1] != "\u0308":
+        return
+    ink = canvas.getbbox()
+    if ink is None:
+        return
+    px = canvas.load()
+    breite, _ = canvas.size
+    # Der Aufsatz reicht bis zur ersten leeren Zeile. Gibt es keine (die
+    # Punkte kleben am Buchstaben), wird nichts angefasst - lieber kleine
+    # Punkte als ein verschmierter Buchstabe.
+    leer = next((y for y in range(ink[1], ink[3])
+                 if not any(px[x, y] for x in range(breite))), None)
+    if leer is None:
+        return
+    punkte = [(x, y) for y in range(leer) for x in range(breite) if px[x, y]]
+    neu = []
+    for x, y in punkte:
+        if px[x - 1, y] or px[x + 1, y]:
+            continue
+        # Zu schmal: nach aussen verbreitern, weg vom anderen Punkt - die
+        # Luecke dazwischen ist oft nur ein Pixel breit und darf nicht
+        # zulaufen, sonst wird aus zwei Punkten ein Strich.
+        if not px[x + 2, y]:
+            neu.append((x + 1, y))
+        elif not px[x - 2, y]:
+            neu.append((x - 1, y))
+    for x, y in neu:
+        px[x, y] = 255
+    punkte = [(x, y) for y in range(leer) for x in range(breite) if px[x, y]]
+    neu = []
+    for x, y in punkte:
+        if not px[x, y - 1] and not px[x, y + 1]:
+            # Zu flach: nach unten, solange die Leerzeile zum Buchstaben
+            # frei bleibt, sonst nach oben.
+            neu.append((x, y + 1) if y + 1 < leer else (x, y - 1))
+    for x, y in neu:
+        px[x, y] = 255
 
 
 def gen_font(ttf_path: str, size_px: int, font_name: str, output_path: str) -> None:
@@ -78,6 +127,9 @@ def gen_font(ttf_path: str, size_px: int, font_name: str, output_path: str) -> N
         # mit Hinting und trifft die Pixelkanten sauber - genau das ist der
         # Unterschied zwischen scharf und matschig.
         canvas, ink, pad = _render(font, char, advance, ascent, descent, size_px, "1")
+        if ink is not None:
+            _punkte_verstaerken(char, canvas)
+            ink = canvas.getbbox()
         if ink is None:                     # Leerzeichen: kein Pixel, nur Vorschub
             glyphs.append((offset, 0, 0, advance, 0, 0))
             continue
