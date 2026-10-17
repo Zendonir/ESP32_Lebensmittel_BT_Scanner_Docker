@@ -94,6 +94,7 @@ class TemplateIn(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     category: str = ""
     shelf_days: int = 7
+    haltbarkeit: dict | None = None   # Tage je Lagerart, None = unveraendert
     unit: str = ""
     brands: list[str] = Field(default_factory=list)
     use_sorten: bool = False
@@ -106,6 +107,7 @@ class TemplateOut(ORMModel):
     name: str
     category: str
     shelf_days: int
+    haltbarkeit: dict | None = None
     unit: str
     brands: list[str]
     use_sorten: bool

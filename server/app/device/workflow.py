@@ -1162,7 +1162,11 @@ async def _tap_tmpl_product(session, sess, item) -> None:
     draft.category = tpl.category
     draft.unit = tpl.unit
     draft.expiry_date = (await haltbarkeit.vorschlag(
-        session, ort=sess.location, kategorie=tpl.category, eigene_tage=tpl.shelf_days))["datum"]
+        session, ort=sess.location, kategorie=tpl.category,
+        # Alte Vorlagen kennen nur shelf_days; wer je Lagerart eingetragen
+        # hat, meint mit einer leeren Art "wie die Kategorie".
+        eigene_tage=0 if tpl.haltbarkeit else tpl.shelf_days,
+        vorlage=tpl.haltbarkeit))["datum"]
     draft.quantity = 1.0
 
     if tpl.brands:

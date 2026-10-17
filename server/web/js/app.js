@@ -428,7 +428,9 @@ async function loadTemplates() {
   state.templates = await get('/api/templates');
   $('#tpl-body').innerHTML = state.templates.map((t) => `<tr>
     <td class="name"><b>${esc(t.name)}</b></td>
-    <td>${esc(t.category)}</td><td>${t.shelf_days}</td><td>${esc(t.unit)}</td>
+    <td>${esc(t.category)}</td><td style="font-size:12px">${haltbarkeitText(
+      t.haltbarkeit && Object.keys(t.haltbarkeit).length ? t.haltbarkeit : (t.shelf_days ? { kuehl: t.shelf_days } : {}))}</td>
+    <td>${esc(t.unit)}</td>
     <td>${esc((t.brands || []).join(', '))}</td>
     <td>${esc((t.sorten || []).join(', '))}</td>
     <td class="right">
@@ -458,7 +460,9 @@ async function templateDialog(tpl) {
   const values = await modal(tpl ? `Vorlage ${tpl.name}` : 'Neue Vorlage', [
     { name: 'name', label: 'Name', value: tpl?.name || '' },
     { name: 'category', label: 'Kategorie', value: tpl?.category || '', options: state.categories.map((c) => c.name) },
-    { name: 'shelf_days', label: 'MHD-Tage', value: tpl?.shelf_days ?? 7, type: 'number' },
+    ...haltbarkeitFelder(tpl?.haltbarkeit && Object.keys(tpl.haltbarkeit).length
+      ? tpl.haltbarkeit : (tpl?.shelf_days ? { kuehl: tpl.shelf_days } : {})).map((f) => ({
+      ...f, label: `${f.label} – 0 = wie Kategorie` })),
     { name: 'unit', label: 'Einheit', value: tpl?.unit || '', options: ['', 'St.', 'g', 'kg', 'ml', 'l'] },
     { name: 'brands', label: 'Marken', type: 'tags', value: tpl?.brands || [], placeholder: 'Marke hinzufügen …' },
     { name: 'sorten', label: 'Sorten', type: 'tags', value: tpl?.sorten || [], placeholder: 'Sorte hinzufügen …' },
@@ -481,7 +485,7 @@ async function templateDialog(tpl) {
   const body = {
     name: values.name,
     category: values.category,
-    shelf_days: parseInt(values.shelf_days, 10) || 0,
+    haltbarkeit: haltbarkeitAus(values),
     unit: values.unit,
     brands: values.brands,
     sorten: values.sorten,

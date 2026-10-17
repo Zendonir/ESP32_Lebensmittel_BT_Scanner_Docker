@@ -7,7 +7,7 @@ entsteht der MHD-Vorschlag beim Einlagern - am Terminal, am Handy und in der
 Verwaltung derselbe, weil alle hier rechnen.
 
 Reihenfolge, was gilt:
-  1. Produkt, Lagerart passend          (Hackfleisch im Gefrierschrank: 90)
+  1. Produkt bzw. Vorlage, Lagerart passend   (Hackfleisch im Gefrierschrank: 90)
   2. eigene Tage von Produkt/Vorlage     - nur ausserhalb des Gefrierschranks:
                                            "7 Tage" meint gekuehlt, nicht gefroren
   3. Kategorie, Lagerart passend
@@ -85,12 +85,16 @@ async def vorschlag(
     kategorie: str = "",
     produkt: Product | None = None,
     eigene_tage: int = 0,
+    vorlage: dict | None = None,
 ) -> dict:
     """MHD-Vorschlag: {"tage", "datum", "quelle", "art"}. datum "" = keiner."""
     art = await art_von_ort(session, ort)
     tage, quelle = 0, ""
 
-    if produkt is not None and art:
+    if vorlage and art:
+        tage = int(vorlage.get(art) or 0)
+        quelle = f"Vorlage · {ARTEN[art]}" if tage else ""
+    if not tage and produkt is not None and art:
         tage = int((produkt.haltbarkeit or {}).get(art) or 0)
         quelle = "Produkt" if tage else ""
     if not tage and art != "tiefkuehl":

@@ -666,6 +666,15 @@ async function renderShopping() {
 // ------------------------------------------------------------------ Vorlagen
 // Dieselben Vorlagen wie in der Verwaltung und am Terminal - hier nur mit
 // grossen Flaechen, weil das am Telefon mit dem Daumen bedient wird.
+// "🏠 – · ❄️ 2 · 🧊 180" - leer heisst: wie die Kategorie.
+function haltKurz(t) {
+  const h = t.haltbarkeit && Object.keys(t.haltbarkeit).length
+    ? t.haltbarkeit : (t.shelf_days ? { kuehl: t.shelf_days } : {});
+  if (!Object.keys(h).length) return 'MHD wie Kategorie';
+  return [['raum', '🏠'], ['kuehl', '❄️'], ['tiefkuehl', '🧊']]
+    .map(([k, i]) => `${i} ${h[k] ? `${h[k]} T` : '–'}`).join(' · ');
+}
+
 async function renderTemplates() {
   const rows = await get('/api/templates');
   count.textContent = rows.length;
@@ -673,7 +682,7 @@ async function renderTemplates() {
     <button class="primary" id="tpl-new">+ Neue Vorlage</button>
     ${rows.map((t) => `<div class="swipe-inner">
       <div class="t">${esc(t.name)}</div>
-      <div class="s">${esc(t.category)} · ${t.shelf_days} Tage${t.unit ? ` · ${esc(t.unit)}` : ''}</div>
+      <div class="s">${esc(t.category)} · ${haltKurz(t)}${t.unit ? ` · ${esc(t.unit)}` : ''}</div>
       ${(t.brands || []).length ? `<div class="tag-list" style="margin-top:6px">${
         t.brands.map((b) => `<span class="tag">${esc(b)}</span>`).join('')}</div>` : ''}
       ${(t.sorten || []).length ? `<div class="tag-list" style="margin-top:4px">${
@@ -701,6 +710,12 @@ async function templateForm(tpl) {
   count.textContent = '';
 
   const option = (value, selected) => `<option ${value === selected ? 'selected' : ''}>${esc(value)}</option>`;
+  // Haltbarkeit je Lagerart. Alte Vorlagen hatten nur "MHD-Tage" - die
+  // gelten als Kuehlschrank-Wert, bis man es anders eintraegt.
+  const halt = [['raum', '🏠 Vorrat'], ['kuehl', '❄️ Kühlschrank'], ['tiefkuehl', '🧊 Gefrier']];
+  const tplHalt = tpl?.haltbarkeit && Object.keys(tpl.haltbarkeit).length
+    ? tpl.haltbarkeit : (tpl?.shelf_days ? { kuehl: tpl.shelf_days } : {});
+  const katHalt = (name) => categories.find((c) => c.name === name)?.haltbarkeit || {};
   view.innerHTML = `<form class="mform" id="tplform">
     <label class="field"><span>Name</span>
       <input name="name" value="${esc(tpl?.name || '')}" required autocomplete="off"></label>
@@ -708,8 +723,12 @@ async function templateForm(tpl) {
       <select name="category">${categories.map((c) => option(c.name, tpl?.category)).join('')}
         ${tpl && !categories.some((c) => c.name === tpl.category) ? option(tpl.category, tpl.category) : ''}
       </select></label>
-    <label class="field"><span>MHD-Tage</span>
-      <input name="shelf_days" type="number" inputmode="numeric" min="0" value="${tpl?.shelf_days ?? 7}"></label>
+    <div class="field"><span>Haltbarkeit in Tagen – leer = wie die Kategorie</span>
+      <div class="row" style="gap:8px;flex-wrap:nowrap">${halt.map(([k, label]) => `
+        <label style="flex:1;font-size:13px;color:var(--muted)">${label}
+          <input name="h_${k}" type="number" inputmode="numeric" min="0" style="width:100%"
+            value="${tplHalt[k] || ''}" placeholder="${katHalt(tpl?.category)[k] || '–'}"></label>`).join('')}
+      </div></div>
     <label class="field"><span>Einheit</span>
       <select name="unit">${units.map((u) => option(u, tpl?.unit || '')).join('')}</select></label>
     <div class="field"><span>Marken</span><div id="f-brands"></div></div>
@@ -719,6 +738,11 @@ async function templateForm(tpl) {
       <button class="primary" style="flex:1">Speichern</button>
     </div></form>`;
 
+  // Platzhalter zeigen, was die gewaehlte Kategorie vorgibt.
+  document.querySelector('#tplform [name="category"]').addEventListener('change', (ev) => {
+    const h = katHalt(ev.target.value);
+    halt.forEach(([k]) => { document.querySelector(`#tplform [name="h_${k}"]`).placeholder = h[k] || '–'; });
+  });
   const brands = tagEditor(document.getElementById('f-brands'), tpl?.brands || [], 'Marke hinzufügen …');
   const sorten = tagEditor(document.getElementById('f-sorten'), tpl?.sorten || [], 'Sorte hinzufügen …');
 
@@ -733,7 +757,7 @@ async function templateForm(tpl) {
     const body = {
       name: form.get('name').trim(),
       category: form.get('category'),
-      shelf_days: parseInt(form.get('shelf_days'), 10) || 0,
+      haltbarkeit: Object.fromEntries(halt.map(([k]) => [k, parseInt(form.get(`h_${k}`), 10) || 0])),
       unit: form.get('unit'),
       brands: brands.values(),
       sorten: sorten.values(),

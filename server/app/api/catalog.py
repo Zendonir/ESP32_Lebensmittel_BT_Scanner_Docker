@@ -177,7 +177,10 @@ async def list_templates(
 
 @router.post("/templates", response_model=TemplateOut, status_code=201)
 async def create_template(body: TemplateIn, session: AsyncSession = Depends(get_session)):
-    row = Template(**body.model_dump())
+    daten = body.model_dump(exclude_none=True)
+    daten["haltbarkeit"] = haltbarkeit.bereinigen(daten.get("haltbarkeit"))
+    row = Template(**daten)
+    _shelf_days_nachziehen(row)
     session.add(row)
     try:
         await session.commit()
@@ -188,6 +191,13 @@ async def create_template(body: TemplateIn, session: AsyncSession = Depends(get_
     return row
 
 
+def _shelf_days_nachziehen(row: Template) -> None:
+    """shelf_days fuer alte Anzeigen (Kachel am Terminal) aus der Haltbarkeit."""
+    h = row.haltbarkeit or {}
+    if h:
+        row.shelf_days = h.get("kuehl") or h.get("raum") or h.get("tiefkuehl") or 0
+
+
 @router.put("/templates/{tpl_id}", response_model=TemplateOut)
 async def update_template(
     tpl_id: int, body: TemplateIn, session: AsyncSession = Depends(get_session)
@@ -195,8 +205,9 @@ async def update_template(
     row = await session.get(Template, tpl_id)
     if row is None:
         raise HTTPException(404, "Vorlage unbekannt")
-    for key, value in body.model_dump().items():
-        setattr(row, key, value)
+    for key, value in body.model_dump(exclude_none=True).items():
+        setattr(row, key, haltbarkeit.bereinigen(value) if key == "haltbarkeit" else value)
+    _shelf_days_nachziehen(row)
     await session.commit()
     await hub.notify_ui("catalog")
     return row

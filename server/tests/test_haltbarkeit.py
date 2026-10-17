@@ -165,3 +165,32 @@ def test_ki_schema_beschraenkt_die_kategorie():
     assert schema["properties"]["kategorie"]["enum"] == ["Getränke", "Konserven"]
     assert schema["additionalProperties"] is False
     assert set(schema["properties"]["haltbarkeit"]["required"]) == set(haltbarkeit.ARTEN)
+
+
+def test_vorlage_mit_haltbarkeit_je_lagerart(client):
+    tag = uuid.uuid4().hex[:6]
+    r = client.post("/api/templates", json={"name": f"Hack {tag}", "category": "Fleisch & Fisch",
+                                            "haltbarkeit": {"kuehl": 1, "tiefkuehl": 120}})
+    assert r.status_code == 201, r.text
+    tpl = r.json()
+    assert tpl["haltbarkeit"] == {"kuehl": 1, "tiefkuehl": 120} and tpl["shelf_days"] == 1
+
+    async def frage(art):
+        async with session_scope() as session:
+            from app.models import Location
+            session.add(Location(name=f"{art}-{tag}", kind=art))
+            await session.flush()
+            v = await haltbarkeit.vorschlag(session, ort=f"{art}-{tag}", kategorie="Fleisch & Fisch",
+                                            vorlage=tpl["haltbarkeit"])
+            await session.rollback()
+            return v
+    tief, raum = _run(frage("tiefkuehl")), _run(frage("raum"))
+    assert tief["tage"] == 120 and tief["quelle"].startswith("Vorlage")
+    assert raum["tage"] == 0     # leer = wie die Kategorie, und Fleisch lagert nicht offen
+
+    # Ohne Feld bleibt die Haltbarkeit stehen (aelterer Browser).
+    r = client.put(f"/api/templates/{tpl['id']}", json={"name": tpl["name"], "category": "Fleisch & Fisch"})
+    assert r.json()["haltbarkeit"] == {"kuehl": 1, "tiefkuehl": 120}
+    r = client.put(f"/api/templates/{tpl['id']}", json={"name": tpl["name"], "category": "Fleisch & Fisch",
+                                                       "haltbarkeit": {"kuehl": 3}})
+    assert r.json()["haltbarkeit"] == {"kuehl": 3} and r.json()["shelf_days"] == 3

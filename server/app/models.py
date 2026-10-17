@@ -123,6 +123,9 @@ class Template(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255))
     category: Mapped[str] = mapped_column(String(100), default="")
     shelf_days: Mapped[int] = mapped_column(Integer, default=7)
+    # Wie bei Kategorie und Produkt: Tage je Lagerart. Geht shelf_days vor;
+    # fehlt eine Art, gilt die Kategorie (services/haltbarkeit.py).
+    haltbarkeit: Mapped[dict] = mapped_column(JSON, default=dict)
     unit: Mapped[str] = mapped_column(String(16), default="")
     brands: Mapped[list] = mapped_column(JSON, default=list)
     use_sorten: Mapped[bool] = mapped_column(Boolean, default=False)
