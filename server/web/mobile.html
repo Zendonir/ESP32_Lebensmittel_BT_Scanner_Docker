@@ -30,6 +30,12 @@
     }
 
     .list { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+    .kacheln { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 12px; }
+    .kachel { text-align: left; padding: 16px 14px; min-height: 84px; border-radius: 14px;
+      background: var(--surface); border: 1px solid var(--border); border-left: 6px solid var(--farbe);
+      display: flex; flex-direction: column; gap: 4px; color: var(--text); font: inherit; }
+    .kachel b { font-size: 16px; }
+    .kachel span { font-size: 12px; color: var(--muted); }
 
     /* Wischen zum Auslagern: die sichtbare Karte liegt ueber dem Aktionsfeld
        und wird nach links geschoben. Ohne eigenen Stacking-Kontext scheint der
@@ -99,7 +105,7 @@
   <button data-view="inv" class="active"><span class="ico">📦</span>Inventar</button>
   <button data-view="exp"><span class="ico">⏰</span>Ablaufend</button>
   <button data-view="scan"><span class="ico">📷</span>Scan</button>
-  <button data-view="shop"><span class="ico">🛒</span>Einkauf</button>
+  <button data-view="ein"><span class="ico">📥</span>Einlagern</button>
   <button data-view="tpl"><span class="ico">📋</span>Vorlagen</button>
 </nav>
 
@@ -116,7 +122,7 @@ const title = document.getElementById('m-title');
 const count = document.getElementById('m-count');
 let current = 'inv';
 
-const TITLES = { inv: 'Inventar', exp: 'Ablaufend', scan: 'Scannen', shop: 'Einkauf', tpl: 'Vorlagen' };
+const TITLES = { inv: 'Inventar', exp: 'Ablaufend', scan: 'Scannen', ein: 'Einlagern', tpl: 'Vorlagen' };
 
 document.getElementById('m-nav').addEventListener('click', (ev) => {
   const btn = ev.target.closest('button[data-view]');
@@ -134,7 +140,7 @@ async function render() {
     else if (current === 'exp') await renderList('/api/inventory?expiring=true&limit=200');
     else if (current === 'scan') renderScan();
     else if (current === 'tpl') await renderTemplates();
-    else await renderShopping();
+    else await renderEinlagern();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -452,7 +458,11 @@ function plusTage(tage) {
   const d = new Date(); d.setDate(d.getDate() + tage);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-async function einlagernFormular(code, produkt) {
+// `vorlage`: Einlagern ohne Barcode ueber eine Vorlage (Marken, Sorten,
+// Einheit, Haltbarkeit von dort). `danach`: wohin es nach dem Speichern oder
+// Abbrechen geht - Standard ist zurueck zum Scannen.
+async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
+  const zurueck = danach || (() => renderScan());
   stopCamera();
   const [kategorien, orte, terminals, kiStatus] = await Promise.all([
     get('/api/categories'), get('/api/locations'), get('/api/labels/terminals').catch(() => []),
@@ -462,24 +472,31 @@ async function einlagernFormular(code, produkt) {
   if (!orte.some((o) => o.name === ort)) ort = (orte.find((o) => o.is_default) || orte[0] || {}).name || '';
   const p = produkt || {};
   const opt = (liste, wert) => liste.map((n) => `<option ${n === wert ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  // Sorten der Vorlage, sonst die der Kategorie (Fleisch: Schwein, ...).
+  const vorlageSorten = vorlage ? ((vorlage.sorten || []).length ? vorlage.sorten
+    : (kategorien.find((k) => k.name === vorlage.category)?.subcategories || [])) : [];
   const mhdKnoepfe = [['+3 T', 3], ['+1 W', 7], ['+2 W', 14], ['+1 M', 30], ['+3 M', 90], ['+6 M', 180], ['+1 J', 365]];
 
   view.innerHTML = `<form class="card" id="einlagern" style="display:grid;gap:12px">
-    <div>
+    ${code ? `<div>
       <div class="muted" style="font-size:13px">Erkannt</div>
       <div class="mono" style="font-size:20px;letter-spacing:.03em">${esc(code)}</div>
       ${produkt ? '' : '<div class="muted" style="margin-top:4px">Produkt unbekannt – bitte Namen eingeben.</div>'}
-    </div>
+    </div>` : `<div class="muted" style="font-size:13px">${vorlage ? `Vorlage <b>${esc(vorlage.name)}</b>` : 'Ohne Vorlage'}
+      · ${esc(p.category || '')}</div>`}
     <label class="field">Name<input name="name" value="${esc(p.name || '')}" required ${p.name ? '' : 'autofocus'}></label>
-    ${kiStatus.aktiv ? `<div class="row" style="gap:8px;margin-top:-4px">
+    ${kiStatus.aktiv && !vorlage ? `<div class="row" style="gap:8px;margin-top:-4px">
       <button type="button" class="sm" id="ki-knopf">✨ KI-Vorschlag</button>
       <span class="muted" id="ki-text" style="font-size:13px;flex:1"></span></div>` : ''}
-    <label class="field">Marke<input name="brand" value="${esc(p.brand || '')}"></label>
+    <label class="field">Marke<input name="brand" list="marken" value="${esc(p.brand || '')}">
+      <datalist id="marken">${(vorlage?.brands || []).map((m) => `<option value="${esc(m)}">`).join('')}</datalist></label>
     <div class="row" style="gap:10px">
       <label class="field" style="flex:1">Kategorie<select name="category"><option value=""></option>${
         opt(kategorien.map((k) => k.name), p.category || '')}</select></label>
-      <label class="field" style="flex:1">Sorte<input name="subcategory" list="sorten" value="${esc(p.subcategory || '')}">
-        <datalist id="sorten"></datalist></label>
+      ${vorlage?.use_sorten ? `<label class="field" style="flex:1">Was ist es?<select name="subcategory" required>
+        <option value="">bitte wählen</option>${opt(vorlageSorten, '')}</select></label>`
+    : `<label class="field" style="flex:1">Sorte<input name="subcategory" list="sorten" value="${esc(p.subcategory || '')}">
+        <datalist id="sorten"></datalist></label>`}
     </div>
     <label class="field">MHD<input name="expiry_date" type="date" value="${esc(p.expiry_date || '')}">
       <span class="muted" id="mhd-quelle" style="font-size:12px"></span></label>
@@ -513,8 +530,10 @@ async function einlagernFormular(code, produkt) {
 
   const form = document.getElementById('einlagern');
   const sorten = () => {
+    const liste = document.getElementById('sorten');
+    if (!liste) return;              // Vorlage mit fester Sortenauswahl
     const k = kategorien.find((x) => x.name === form.category.value);
-    document.getElementById('sorten').innerHTML = (k?.subcategories || [])
+    liste.innerHTML = (k?.subcategories || [])
       .map((s) => `<option value="${esc(s)}">`).join('');
   };
   sorten();
@@ -536,7 +555,8 @@ async function einlagernFormular(code, produkt) {
     }
     try {
       const v = await get(`/api/haltbarkeit/vorschlag?ort=${encodeURIComponent(form.location.value)}`
-        + `&kategorie=${encodeURIComponent(form.category.value)}&barcode=${encodeURIComponent(code)}`);
+        + `&kategorie=${encodeURIComponent(form.category.value)}&barcode=${encodeURIComponent(code)}`
+        + (vorlage ? `&vorlage=${vorlage.id}` : ''));
       if (mhdVonHand) return;
       form.expiry_date.value = v.datum || '';
       quelle.textContent = v.datum ? `Vorschlag: ${v.quelle} · ${v.tage} Tage`
@@ -581,7 +601,8 @@ async function einlagernFormular(code, produkt) {
   form.querySelectorAll('[data-anzahl]').forEach((b) => b.addEventListener('click', () => {
     form.count.value = Math.min(20, Math.max(1, (+form.count.value || 1) + +b.dataset.anzahl));
   }));
-  document.getElementById('abbrechen').addEventListener('click', () => renderScan());
+  document.getElementById('abbrechen').addEventListener('click', () => zurueck());
+  if (vorlage?.unit) form.unit.value = vorlage.unit;
 
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
@@ -611,7 +632,7 @@ async function einlagernFormular(code, produkt) {
       toast(`${body.name} eingelagert · ${nummern}${body.print ? (r.printed ? ' · druckt' : ' · Druck wartet') : ''}`,
         'success');
       navigator.vibrate?.([40, 60, 40]);
-      renderScan();
+      zurueck();
     } catch (e) {
       knopf.disabled = false;
       // Inzwischen ist ein zweites Terminal dazugekommen: jetzt fragen.
@@ -630,36 +651,38 @@ async function einlagernFormular(code, produkt) {
   });
 }
 
-// -------------------------------------------------------------------- Einkauf
-async function renderShopping() {
-  const rows = await get('/api/shopping');
-  count.textContent = rows.filter((r) => !r.done).length;
+// ----------------------------------------------------------------- Einlagern
+// Ohne Barcode einlagern, wie "Kategorie" am Terminal: Kategorie, dann
+// Vorlage, dann dieselbe Maske wie nach einem Kamera-Scan. Die Einkaufsliste
+// stand vorher hier und wurde nicht gebraucht.
+async function renderEinlagern(kategorie = null) {
+  count.textContent = '';
+  title.textContent = kategorie || TITLES.ein;
+  const [kategorien, vorlagen] = await Promise.all([get('/api/categories'), get('/api/templates')]);
+  if (!kategorie) {
+    view.innerHTML = `<div class="kacheln">${kategorien.map((k) => {
+      const n = vorlagen.filter((t) => t.category === k.name).length;
+      return `<button class="kachel" data-kat="${esc(k.name)}" style="--farbe:${esc(k.color)}">
+        <b>${esc(k.name)}</b><span>${n ? `${n} Vorlage${n === 1 ? '' : 'n'}` : 'frei eingeben'}</span></button>`;
+    }).join('')}</div>`;
+    view.querySelectorAll('[data-kat]').forEach((b) => b.addEventListener('click', () => renderEinlagern(b.dataset.kat)));
+    return;
+  }
+  const passend = vorlagen.filter((t) => t.category === kategorie);
   view.innerHTML = `<div class="list">
-    <form class="row" id="add"><input name="name" placeholder="Was fehlt?" style="flex:1" required>
-      <button class="primary">+</button></form>
-    ${rows.map((s) => `<div class="swipe-inner" style="display:flex;gap:10px;align-items:center">
-      <input type="checkbox" data-done="${s.id}" ${s.done ? 'checked' : ''}>
-      <span style="flex:1;${s.done ? 'text-decoration:line-through;opacity:.55' : ''}">${esc(s.name)}
-        <span class="muted">${s.quantity} ${esc(s.unit)}</span></span>
-      <button class="sm danger" data-del="${s.id}">×</button></div>`).join('')}
+    ${passend.map((t) => `<button class="swipe-inner" data-tpl="${t.id}" style="text-align:left;width:100%">
+      <div class="t">${esc(t.name)}</div>
+      <div class="s">${haltKurz(t)}${t.use_sorten ? ' · fragt nach Sorte' : ''}${t.unit ? ` · ${esc(t.unit)}` : ''}</div>
+    </button>`).join('')}
+    <button class="swipe-inner" data-tpl="" style="text-align:left;width:100%">
+      <div class="t">Ohne Vorlage</div><div class="s">Name selbst eingeben</div></button>
+    <button class="ghost" id="ein-zurueck" style="margin-top:6px">← Kategorien</button>
   </div>`;
-
-  document.getElementById('add').addEventListener('submit', async (ev) => {
-    ev.preventDefault();
-    const name = new FormData(ev.target).get('name');
-    await post('/api/shopping', { name, quantity: 1, unit: '', note: '', done: false });
-    renderShopping();
-  });
-
-  view.querySelectorAll('[data-done]').forEach((cb) => cb.addEventListener('change', async () => {
-    const item = rows.find((r) => r.id === +cb.dataset.done);
-    await put(`/api/shopping/${item.id}`, { ...item, done: cb.checked });
-    renderShopping();
-  }));
-
-  view.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-    await del(`/api/shopping/${b.dataset.del}`);
-    renderShopping();
+  document.getElementById('ein-zurueck').addEventListener('click', () => renderEinlagern());
+  view.querySelectorAll('[data-tpl]').forEach((b) => b.addEventListener('click', () => {
+    const tpl = passend.find((t) => String(t.id) === b.dataset.tpl) || null;
+    einlagernFormular('', { category: kategorie, name: tpl?.name || '' }, tpl,
+      () => renderEinlagern(kategorie));
   }));
 }
 
@@ -790,7 +813,6 @@ liveConnect((msg) => {
   // Bei der Liste nur die Eintraege auffrischen - ein kompletter Neuaufbau
   // naehme dem Suchfeld mitten im Tippen den Fokus.
   if (msg.event === 'inventory' && (current === 'inv' || current === 'exp')) fillList().catch(() => {});
-  else if (msg.event === 'shopping' && current === 'shop') render();
 }, () => {});
 
 render();

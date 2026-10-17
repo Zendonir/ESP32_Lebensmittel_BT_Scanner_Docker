@@ -194,3 +194,12 @@ def test_vorlage_mit_haltbarkeit_je_lagerart(client):
     r = client.put(f"/api/templates/{tpl['id']}", json={"name": tpl["name"], "category": "Fleisch & Fisch",
                                                        "haltbarkeit": {"kuehl": 3}})
     assert r.json()["haltbarkeit"] == {"kuehl": 3} and r.json()["shelf_days"] == 3
+
+
+def test_vorschlag_mit_vorlage_ueber_die_api(client):
+    tag = uuid.uuid4().hex[:6]
+    tpl = client.post("/api/templates", json={"name": f"Gulasch {tag}", "category": "Fleisch & Fisch",
+                                              "haltbarkeit": {"tiefkuehl": 120}}).json()
+    _ort(client, f"T-{tag}", "tiefkuehl")
+    v = client.get("/api/haltbarkeit/vorschlag", params={"ort": f"T-{tag}", "vorlage": tpl["id"]}).json()
+    assert v["tage"] == 120 and v["quelle"].startswith("Vorlage")

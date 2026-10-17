@@ -1198,7 +1198,7 @@ async def _tap_tmpl_product(session, sess, item) -> None:
         # Alte Vorlagen kennen nur shelf_days; wer je Lagerart eingetragen
         # hat, meint mit einer leeren Art "wie die Kategorie".
         eigene_tage=0 if tpl.haltbarkeit else tpl.shelf_days,
-        vorlage=tpl.haltbarkeit))["datum"]
+        vorlage=tpl.haltbarkeit, herkunft="Vorlage"))["datum"]
     draft.quantity = 1.0
 
     if tpl.brands:

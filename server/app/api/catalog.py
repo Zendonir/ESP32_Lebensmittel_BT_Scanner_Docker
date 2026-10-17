@@ -263,9 +263,17 @@ async def lagerarten():
 
 @router.get("/haltbarkeit/vorschlag")
 async def mhd_vorschlag(ort: str = "", kategorie: str = "", barcode: str = "",
+                        vorlage: int | None = None,
                         session: AsyncSession = Depends(get_session)):
-    """MHD-Vorschlag fuer Ort + Kategorie (+ Produkt) - dieselbe Rechnung wie am Terminal."""
+    """MHD-Vorschlag fuer Ort + Kategorie (+ Produkt oder Vorlage) - dieselbe
+    Rechnung wie am Terminal."""
     produkt = await inv.product_for_barcode(session, barcode) if barcode else None
+    tpl = await session.get(Template, vorlage) if vorlage else None
+    if tpl is not None:
+        return await haltbarkeit.vorschlag(
+            session, ort=ort, kategorie=kategorie or tpl.category,
+            eigene_tage=0 if tpl.haltbarkeit else tpl.shelf_days, vorlage=tpl.haltbarkeit,
+            herkunft="Vorlage")
     return await haltbarkeit.vorschlag(session, ort=ort, kategorie=kategorie, produkt=produkt)
 
 

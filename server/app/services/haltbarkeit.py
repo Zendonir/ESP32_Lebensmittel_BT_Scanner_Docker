@@ -86,6 +86,7 @@ async def vorschlag(
     produkt: Product | None = None,
     eigene_tage: int = 0,
     vorlage: dict | None = None,
+    herkunft: str = "Produkt",       # wie die eigenen Tage heissen: Produkt/Vorlage
 ) -> dict:
     """MHD-Vorschlag: {"tage", "datum", "quelle", "art"}. datum "" = keiner."""
     art = await art_von_ort(session, ort)
@@ -99,7 +100,7 @@ async def vorschlag(
         quelle = "Produkt" if tage else ""
     if not tage and art != "tiefkuehl":
         tage = int(eigene_tage or (produkt.default_shelf_days if produkt else 0) or 0)
-        quelle = "Produkt" if tage else ""
+        quelle = herkunft if tage else ""
     if not tage and kategorie and art:
         row = (await session.execute(
             select(Category).where(Category.name == kategorie))).scalar_one_or_none()
