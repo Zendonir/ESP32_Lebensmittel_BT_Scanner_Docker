@@ -732,7 +732,10 @@ async function templateForm(tpl) {
     <label class="field"><span>Einheit</span>
       <select name="unit">${units.map((u) => option(u, tpl?.unit || '')).join('')}</select></label>
     <div class="field"><span>Marken</span><div id="f-brands"></div></div>
-    <div class="field"><span>Sorten</span><div id="f-sorten"></div></div>
+    <label class="row tight" style="font-size:16px"><input type="checkbox" name="use_sorten"
+      ${tpl?.use_sorten ? 'checked' : ''}> Sorte beim Einlagern abfragen (z. B. Fleischsorte)</label>
+    <div class="field" id="f-sorten-feld" ${tpl?.use_sorten ? '' : 'hidden'}><span>Sorten zur Auswahl –
+      steht danach auf dem Etikett: „${esc(tpl?.name || 'Filet')} - Schwein“</span><div id="f-sorten"></div></div>
     <div class="row">
       <button type="button" class="ghost" id="tpl-cancel" style="flex:1">Abbrechen</button>
       <button class="primary" style="flex:1">Speichern</button>
@@ -745,6 +748,15 @@ async function templateForm(tpl) {
   });
   const brands = tagEditor(document.getElementById('f-brands'), tpl?.brands || [], 'Marke hinzufügen …');
   const sorten = tagEditor(document.getElementById('f-sorten'), tpl?.sorten || [], 'Sorte hinzufügen …');
+  // Haken gesetzt: Sortenliste zeigen und, wenn leer, mit denen der
+  // Kategorie fuellen (Fleisch: Schwein, Geflügel, Rind, …).
+  const sortenFeld = document.getElementById('f-sorten-feld');
+  const sortenHaken = document.querySelector('#tplform [name="use_sorten"]');
+  sortenHaken.addEventListener('change', () => {
+    sortenFeld.hidden = !sortenHaken.checked;
+    const kat = categories.find((c) => c.name === document.querySelector('#tplform [name="category"]').value);
+    if (sortenHaken.checked && sorten.isEmpty() && kat?.subcategories?.length) sorten.set(kat.subcategories);
+  });
 
   document.getElementById('tpl-cancel').addEventListener('click', () => {
     title.textContent = TITLES.tpl;
@@ -761,7 +773,7 @@ async function templateForm(tpl) {
       unit: form.get('unit'),
       brands: brands.values(),
       sorten: sorten.values(),
-      use_sorten: sorten.values().length > 0,
+      use_sorten: form.get('use_sorten') === 'on',
       sort_order: tpl?.sort_order ?? 0,
     };
     try {

@@ -465,7 +465,9 @@ async function templateDialog(tpl) {
       ...f, label: `${f.label} – 0 = wie Kategorie` })),
     { name: 'unit', label: 'Einheit', value: tpl?.unit || '', options: ['', 'St.', 'g', 'kg', 'ml', 'l'] },
     { name: 'brands', label: 'Marken', type: 'tags', value: tpl?.brands || [], placeholder: 'Marke hinzufügen …' },
-    { name: 'sorten', label: 'Sorten', type: 'tags', value: tpl?.sorten || [], placeholder: 'Sorte hinzufügen …' },
+    { name: 'use_sorten', label: 'Sorte beim Einlagern abfragen (z. B. Fleischsorte) – steht dann auf dem Etikett: „Filet - Schwein“',
+      value: tpl ? tpl.use_sorten : false, type: 'checkbox' },
+    { name: 'sorten', label: 'Sorten zur Auswahl', type: 'tags', value: tpl?.sorten || [], placeholder: 'Sorte hinzufügen …' },
   ], (body, editors) => {
     // Hat die Kategorie feste Sorten (Fleisch & Fisch: Schwein, Geflügel, …),
     // werden sie angeboten, solange die Vorlage noch keine eigenen hat. Wer
@@ -489,7 +491,7 @@ async function templateDialog(tpl) {
     unit: values.unit,
     brands: values.brands,
     sorten: values.sorten,
-    use_sorten: values.sorten.length > 0,
+    use_sorten: !!values.use_sorten,
     sort_order: tpl?.sort_order ?? 0,
   };
   if (tpl) await put(`/api/templates/${tpl.id}`, body);

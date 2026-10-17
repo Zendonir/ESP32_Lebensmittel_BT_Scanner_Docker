@@ -65,7 +65,13 @@ def _after_product(sess: "DeviceSession") -> str:
     Hat die Kategorie Unterkategorien und ist noch keine gesetzt, wird sie
     zuerst erfragt - sie gehoert auf das Etikett ("Filet - Schwein") und laesst
     sich hinterher nur muehsam nachtragen.
+
+    Nicht bei Vorlagen: dort entscheidet der Haken "Sorte abfragen" an der
+    Vorlage (use_sorten), und der ist schon abgearbeitet. Vorher fragte jede
+    Fleisch-Vorlage ohne Sortenliste trotzdem nach - auch "Aufschnitt".
     """
+    if sess.draft.template_id:
+        return ENTER_DATE
     if cat.subcategories_for(sess.draft.category) and not sess.draft.subcategory:
         return SUBCATEGORY
     return ENTER_DATE
@@ -630,15 +636,16 @@ async def _screen_tmpl_brand(session, sess, sid, status) -> dict:
 
 async def _screen_tmpl_sorte(session, sess, sid, status) -> dict:
     tpl = await session.get(Template, sess.draft.template_id)
-    sorten = list(tpl.sorten or []) if tpl else []
+    # Ohne eigene Liste die der Kategorie (Fleisch: Schwein, Gefluegel, ...).
+    sorten = (list(tpl.sorten or []) or list(cat.subcategories_for(tpl.category))) if tpl else []
     items = [{"id": f"sorte:{s}", "label": s, "color": "#4c9eff"} for s in sorten]
     items.append({"id": "sorte:", "label": "Ohne Sorte", "color": "#1c222a"})
     return proto.screen(
         screen_id=sid,
         kind="list",
-        title="Sorte",
-        subtitle=sess.draft.name,
-        lines=["Neue Sorten im Web-Interface anlegen"],
+        title="Was ist es?",
+        subtitle=f"{sess.draft.name} - die Sorte steht danach auf dem Etikett",
+        lines=["Sorten an der Vorlage im Web-Interface"],
         items=items,
         status=status,
     )
