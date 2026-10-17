@@ -13,6 +13,7 @@ from app.device import workflow
 from app.device.hub import hub
 from app.main import app
 from app.services import labels
+from app.services.dates import shift_iso
 
 
 @pytest.fixture(scope="module")
@@ -52,7 +53,7 @@ def test_mit_haken_wird_die_sorte_gefragt_und_gedruckt(client, monkeypatch):
             return frage, sess.current, sess.draft.subcategory
     frage, danach, sorte = _run(ablauf())
     assert [i["label"] for i in frage["items"]][:5] == ["Schwein", "Geflügel", "Rind", "Kalb", "Lamm"]
-    assert sorte == "Schwein" and danach == workflow.ENTER_DATE   # nicht noch einmal fragen
+    assert sorte == "Schwein" and danach == workflow.ENTER_QTY    # nicht noch einmal fragen, kein MHD
 
     titel = labels._title({"name": f"Filet {tag}", "subcategory": "Schwein"})
     assert titel == f"Filet {tag} - Schwein"
@@ -75,5 +76,37 @@ def test_ohne_haken_wird_nicht_gefragt(client, monkeypatch):
             sess.draft = workflow.Draft()
             await workflow.on_tap(session, sess, f"tpl:{tpl}")
             return sess.current
-    assert _run(ablauf()) == workflow.ENTER_DATE
+    assert _run(ablauf()) == workflow.ENTER_QTY
     workflow.drop_session(f"ohne-{tag}")
+
+
+def test_vorlage_fragt_kein_mhd_sondern_nimmt_den_ort(client, monkeypatch):
+    async def senden(device_id, msg):
+        return None
+    monkeypatch.setattr(hub, "send_to", senden)
+
+    tag = uuid.uuid4().hex[:6]
+    tpl = client.post("/api/templates", json={"name": f"Hack {tag}", "category": "Fleisch & Fisch",
+                                              "haltbarkeit": {"kuehl": 2, "tiefkuehl": 90}}).json()["id"]
+    for name, art in ((f"Kühl {tag}", "kuehl"), (f"Truhe {tag}", "tiefkuehl")):
+        assert client.post("/api/locations", json={"name": name, "kind": art}).status_code == 201
+    sess = workflow.session_for(f"mhd-{tag}")
+
+    async def ablauf():
+        async with session_scope() as session:
+            sess.stack = [workflow.HOME, workflow.TMPL_PRODUCT]
+            sess.draft = workflow.Draft()
+            # Ohne Ort wird zuerst der Ort gefragt, danach geht es weiter.
+            await workflow.on_tap(session, sess, f"tpl:{tpl}")
+            gefragt = sess.current
+            await workflow.on_tap(session, sess, f"loc:Kühl {tag}")
+            kuehl = sess.current, sess.draft.expiry_date
+            # Ort unterwegs gewechselt: beim Speichern zaehlt der neue.
+            sess.location = f"Truhe {tag}"
+            await workflow.on_tap(session, sess, "ok")
+            return gefragt, kuehl, sess.current, sess.draft.expiry_date
+    gefragt, (danach, mhd_kuehl), ende, mhd_truhe = _run(ablauf())
+    assert gefragt == workflow.LOCATIONS
+    assert danach == workflow.ENTER_QTY and mhd_kuehl == shift_iso(2)
+    assert ende == workflow.RESULT and mhd_truhe == shift_iso(90)
+    workflow.drop_session(f"mhd-{tag}")

@@ -434,12 +434,10 @@ def test_geraeteworkflow_ohne_hardware(client):
             tpl_id = screen["items"][0]["id"]
             await workflow.on_tap(session, sess, tpl_id)
 
-            # Gebaeck hat keine Einheit und keine Marken -> direkt zum Datum
-            assert sess.current == workflow.ENTER_DATE
-            assert sess.draft.expiry_date  # aus shelf_days vorbelegt
-
-            await workflow.on_tap(session, sess, "ok")
+            # Gebaeck hat keine Einheit und keine Marken -> direkt zur Anzahl,
+            # das MHD kommt aus der Vorlage und wird nicht gefragt
             assert sess.current == workflow.ENTER_QTY
+            assert sess.draft.expiry_date
 
             await workflow.on_input(session, sess, 2)
             assert sess.draft.count == 2

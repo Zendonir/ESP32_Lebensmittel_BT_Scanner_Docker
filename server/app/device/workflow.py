@@ -69,9 +69,12 @@ def _after_product(sess: "DeviceSession") -> str:
     Nicht bei Vorlagen: dort entscheidet der Haken "Sorte abfragen" an der
     Vorlage (use_sorten), und der ist schon abgearbeitet. Vorher fragte jede
     Fleisch-Vorlage ohne Sortenliste trotzdem nach - auch "Aufschnitt".
+
+    Bei Vorlagen wird auch kein MHD gefragt: das ergibt sich aus der
+    Haltbarkeit der Vorlage fuer die Lagerart des Orts (`_vorlage_mhd`).
     """
     if sess.draft.template_id:
-        return ENTER_DATE
+        return ENTER_QTY
     if cat.subcategories_for(sess.draft.category) and not sess.draft.subcategory:
         return SUBCATEGORY
     return ENTER_DATE
@@ -1134,6 +1137,8 @@ async def _tap_locations(session, sess, item) -> None:
     weiter, sess.pending = sess.pending, ""
     if weiter.startswith("scan:"):
         await _scan_barcode(session, sess, weiter[5:])
+    elif weiter.startswith("tpl:"):
+        await _tap_tmpl_product(session, sess, weiter)
     elif weiter == "store":
         await _save_draft(session, sess)
 
@@ -1188,17 +1193,17 @@ async def _tap_tmpl_product(session, sess, item) -> None:
     tpl = await session.get(Template, int(item[4:]))
     if tpl is None:
         return
+    # Das MHD haengt am Ort - also erst den Ort, dann alles andere.
+    await expire_location(session, sess)
+    if not sess.location:
+        await ort_erfragen(session, sess, item)
+        return
     draft = sess.draft
     draft.template_id = tpl.id
     draft.name = tpl.name
     draft.category = tpl.category
     draft.unit = tpl.unit
-    draft.expiry_date = (await haltbarkeit.vorschlag(
-        session, ort=sess.location, kategorie=tpl.category,
-        # Alte Vorlagen kennen nur shelf_days; wer je Lagerart eingetragen
-        # hat, meint mit einer leeren Art "wie die Kategorie".
-        eigene_tage=0 if tpl.haltbarkeit else tpl.shelf_days,
-        vorlage=tpl.haltbarkeit, herkunft="Vorlage"))["datum"]
+    await _vorlage_mhd(session, sess, tpl)
     draft.quantity = 1.0
 
     if tpl.brands:
@@ -1207,6 +1212,25 @@ async def _tap_tmpl_product(session, sess, item) -> None:
         sess.push(TMPL_SORTE)
     else:
         sess.push(TMPL_AMOUNT if tpl.unit else _after_product(sess))
+
+
+async def _vorlage_mhd(session: AsyncSession, sess: DeviceSession, tpl: Template | None = None) -> None:
+    """MHD einer Vorlage aus der Lagerart des aktuellen Orts.
+
+    Gefragt wird es bei Vorlagen nicht - "Hack" im Gefrierschrank haelt eben
+    anders als im Kuehlschrank, und genau das steht an der Vorlage.
+    """
+    draft = sess.draft
+    if tpl is None:
+        tpl = await session.get(Template, draft.template_id)
+    if tpl is None:
+        return
+    draft.expiry_date = (await haltbarkeit.vorschlag(
+        session, ort=sess.location, kategorie=tpl.category,
+        # Alte Vorlagen kennen nur shelf_days; wer je Lagerart eingetragen
+        # hat, meint mit einer leeren Art "wie die Kategorie".
+        eigene_tage=0 if tpl.haltbarkeit else tpl.shelf_days,
+        vorlage=tpl.haltbarkeit, herkunft="Vorlage"))["datum"]
 
 
 async def _tap_tmpl_brand(session, sess, item) -> None:
@@ -1270,6 +1294,9 @@ async def _save_draft(session: AsyncSession, sess: DeviceSession) -> None:
         return
     sess.erfasst()
     draft = sess.draft
+    if draft.template_id:
+        # Ort kann sich unterwegs geaendert haben (Statusleiste, Ablauf).
+        await _vorlage_mhd(session, sess)
     # Ohne Fuellmenge ist jedes Etikett genau ein Artikel; mit Einheit ist die
     # Menge die Fuellmenge und die Etikettenzahl davon unabhaengig.
     quantity = draft.quantity if draft.unit else 1.0
