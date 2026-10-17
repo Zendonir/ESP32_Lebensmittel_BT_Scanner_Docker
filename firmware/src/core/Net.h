@@ -21,6 +21,15 @@ public:
     bool wifiConnected() const;
     bool serverConnected() const { return _wsConnected; }
     bool portalActive() const { return _portalActive; }
+    // Selbsttaetig (nach langem Ausfall) geoeffnet - laeuft nebenher, das
+    // Geraet bleibt bedienbar. Von Hand geoeffnet uebernimmt es den Schirm.
+    bool portalAuto() const { return _portalAuto; }
+
+    // Jemand bedient gerade das Geraet. Solange keine Serververbindung
+    // besteht, wird dann nicht neu verbunden: ein vergeblicher TCP-Aufbau
+    // blockiert bis zu WEBSOCKETS_TCP_TIMEOUT, und genau das fuehlte sich als
+    // "Geraet haengt" an.
+    void noteUserActivity() { _lastUserMs = millis(); }
 
     // Einrichtungsportal von Hand oeffnen (System-Panel, "WLAN einrichten"),
     // ohne auf BOOT-beim-Start oder einen anhaltenden Ausfall zu warten.
@@ -61,6 +70,8 @@ private:
     volatile bool _closePortal = false;
 
     uint32_t _lastWifiTry = 0;
+    uint32_t _lastUserMs  = 0;
+    uint8_t  _failCount   = 0;     // vergebliche Verbindungsversuche in Folge
 
     // Gestufte Wiederherstellung bei anhaltendem Ausfall - siehe config.h.
     uint32_t _disconnectedSince = 0;   // 0 = gerade verbunden

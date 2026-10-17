@@ -203,6 +203,8 @@ void Net::handleSocketEvent(uint8_t type, uint8_t *payload, size_t length) {
     switch (type) {
         case WStype_CONNECTED:
             _wsConnected = true;
+            _failCount = 0;
+            ws.setReconnectInterval(WS_RECONNECT_MS);
             _disconnectedSince = 0;   // Ausfall vorbei - naechster faengt wieder bei 0 an
             _nextSdRetryMs = 0;
             // Der Ausfall, der das Portal aufgemacht hat, ist vorbei. Nicht
@@ -217,6 +219,12 @@ void Net::handleSocketEvent(uint8_t type, uint8_t *payload, size_t length) {
         case WStype_DISCONNECTED:
             if (_wsConnected) log_w("Server getrennt");
             _wsConnected = false;
+            // Abstand zwischen den Versuchen wachsen lassen: 5, 10, 20 s.
+            // Jeder vergebliche Versuch blockiert den Loop bis zu 1,2 s - alle
+            // 5 s war das jede vierte Sekunde ein Haenger.
+            if (_failCount < 8) _failCount++;
+            ws.setReconnectInterval(min<uint32_t>(WS_RECONNECT_MS << min<uint8_t>(_failCount - 1, 2),
+                                                  WS_RECONNECT_MAX_MS));
             break;
 
         case WStype_TEXT: {
@@ -343,6 +351,9 @@ void Net::loop() {
     trackConnectionHealth(_wsConnected);
 
     if (!_wsStarted) startSocket();
+    // Ohne Verbindung waehrend der Bedienung keinen Verbindungsaufbau - siehe
+    // noteUserActivity(). Steht die Verbindung, laeuft ws.loop() immer.
+    if (!_wsConnected && millis() - _lastUserMs < USER_QUIET_MS) return;
     ws.loop();
 }
 

@@ -210,7 +210,9 @@ async def patch_settings(
 
     # Anzeige-Einstellungen sofort an alle Geraete durchreichen.
     if key == "device_ui":
-        await hub.broadcast_devices(proto.config(merged))
+        from ..device import workflow
+
+        await hub.broadcast_devices(proto.config(workflow.config_fuer_geraet(merged)))
     await hub.notify_ui("settings")
     return merged
 

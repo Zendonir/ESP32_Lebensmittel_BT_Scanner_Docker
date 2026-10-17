@@ -224,6 +224,18 @@ async def _handle_message(device_id: str, sess, raw: str, client_ip: str) -> Non
                     device_id=device_id,
                 )
 
+            elif kind == "offline":
+                # Was das Terminal ohne Verbindung gesammelt hat. Die
+                # Quittung nennt die Anzahl - erst dann loescht das Terminal
+                # seinen Speicher. Geht sie verloren, kommt dasselbe noch
+                # einmal: Etiketten sind dann schon ausgelagert (zaehlt als
+                # doppelt), Produkte stuenden zweimal unter "Nachtragen".
+                items = msg.get("items") or []
+                await workflow.on_offline(session, sess, items)
+                await hub.send_to(device_id, {"t": "offline_ack",
+                                              "n": len(items) if isinstance(items, list) else 0})
+                await workflow.push_screen(session, sess)
+
             elif kind == "pong":
                 pass
 

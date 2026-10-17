@@ -72,6 +72,16 @@ public:
     void scrollByRows(int rows);
 
     int screenId() const { return _screenId; }
+
+    // Wartet auf den Server (nach Tipp oder Scan). Ab einer kurzen Schwelle
+    // erscheint oben ein Hinweis, damit ein langsamer Server nicht wie ein
+    // eingefrorenes Geraet aussieht. Der naechste Bildschirm loescht ihn.
+    void setBusy(bool on);
+    bool busyTooLong() const;          // so lange schon, dass etwas faul ist
+
+    // Lagerort aus der Statusleiste des letzten Server-Bildschirms - fuer
+    // Scans, die offline gespeichert werden.
+    String statusLocation() const { return String(_screen["status"]["location"] | ""); }
     bool ready() const { return _ready; }
 
 private:
@@ -145,6 +155,9 @@ private:
     uint32_t _lastWakeMs = 0;
     bool     _keepAwake  = false;
     bool     _dimmed     = false;
+
+    uint32_t _busySince  = 0;      // 0 = wartet auf nichts
+    bool     _busyShown  = false;
 };
 
 extern Screen screen;

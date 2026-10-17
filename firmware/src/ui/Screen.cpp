@@ -86,7 +86,30 @@ uint16_t Screen::parseColor(const char *hex, uint16_t fallback) {
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
+// Unter dieser Zeit zeigt der Hinweis nichts an - schnelle Antworten sollen
+// nicht flackern. Ab BUSY_GIVE_UP_MS gilt die Anfrage als verloren.
+static constexpr uint32_t BUSY_SHOW_MS    = 350;
+static constexpr uint32_t BUSY_GIVE_UP_MS = 10000;   // Produktsuche darf 8 s dauern
+
+void Screen::setBusy(bool on) {
+    if (on) {
+        _busySince = millis() | 1;
+        return;
+    }
+    _busySince = 0;
+    if (_busyShown) {
+        _busyShown = false;
+        redraw();
+    }
+}
+
+bool Screen::busyTooLong() const {
+    return _busySince && millis() - _busySince > BUSY_GIVE_UP_MS;
+}
+
 void Screen::apply(JsonDocument &doc) {
+    _busySince = 0;          // die Antwort ist da
+    _busyShown = false;
     _screen.clear();
     _screen.set(doc);
     _screenId = _screen["id"] | 0;
@@ -137,6 +160,10 @@ void Screen::showBoot(const String &line1, const String &line2) {
 }
 
 void Screen::loop() {
+    if (_busySince && !_busyShown && millis() - _busySince > BUSY_SHOW_MS) {
+        _busyShown = true;
+        redraw();
+    }
     if (_dimAfterS && !_dimmed && !_keepAwake && millis() - _lastWakeMs > (uint32_t)_dimAfterS * 1000UL) {
         _dimmed = true;
         ledcWrite(LCD_BL, 0);
@@ -237,6 +264,15 @@ void Screen::drawStatusBar() {
     }
     const bool scanner = status["scanner"] | false;
     _spr.fillCircle(W - 22, STATUS_H / 2, 5, scanner ? C_OK : C_DANGER);
+
+    // "Bitte warten" - ueber die ganze Breite unter der Leiste, damit es auch
+    // aus dem Augenwinkel auffaellt. Der Tipp ist angekommen, die Antwort
+    // kommt noch.
+    if (_busyShown) {
+        _spr.fillRect(0, STATUS_H - 3, W, 3, C_PRIMARY);
+        _spr.setTextColor(C_PRIMARY, C_SURFACE);
+        _spr.drawString("...", W - 54, 2);
+    }
 
     if (!_banner.isEmpty()) {
         _spr.fillRect(0, STATUS_H, W, 18, C_WARN);

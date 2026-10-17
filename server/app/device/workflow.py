@@ -22,6 +22,7 @@ from ..models import (
     Device,
     InventoryItem,
     Location,
+    OfflineScan,
     PrintJob,
     Template,
     utcnow,
@@ -56,6 +57,7 @@ INVENTORY = "inventory"
 SYSTEM = "system"
 INV_SEARCH = "inv_search"
 ROLL_NEW = "roll_new"
+NACHTRAG = "nachtrag"          # offline gescannte Produkte nachtragen
 
 def _after_product(sess: "DeviceSession") -> str:
     """Naechster Bildschirm, sobald das Produkt feststeht.
@@ -112,6 +114,9 @@ class DeviceSession:
     last_erfasst: datetime = field(default_factory=utcnow)
     # Was nach der Ortswahl weiterlaufen soll: "scan:<code>" oder "store".
     pending: str = ""
+    # Gerade nachgetragener Offline-Scan (OfflineScan.id) - erledigt erst,
+    # wenn er wirklich eingelagert ist; Abbrechen laesst ihn stehen.
+    offline_id: int | None = None
     scanner: dict = field(default_factory=dict)
     online_since: datetime = field(default_factory=utcnow)
     inv_sort: str = "mhd"
@@ -142,6 +147,7 @@ class DeviceSession:
         self.stack = [HOME]
         self.draft = Draft()
         self.pending = ""
+        self.offline_id = None
 
     def touch(self) -> None:
         self.last_action = utcnow()
@@ -343,6 +349,8 @@ async def render(session: AsyncSession, sess: DeviceSession) -> dict:
         return await _screen_system(session, sess, sid, status)
     if name == ROLL_NEW:
         return await _screen_roll_new(session, sess, sid, status)
+    if name == NACHTRAG:
+        return await _screen_nachtrag(session, sess, sid, status)
     if name == SUBCATEGORY:
         return _screen_subcategory(sess, sid, status)
 
@@ -359,6 +367,12 @@ async def _screen_home(session, sess, sid, status) -> dict:
         {"id": "inventory", "label": "Inventar", "color": "#cc9218"},
         {"id": "system", "label": "System", "color": "#1c222a"},
     ]
+    offen = await _offline_offen(session, sess)
+    if offen:
+        # Ganz vorn und auffaellig: ohne Nachtragen fehlen diese Artikel im
+        # Bestand, und niemand sonst erinnert daran.
+        items.insert(0, {"id": "nachtrag", "label": f"Nachtragen ({len(offen)})",
+                         "sub": "offline gescannt", "color": "#fb8c00"})
     stats = [
         {"label": "Produkte", "value": counts["total"], "color": "#4c9eff"},
         {"label": "Ablaufend", "value": counts["expiring"], "color": "#cc9218"},
@@ -926,6 +940,14 @@ async def check_idle_locations() -> None:
                 await push_screen(session, sess)
 
 
+def config_fuer_geraet(device_cfg: dict) -> dict:
+    """config-Nachricht: Anzeige-Einstellungen plus, woran das Terminal offline
+    eigene Etiketten erkennt (nur fuer den Text "wird ausgelagert")."""
+    from ..config import settings as app_settings
+
+    return {**device_cfg, "label_prefix": app_settings.label_prefix}
+
+
 async def on_connect(session: AsyncSession, sess: DeviceSession, device: Device) -> None:
     from ..services import haushalte
 
@@ -941,7 +963,7 @@ async def on_connect(session: AsyncSession, sess: DeviceSession, device: Device)
     sess.erfasst()
 
     device_cfg = await settings_store.get(session, "device_ui", {})
-    await hub.send_to(sess.device_id, proto.config(device_cfg))
+    await hub.send_to(sess.device_id, proto.config(config_fuer_geraet(device_cfg)))
     await push_screen(session, sess)
     # Nach einem Neustart ist die Warteschlange der Firmware leer - was hier
     # noch als "sent" steht, hat das Geraet nie zu Ende gebracht.
@@ -982,6 +1004,7 @@ async def on_tap(session: AsyncSession, sess: DeviceSession, item: str) -> None:
         INV_SEARCH: _tap_inv_search,
         SYSTEM: _tap_system,
         ROLL_NEW: _tap_roll_new,
+        NACHTRAG: _tap_nachtrag,
     }.get(sess.current)
 
     if handler is not None:
@@ -1006,6 +1029,8 @@ async def _tap_home(session, sess, item) -> None:
         sess.push(SYSTEM)
     elif item == "new_roll":
         sess.push(ROLL_NEW)
+    elif item == "nachtrag":
+        sess.push(NACHTRAG)
 
 
 async def _tap_subcategory(session, sess, item) -> None:
@@ -1257,6 +1282,11 @@ async def _save_draft(session: AsyncSession, sess: DeviceSession) -> None:
         want_print=True,
         household=sess.household,
     )
+    if sess.offline_id:
+        row = await session.get(OfflineScan, sess.offline_id)
+        if row is not None:
+            row.done = True
+        sess.offline_id = None
     # Am Terminal erfasst = an diesem Terminal gedruckt.
     pk = await geraet_pk(session, sess.device_id)
     for job in jobs:
@@ -1564,3 +1594,132 @@ async def on_print_result(
     # sofort wiederholt - sonst dreht sich ein Drucker ohne Papier im Kreis.
     if ok and device_id:
         await flush_print_queue(session, device_id)
+
+
+# ---------------------------------------------------------------------------
+# Offline-Betrieb
+# ---------------------------------------------------------------------------
+async def _offline_offen(session: AsyncSession, sess: DeviceSession) -> list[OfflineScan]:
+    return list((await session.execute(
+        select(OfflineScan).where(OfflineScan.device_id == sess.device_id,
+                                  OfflineScan.done.is_(False))
+        .order_by(OfflineScan.scanned_at, OfflineScan.id)
+    )).scalars().all())
+
+
+async def on_offline(session: AsyncSession, sess: DeviceSession, items: list) -> dict:
+    """Was das Terminal ohne Verbindung gesammelt hat, nachholen.
+
+    Etiketten werden ausgelagert - aber nur ausgelagert: ein zweiter Scan
+    desselben Etiketts bucht offline *nicht* wieder ein. Ohne Rueckmeldung
+    am Bildschirm hat man im Zweifel einfach zweimal gescannt.
+    Produkt-Scans brauchen MHD, Menge und ein Etikett mit Nummer; sie warten
+    unter "Nachtragen". Gibt die Zaehler fuer die Meldung zurueck.
+    """
+    jetzt = utcnow()
+    zaehler = {"ausgelagert": 0, "nachtragen": 0, "unbekannt": 0, "doppelt": 0}
+    for eintrag in items if isinstance(items, list) else []:
+        if not isinstance(eintrag, dict):
+            continue
+        code = str(eintrag.get("code", "")).strip()[:64]
+        if not code:
+            continue
+        try:
+            alter = int(eintrag.get("age_s", -1))
+        except (TypeError, ValueError):
+            alter = -1
+        zeitpunkt = jetzt - timedelta(seconds=alter) if 0 <= alter < 30 * 86400 else jetzt
+        ort = str(eintrag.get("loc", "") or "")[:100]
+
+        if is_label(code):
+            item = await inv.find_active_by_label(session, code)
+            if item is not None:
+                await inv.remove_item(session, item, reason="offline", device_id=sess.device_id,
+                                      household=sess.household)
+                zaehler["ausgelagert"] += 1
+            elif await inv.find_by_label(session, code) is not None:
+                zaehler["doppelt"] += 1
+            else:
+                zaehler["unbekannt"] += 1
+        else:
+            session.add(OfflineScan(device_id=sess.device_id, household=sess.household,
+                                    code=code, location=ort, scanned_at=zeitpunkt))
+            zaehler["nachtragen"] += 1
+    await session.commit()
+    if zaehler["ausgelagert"]:
+        await hub.notify_ui("inventory")
+
+    teile = []
+    if zaehler["ausgelagert"]:
+        teile.append(f"{zaehler['ausgelagert']} ausgelagert")
+    if zaehler["nachtragen"]:
+        teile.append(f"{zaehler['nachtragen']} nachtragen")
+    if zaehler["unbekannt"]:
+        teile.append(f"{zaehler['unbekannt']} Etikett(en) unbekannt")
+    if teile:
+        await hub.send_to(sess.device_id, proto.toast(
+            "Offline: " + " · ".join(teile), "warn" if zaehler["unbekannt"] else "success"))
+    log.info("[%s] Offline-Abgleich: %s", sess.device_id, zaehler)
+    return zaehler
+
+
+async def _screen_nachtrag(session, sess, sid, status) -> dict:
+    offen = await _offline_offen(session, sess)
+    items = [
+        {
+            "id": f"off:{row.id}",
+            "label": row.code,
+            "sub": " · ".join(t for t in (row.location, _zeit_kurz(row.scanned_at)) if t),
+            "color": "#fb8c00",
+        }
+        for row in offen
+    ]
+    if offen:
+        items.append({"id": "off:verwerfen", "label": "Alle verwerfen",
+                      "sub": "nichts einlagern", "color": "#f04640"})
+    return proto.screen(
+        screen_id=sid,
+        kind="list",
+        title="Nachtragen",
+        subtitle="Offline gescannt - antippen zum Einlagern",
+        items=items or [{"id": "none", "label": "Alles nachgetragen", "color": "#2eb048"}],
+        status=status,
+    )
+
+
+def _zeit_kurz(stamp: datetime | None) -> str:
+    if stamp is None:
+        return ""
+    alter = _seconds_since(stamp)
+    if alter < 3600:
+        return f"vor {max(1, int(alter // 60))} min"
+    if alter < 86400:
+        return f"vor {int(alter // 3600)} h"
+    return f"vor {int(alter // 86400)} T"
+
+
+async def _tap_nachtrag(session, sess, item) -> None:
+    if item == "off:verwerfen":
+        for row in await _offline_offen(session, sess):
+            row.done = True
+        await session.commit()
+        sess.reset()
+        return
+    if not item.startswith("off:"):
+        return
+    try:
+        row = await session.get(OfflineScan, int(item[4:]))
+    except ValueError:
+        return
+    if row is None or row.done or row.device_id != sess.device_id:
+        return
+    # Dort einlagern, wo offline gescannt wurde - sofern es den Ort gibt.
+    if row.location and row.location != sess.location:
+        gibt_es = (await session.execute(
+            select(Location.id).where(Location.name == row.location))).scalar_one_or_none()
+        if gibt_es is not None:
+            sess.location = row.location
+            await hub.send_to(sess.device_id, proto.toast(f"Ort: {row.location}"))
+    sess.erfasst()
+    await _scan_barcode(session, sess, row.code)
+    sess.offline_id = row.id

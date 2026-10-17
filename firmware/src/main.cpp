@@ -15,11 +15,13 @@
 #include <WiFiClient.h>
 #include <esp_system.h>    // esp_reset_reason()
 #include <esp_task_wdt.h>
+#include <vector>
 
 #include "config.h"
 #include "core/Board.h"
 #include "core/Buttons.h"
 #include "core/Net.h"
+#include "core/OfflineQueue.h"
 #include "core/SdStore.h"
 #include "core/Settings.h"
 #include "printer/Printer.h"
@@ -34,10 +36,63 @@
 
 static uint32_t lastTelemetry = 0;
 
-// Ein Scan, der bei getrenntem Server anfaellt, geht nicht verloren: er wartet
-// hier, bis die Verbindung steht. Genau ein Platz - mehr braucht niemand, der
-// vor dem Geraet steht und auf eine Rueckmeldung wartet.
-static String pendingScan;
+// ---------------------------------------------------------------------------
+// Offline-Betrieb
+//
+// Faellt WLAN oder Server weg, bleibt das Terminal benutzbar: Scans landen im
+// OfflineQueue (NVS, uebersteht Neustarts) und der Bildschirm zeigt, was
+// gesammelt wurde. Steht die Verbindung wieder, geht alles als eine
+// "offline"-Nachricht hinaus; der Server lagert Etiketten aus und legt
+// Produkt-Scans unter "Nachtragen" ab. Was ein Code bedeutet, entscheidet
+// weiterhin der Server - hier wird nur gesammelt.
+// ---------------------------------------------------------------------------
+static constexpr int LOCAL_SCREEN_ID = -1;   // Bildschirm aus der Firmware
+static String   labelPrefix   = "LEB";       // kommt mit config vom Server
+static String   lastLocation;                // Ort aus dem letzten Server-Bildschirm
+static uint32_t lostAt        = 0;           // seit wann ohne Server (0 = verbunden)
+static uint32_t connectedAt   = 0;           // seit wann wieder verbunden
+static bool     offlineShown  = false;
+static uint32_t batchSentAt   = 0;           // 0 = keine Quittung ausstehend
+static size_t   batchSize     = 0;
+
+// Druckergebnisse, die ohne Verbindung anfielen.
+struct PrintResult { int job; bool ok; String error; };
+static std::vector<PrintResult> pendingResults;
+
+static void showOfflineScreen() {
+    JsonDocument doc;
+    doc["id"] = LOCAL_SCREEN_ID;
+    doc["kind"] = "list";
+    doc["title"] = "Offline";
+    String sub = net.wifiConnected() ? "Server nicht erreichbar" : "Kein WLAN";
+    if (net.portalActive()) sub += String(" - Einrichtung: WLAN ") + AP_SSID;
+    doc["subtitle"] = sub;
+
+    JsonObject status = doc["status"].to<JsonObject>();
+    status["location"] = lastLocation;
+    status["scanner"] = bleScanner.isConnected();
+    status["battery"] = bleScanner.battery();
+
+    JsonArray items = doc["items"].to<JsonArray>();
+    JsonObject info = items.add<JsonObject>();
+    info["header"] = true;
+    info["label"] = offlineQueue.size()
+        ? String(offlineQueue.size()) + " gespeichert - wird verbucht, sobald der Server da ist"
+        : String("Weiter scannen: Etikett = auslagern, Produkt = spaeter nachtragen");
+
+    // Neueste zuerst - das ist der Scan, den man gerade gemacht hat.
+    const auto &list = offlineQueue.items();
+    for (int i = (int)list.size() - 1; i >= 0; i--) {
+        const bool etikett = labelPrefix.length() && list[i].code.startsWith(labelPrefix);
+        JsonObject o = items.add<JsonObject>();
+        o["id"] = "__local_none";
+        o["label"] = list[i].code;
+        o["sub"] = etikett ? "wird ausgelagert" : "Produkt - wird nachgetragen";
+        o["color"] = etikett ? "#2eb048" : "#fb8c00";
+    }
+    screen.apply(doc);
+    offlineShown = true;
+}
 
 // ---------------------------------------------------------------------------
 static void logResetReason() {
@@ -107,6 +162,16 @@ static void onServerMessage(JsonDocument &doc) {
 
     if (type == "screen") {
         screen.apply(doc);
+        offlineShown = false;
+        const String ort = screen.statusLocation();
+        if (!ort.isEmpty()) lastLocation = ort;
+
+    } else if (type == "offline_ack") {
+        // Erst jetzt ist der gesammelte Stand verbucht.
+        const size_t n = doc["n"] | 0;
+        offlineQueue.drop(min(n, batchSize));
+        batchSentAt = 0;
+        batchSize = 0;
 
     } else if (type == "toast") {
         screen.toast(String(doc["text"] | ""), String(doc["level"] | "info"));
@@ -138,6 +203,7 @@ static void onServerMessage(JsonDocument &doc) {
             const float m = max(0.0f, minuten.as<float>());
             bleScanner.setIdleTimeout((uint32_t)(m * 60000.0f));
         }
+        if (doc["label_prefix"].is<const char *>()) labelPrefix = String(doc["label_prefix"] | "");
 
     } else if (type == "ping") {
         net.sendEvent("pong");
@@ -177,12 +243,59 @@ static void sendTelemetry() {
     net.send(doc);
 }
 
+static void storeOffline(const String &code) {
+    if (!offlineQueue.add(code, lastLocation)) {
+        buzzer.play("error");
+        screen.toast("Offline-Speicher voll - bitte Verbindung herstellen", "error");
+        return;
+    }
+    buzzer.play("ok");
+    if (offlineShown) showOfflineScreen();
+    screen.toast("Gespeichert - wird spaeter verbucht", "warn");
+}
+
 static void sendScan(const String &code) {
+    // Solange noch Gesammeltes aussteht, hinten anstellen - sonst kaeme ein
+    // neuer Scan vor aelteren beim Server an.
+    if (!net.serverConnected() || offlineQueue.size() > 0) {
+        storeOffline(code);
+        return;
+    }
     JsonDocument doc;
     doc["t"] = "scan";
     doc["code"] = code;
     doc["source"] = "ble";
-    if (!net.send(doc)) pendingScan = code;
+    if (net.send(doc)) screen.setBusy(true);
+    else storeOffline(code);
+}
+
+// Tipp an den Server. Ohne Verbindung sagt das Geraet das sofort, statt den
+// Tipp stillschweigend zu verschlucken.
+static void sendTap(const String &item) {
+    if (!net.serverConnected()) {
+        screen.toast("Keine Verbindung - Scannen geht weiter", "warn");
+        return;
+    }
+    JsonDocument doc;
+    doc["t"] = "tap";
+    doc["screen"] = screen.screenId();
+    doc["item"] = item;
+    if (net.send(doc)) screen.setBusy(true);
+}
+
+// Offline Gesammeltes nachreichen, sobald die Verbindung eine Weile steht
+// (der Server hat dann hello und Startbildschirm hinter sich).
+static void syncOffline() {
+    if (offlineQueue.size() == 0 || !net.serverConnected()) return;
+    if (millis() - connectedAt < 1500) return;
+    if (batchSentAt && millis() - batchSentAt < 15000) return;   // Quittung abwarten
+    JsonDocument doc;
+    const size_t n = offlineQueue.buildBatch(doc, 20);
+    if (n && net.send(doc)) {
+        batchSentAt = millis() | 1;
+        batchSize = n;
+        log_i("%u Offline-Scans an den Server", (unsigned)n);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +340,7 @@ void setup() {
     printer.begin();
     esp_task_wdt_reset();
 
+    offlineQueue.begin();
     net.onMessage(onServerMessage);
     net.begin();
     esp_task_wdt_reset();
@@ -256,8 +370,14 @@ void loop() {
     // wenn die Verbindung zurueckkommt; dann muss der Bildschirm ebenso
     // umgeschaltet werden, sonst stuende dort weiter eine Einrichtungsadresse,
     // die es gar nicht mehr gibt.
+    //
+    // Nur das von Hand geoeffnete Portal uebernimmt den Bildschirm. Das nach
+    // einem langen Ausfall selbsttaetig geoeffnete lief frueher genauso -
+    // und legte damit Scanner und Touch still: nach drei Minuten ohne WLAN
+    // war das Terminal nicht mehr zu bedienen. Jetzt laeuft es nebenher, der
+    // Offline-Schirm nennt es.
     static bool wasPortalActive = false;
-    if (net.portalActive()) {
+    if (net.portalActive() && !net.portalAuto()) {
         if (!wasPortalActive) {
             screen.showBoot("Einrichtung", String("WLAN ") + AP_SSID + " - 192.168.4.1");
             wasPortalActive = true;
@@ -273,6 +393,23 @@ void loop() {
         bleScanner.retryNow();
     }
 
+    // --- Verbindung / Offline ---------------------------------------------
+    if (net.serverConnected()) {
+        if (lostAt) connectedAt = millis();
+        lostAt = 0;
+        syncOffline();
+    } else {
+        if (!lostAt) lostAt = millis() | 1;
+        batchSentAt = 0;                 // Quittung kommt nicht mehr
+        if (!offlineShown && millis() - lostAt > OFFLINE_AFTER_MS) showOfflineScreen();
+    }
+    // Antwortet der Server nicht mehr, ist das Warten zu beenden - sonst
+    // steht der Hinweis ewig da.
+    if (screen.busyTooLong()) {
+        screen.setBusy(false);
+        screen.toast(net.serverConnected() ? "Server antwortet nicht" : "Keine Verbindung", "warn");
+    }
+
     bleScanner.loop();
     buzzer.loop();
     screen.loop();
@@ -281,29 +418,21 @@ void loop() {
     String code;
     if (bleScanner.readCode(code)) {
         screen.wake();
+        net.noteUserActivity();
         buzzer.play("scan");
         sendScan(code);
-    }
-    if (!pendingScan.isEmpty() && net.serverConnected()) {
-        const String queued = pendingScan;
-        pendingScan = "";
-        sendScan(queued);
     }
 
     // --- Hardwaretaster ---------------------------------------------------
     // Gleichwertig zur Bedienung am Bildschirm: Zurueck macht dasselbe wie das
     // Wischen, die beiden anderen dasselbe wie das Ziehen in einer Liste.
     ButtonEvent taste = buttons.poll();
+    if (taste != ButtonEvent::None) net.noteUserActivity();
     if (taste != ButtonEvent::None && screen.wake()) taste = ButtonEvent::None;  // weckt nur
     switch (taste) {
-        case ButtonEvent::Back: {
-            JsonDocument doc;
-            doc["t"] = "tap";
-            doc["screen"] = screen.screenId();
-            doc["item"] = "back";
-            net.send(doc);
+        case ButtonEvent::Back:
+            if (screen.screenId() != LOCAL_SCREEN_ID) sendTap("back");
             break;
-        }
         case ButtonEvent::ScrollUp:   screen.scrollByRows(-1); break;
         case ButtonEvent::ScrollDown: screen.scrollByRows(1);  break;
         default: break;
@@ -311,6 +440,7 @@ void loop() {
 
     // --- Beruehrung -------------------------------------------------------
     Gesture gesture = touch.poll(screen.scrollable());
+    if (gesture.type != GestureType::None) net.noteUserActivity();
     // Ein dunkler Bildschirm wird von der ersten Beruehrung nur geweckt -
     // sonst loeste man beim Aufwecken blind eine Kachel aus, die man gar
     // nicht gesehen hat.
@@ -325,13 +455,19 @@ void loop() {
             } else if (action.type == ActionType::Tap && action.id == "__local_ble_toggle") {
                 if (bleScanner.isConnected()) bleScanner.disconnect();
                 else bleScanner.retryNow();
+            } else if (screen.screenId() == LOCAL_SCREEN_ID) {
+                // Offline-Schirm: nur Anzeige. Der Ort laesst sich ohne
+                // Server nicht wechseln (die Liste der Orte kennt er).
+                if (action.id == "locations") {
+                    screen.toast("Ort wechseln geht wieder mit Verbindung", "warn");
+                }
             } else if (action.type == ActionType::Tap) {
-                JsonDocument doc;
-                doc["t"] = "tap";
-                doc["screen"] = screen.screenId();
-                doc["item"] = action.id;
-                net.send(doc);
+                sendTap(action.id);
             } else if (action.type == ActionType::Input) {
+                if (!net.serverConnected()) {
+                    screen.toast("Keine Verbindung - Eingabe nicht gespeichert", "warn");
+                    break;
+                }
                 // Erst den Wert, dann den Tipp: der Server soll beides in
                 // dieser Reihenfolge sehen, sonst speichert er den vorherigen
                 // Wert.
@@ -341,11 +477,7 @@ void loop() {
                 value["value"] = action.value;
                 net.send(value);
 
-                JsonDocument tap;
-                tap["t"] = "tap";
-                tap["screen"] = screen.screenId();
-                tap["item"] = action.id;
-                net.send(tap);
+                sendTap(action.id);
             }
             break;
         }
@@ -355,11 +487,7 @@ void loop() {
             // Bildschirmweite Zurueck-Geste - "back" existiert als Aktion
             // bereits auf jedem Bildschirm (device/workflow.py::on_tap), die
             // Geste loest also nur aus, was auch der Zurueck-Knopf ausloest.
-            JsonDocument doc;
-            doc["t"] = "tap";
-            doc["screen"] = screen.screenId();
-            doc["item"] = "back";
-            net.send(doc);
+            if (screen.screenId() != LOCAL_SCREEN_ID) sendTap("back");
             break;
         }
 
@@ -384,13 +512,29 @@ void loop() {
             doc["job"] = jobId;
             doc["ok"] = ok;
             doc["error"] = error;
+            // Ohne Verbindung merken: sonst haelt der Server den Auftrag nach
+            // einer Weile fuer verloren und druckt ihn ein zweites Mal.
+            if (!net.send(doc) && pendingResults.size() < 16) {
+                pendingResults.push_back({jobId, ok, error});
+            }
+        }
+    }
+    if (!pendingResults.empty() && net.serverConnected() && millis() - connectedAt > 1500) {
+        for (const PrintResult &r : pendingResults) {
+            JsonDocument doc;
+            doc["t"] = "print_result";
+            doc["job"] = r.job;
+            doc["ok"] = r.ok;
+            doc["error"] = r.error;
             net.send(doc);
         }
+        pendingResults.clear();
     }
 
     // --- Zustandsanzeige und Telemetrie ------------------------------------
     if (!net.serverConnected()) {
-        screen.setBanner(net.wifiConnected() ? "Kein Server" : "Kein WLAN");
+        // Auf dem Offline-Schirm steht es schon im Titel.
+        screen.setBanner(offlineShown ? "" : (net.wifiConnected() ? "Kein Server" : "Kein WLAN"));
     } else {
         screen.setBanner("");
     }
@@ -407,6 +551,7 @@ void loop() {
         screen.setKeepAwake(lastScannerState);
         lastTelemetry = millis();
         sendTelemetry();
+        if (offlineShown) showOfflineScreen();   // Scanner-Punkt aktualisieren
     }
 
     if (millis() - lastTelemetry > TELEMETRY_INTERVAL_MS) {

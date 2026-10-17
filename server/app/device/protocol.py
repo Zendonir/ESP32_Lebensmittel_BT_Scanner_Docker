@@ -13,6 +13,8 @@ Geraet -> Server
     back        {screen}
     telemetry   {heap, min_heap, psram, rssi, uptime, scanner: {...}}
     print_result{job, ok, error}
+    offline     {items: [{code, age_s, loc}]}  ohne Verbindung gesammelte Scans;
+                age_s = Sekunden seit dem Scan (-1 = unbekannt, nach Neustart)
     pong        {}
 
 Server -> Geraet
@@ -20,7 +22,8 @@ Server -> Geraet
     toast       {text, level}
     beep        {pattern}   ok · scan · print · warn · error · ort (Lagerort waehlen)
     print       {job, chars, blocks}
-    config      {brightness, beep, idle_seconds}
+    config      {brightness, beep, idle_seconds, scanner_minutes, label_prefix}
+    offline_ack {n}         die ersten n gesammelten Scans sind verbucht
     ping        {}
     reboot      {}
     ota         {path, version, size, sha256}

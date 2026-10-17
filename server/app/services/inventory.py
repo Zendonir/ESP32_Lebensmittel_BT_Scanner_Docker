@@ -148,6 +148,12 @@ async def add_items(
     return items, jobs
 
 
+async def find_by_label(session: AsyncSession, label: str) -> InventoryItem | None:
+    """Etikett in jedem Zustand (auch ausgelagert)."""
+    return (await session.execute(
+        select(InventoryItem).where(InventoryItem.label == label))).scalar_one_or_none()
+
+
 async def find_active_by_label(session: AsyncSession, label: str) -> InventoryItem | None:
     return (
         await session.execute(

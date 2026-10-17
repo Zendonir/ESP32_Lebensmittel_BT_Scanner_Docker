@@ -206,6 +206,9 @@ cd firmware && pio run --target upload # flashen
 | Live-Anzeige ueber den Reverse Proxy tot, Log zeigt `GET /ws/ui … 404` | Der Proxy reicht den WebSocket-Upgrade nicht durch (Nginx Proxy Manager: "Websockets Support") |
 | MHD-Vorschlag passt nicht zum Lagerort | Rechnet `services/haltbarkeit.vorschlag()`: Lagerart des Orts (`Location.kind`: raum/kuehl/tiefkuehl), dann Produkt (`Product.haltbarkeit`) vor eigenen Tagen (nicht im Gefrierschrank) vor Kategorie (`Category.haltbarkeit`, Vorgabe `STANDARD`). Terminal, Handy und Verwaltung nutzen dieselbe Funktion |
 | KI-Vorschlag kommt nicht | `services/ki.py` braucht `ANTHROPIC_API_KEY` in der Umgebung und `ki.aktiv`. Terminal fragt im Hintergrund (`ki.im_hintergrund`) und merkt es am Produkt – wirkt ab dem naechsten Scan; das Handy fragt direkt (`POST /api/ki/vorschlag`) |
+| Terminal "haengt" ohne Server | Jeder vergebliche TCP-Aufbau blockiert bis `WEBSOCKETS_TCP_TIMEOUT`. Deshalb: Abstand waechst 5/10/20 s (`WS_RECONNECT_MAX_MS`), und waehrend der Bedienung (`Net::noteUserActivity`, `USER_QUIET_MS`) wird ohne Verbindung gar nicht verbunden. Das selbsttaetig geoeffnete Portal laeuft nebenher und legt Scanner/Touch nicht mehr still |
+| Offline-Betrieb | Ohne Server sammelt `OfflineQueue` (NVS, 40 Eintraege, uebersteht Neustarts) die Scans, der Schirm zeigt sie (lokaler Bildschirm, id -1). Nach dem Verbinden geht eine `offline`-Nachricht hinaus, erst `offline_ack` loescht. Server: Etiketten auslagern (nie wieder einbuchen), Produkte als `OfflineScan` unter "Nachtragen" auf der Startseite. Druckergebnisse ohne Verbindung werden nachgereicht |
+| Tipp ohne sichtbare Reaktion | `Screen::setBusy()` nach Tipp/Scan: ab 350 ms Balken unter der Statusleiste, nach 10 s "Server antwortet nicht". Ohne Verbindung sagt ein Tipp das sofort |
 | Ein haengender Browser friert das Terminal ein | Jeder Sendevorgang hat eine Zeitgrenze (`hub.SEND_TIMEOUT_S`) |
 
 ## Entwicklungsregeln

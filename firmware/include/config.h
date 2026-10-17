@@ -172,6 +172,9 @@
 // ws.loop() blockierend ist - der Abstand bestimmt also mit, wie fluessig sich
 // das Geraet bei ausgefallenem Server noch bedienen laesst.
 #define WS_RECONNECT_MS      5000
+#define WS_RECONNECT_MAX_MS  20000   // laengster Abstand bei anhaltendem Ausfall
+#define USER_QUIET_MS        4000    // so lange nach Bedienung kein Verbindungsaufbau
+#define OFFLINE_AFTER_MS     6000    // ab hier zeigt das Terminal den Offline-Schirm
 #define TELEMETRY_INTERVAL_MS 30000
 #define BATTERY_POLL_MS      300000 // Scanner-Akku alle 5 Minuten
 #define WDT_TIMEOUT_S        30

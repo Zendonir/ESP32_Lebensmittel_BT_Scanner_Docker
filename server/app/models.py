@@ -233,6 +233,26 @@ class Device(Base, TimestampMixin):
     )
 
 
+class OfflineScan(Base):
+    """Produkt-Scan, den ein Terminal ohne Verbindung gespeichert hat.
+
+    Etiketten (Auslagern) werden beim Abgleich sofort verbucht. Ein Produkt
+    einzulagern braucht dagegen Angaben (MHD, Menge) und ein Etikett mit
+    Nummer - das geht erst mit Server. Solche Scans warten hier, bis man sie
+    am Terminal unter "Nachtragen" durchgeht.
+    """
+
+    __tablename__ = "offline_scans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[str] = mapped_column(String(64), index=True)
+    household: Mapped[str] = mapped_column(String(100), default="")
+    code: Mapped[str] = mapped_column(String(64))
+    location: Mapped[str] = mapped_column(String(100), default="")
+    scanned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    done: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+
 class PrintJob(Base):
     """Druckauftrag fuer ein Geraet.
 
