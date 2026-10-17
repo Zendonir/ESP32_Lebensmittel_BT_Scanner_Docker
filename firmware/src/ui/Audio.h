@@ -22,6 +22,9 @@ public:
     // Fehlerfall - das Geraet arbeitet dann stumm weiter.
     bool begin();
     bool available() const { return _ok; }
+    // Fuers System-Panel: warum es still bleibt. "ok", "abgeschaltet"
+    // (Boardvariante ohne bekannte Belegung), "kein Codec", "I2S-Fehler".
+    const char *status() const { return _status; }
 
     void playTone(uint16_t hz, uint16_t ms);
     void loop();
@@ -36,6 +39,7 @@ private:
     static constexpr uint32_t RAMP_FRAMES = 240;  // ~5 ms weich einblenden
 
     bool     _ok = false;
+    const char *_status = AUDIO_ENABLED ? "nicht gestartet" : "abgeschaltet";
     uint8_t  _volume = 70;
 
     // Erzeugungszustand des laufenden Tons

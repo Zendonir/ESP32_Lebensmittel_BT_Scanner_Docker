@@ -765,11 +765,25 @@ function wlanText(rssi) {
   return `${wort} <span class="muted">(${rssi} dBm)</span>`;
 }
 
+// Warum ein Terminal stumm ist - meldet die Firmware im hello ("audio").
+function tonHinweis(t) {
+  const a = t.audio;
+  if (!a || a === 'ok') return '';
+  const grund = {
+    abgeschaltet: 'Auf dieser Boardvariante ist der Ton in der Firmware abgeschaltet – die Belegung '
+      + 'des Audiotakts (MCLK) ist nicht dokumentiert.',
+    'kein Codec': 'Der Audiocodec (ES8311) meldet sich nicht.',
+    'I2S-Fehler': 'Die Audioschnittstelle (I2S) ließ sich nicht einrichten.',
+  }[a] || `Ton: ${a}`;
+  return `<div class="notice warn" style="margin-top:8px"><span><b>Kein Ton.</b> ${esc(grund)}</span></div>`;
+}
+
 function deviceCard(d) {
   const t = d.telemetry || {};
   const scanner = t.scanner || {};
   const kopf = `<div class="row"><h2 style="margin:0;flex:1">
         <span class="dot ${d.online ? 'on' : ''}"></span>${esc(d.name || d.device_id)}</h2>
+        ${(d.telemetry || {}).board ? `<span class="pill">Board ${esc(String(d.telemetry.board).toUpperCase())}</span>` : ''}
         ${d.firmware ? `<span class="pill">Firmware ${esc(d.firmware)}</span>` : ''}</div>
       <div class="muted">${esc(d.device_id)}${d.ip ? ` · ${esc(d.ip)}` : ''}</div>`;
 
@@ -796,6 +810,7 @@ function deviceCard(d) {
       </div>
       ${!scanner.connected && scanner.reason_text ? `<div class="muted" style="margin-top:8px">
         Scanner zuletzt getrennt: ${esc(scanner.reason_text)}</div>` : ''}
+      ${tonHinweis(t)}
       <label class="field" style="margin-top:12px">Haushalt
         <select data-dev-haus="${esc(d.device_id)}">
           ${(state.haushalte || []).map((h) => `<option ${h.name === d.household ? 'selected' : ''}>${esc(h.name)}</option>`).join('')}

@@ -6,6 +6,7 @@
 #include <WiFi.h>
 
 #include "SdStore.h"
+#include "ui/Audio.h"
 #include "Settings.h"
 #include "config.h"
 
@@ -288,6 +289,7 @@ void Net::sendHello() {
     doc["flash_mb"] = ESP.getFlashChipSize() / (1024 * 1024);
     doc["res"]      = String(UI_WIDTH) + "x" + String(UI_HEIGHT);
     doc["sd"]       = sdStore.mounted();
+    doc["audio"]    = audio.status();
 
     // Boardvariante: entscheidet serverseitig, welches OTA-Abbild das Geraet
     // bekommt. Die beiden Varianten haben unterschiedliche Displaytreiber -

@@ -109,6 +109,7 @@ bool Audio::begin() {
         Wire.beginTransmission(ES8311_ADDR);
         if (Wire.endTransmission() != 0) {
             log_w("Kein ES8311 gefunden (0x%02X) - Geraet bleibt stumm", ES8311_ADDR);
+            _status = "kein Codec";
             return false;
         }
     } else {
@@ -132,6 +133,7 @@ bool Audio::begin() {
 
     if (i2s_driver_install(I2S_PORT, &cfg, 0, nullptr) != ESP_OK) {
         log_w("I2S liess sich nicht einrichten - Geraet bleibt stumm");
+        _status = "I2S-Fehler";
         return false;
     }
 
@@ -144,11 +146,13 @@ bool Audio::begin() {
     if (i2s_set_pin(I2S_PORT, &pins) != ESP_OK) {
         i2s_driver_uninstall(I2S_PORT);
         log_w("I2S-Pins liessen sich nicht setzen - Geraet bleibt stumm");
+        _status = "I2S-Fehler";
         return false;
     }
 
     i2s_zero_dma_buffer(I2S_PORT);
     _ok = true;
+    _status = "ok";
     setVolume(_volume);
     log_i("Ton bereit (ES8311, 48 kHz)");
     return true;
