@@ -423,7 +423,7 @@
         <button class="primary" id="mhd-test-kamera">📷 Live-Kamera wie beim Scannen</button>
         <input type="file" id="mhd-test-dateien" accept="image/*" multiple>
         <label class="row tight"><input type="checkbox" id="mhd-test-ki"> auch die KI fragen</label>
-        <button class="ghost" id="mhd-test-json" disabled>Ergebnisse herunterladen</button>
+        <button class="ghost" id="mhd-test-json" disabled>ZIP herunterladen (Bilder + Ergebnisse)</button>
         <button class="ghost" id="mhd-test-leeren" disabled>Leeren</button>
       </div>
       <p class="hint"><b>Live-Kamera</b> läuft genau wie beim Einlagern (Zielrahmen, Ausschnitt,
@@ -432,7 +432,8 @@
         Braucht HTTPS wie der Barcode-Scan.<br>
         <b>Fotos:</b> am besten so fotografieren wie beim Scannen: nah am Datum. Im Container
         wird gelesen, was im Bild steht – bei kleinem Druck auf Flaschen hilft ein enger Ausschnitt.
-        Die heruntergeladene Datei enthält nur Text und Ergebnisse, keine Bilder.</p>
+        Die ZIP-Datei enthält <code>ergebnisse.json</code> und je Test das Bild, das der Server
+        bekam (verkleinertes Foto bzw. Rahmenausschnitt) – so lässt sich jeder Fehlgriff nachstellen.</p>
       <div id="mhd-test-liste" style="display:grid;gap:12px;margin-top:10px"></div>
     </details>
 

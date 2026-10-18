@@ -3,6 +3,7 @@
 
 import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from './api.js';
 import { mhdKamera } from './mhdkamera.js';
+import { zipBlob, base64ZuBytes } from './zip.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -1253,7 +1254,9 @@ $('#layout-picker')?.addEventListener('keydown', (ev) => {
 // mit allen Zwischenschritten: jede gelesene Zeile, jedes gefundene Datum und
 // welches davon gewaehlt wurde. Zum Nachvollziehen, warum ein Aufdruck nicht
 // erkannt wird, und als Material zum Nachschaerfen der Regeln.
-const mhdTest = { ergebnisse: [] };
+// Je Ergebnis auch das Bild, das an den Server ging (verkleinertes Foto bzw.
+// Rahmenausschnitt) - fuer den ZIP-Download, nicht fuer die JSON-Datei.
+const mhdTest = { ergebnisse: [], bilder: [] };
 
 async function mhdTestStatus() {
   const el = $('#mhd-test-status');
@@ -1318,9 +1321,10 @@ $('#mhd-test-dateien').addEventListener('change', async (ev) => {
     platz.innerHTML = `<div class="muted">${esc(datei.name)} wird gelesen …</div>`;
     liste.prepend(platz);
     try {
-      const r = await post('/api/mhd/test', { bild: await mhdTestBild(datei), typ: 'image/jpeg', ki: mitKi, gruendlich: true });
+      const bild = await mhdTestBild(datei);
+      const r = await post('/api/mhd/test', { bild, typ: 'image/jpeg', ki: mitKi, gruendlich: true });
       platz.innerHTML = mhdTestKarte(datei.name, url, r);
-      mhdTest.ergebnisse.push({ datei: datei.name, ...r });
+      mhdTestMerken(datei.name, bild, r);
     } catch (e) {
       platz.innerHTML = `<div style="color:var(--danger)">${esc(datei.name)}: ${esc(e.message)}</div>`;
     }
@@ -1328,12 +1332,20 @@ $('#mhd-test-dateien').addEventListener('change', async (ev) => {
   }
 });
 
-function mhdTestHinzu(name, url, r) {
-  const platz = document.createElement('div');
-  platz.innerHTML = mhdTestKarte(name, url, r);
-  $('#mhd-test-liste').prepend(platz);
-  mhdTest.ergebnisse.push({ datei: name, ...r });
+function mhdTestMerken(name, bild, r) {
+  const nr = String(mhdTest.ergebnisse.length + 1).padStart(2, '0');
+  const sauber = name.replace(/\.[a-z0-9]+$/i, '').replace(/[^\w.-]+/g, '_').replace(/_+/g, '_').slice(0, 40);
+  const bildDatei = `bilder/${nr}-${sauber}.jpg`;
+  mhdTest.ergebnisse.push({ datei: name, bild: bildDatei, ...r });
+  mhdTest.bilder.push({ name: bildDatei, b64: bild });
   $('#mhd-test-json').disabled = $('#mhd-test-leeren').disabled = false;
+}
+
+function mhdTestHinzu(name, bild, r) {
+  const platz = document.createElement('div');
+  platz.innerHTML = mhdTestKarte(name, `data:image/jpeg;base64,${bild}`, r);
+  $('#mhd-test-liste').prepend(platz);
+  mhdTestMerken(name, bild, r);
 }
 
 $('#mhd-test-kamera').addEventListener('click', async () => {
@@ -1349,23 +1361,29 @@ $('#mhd-test-kamera').addEventListener('click', async () => {
       kiErlaubt: $('#mhd-test-ki').checked,
       beiBild: (bild, r) => {
         n += 1;
-        mhdTestHinzu(`Live ${new Date().toLocaleTimeString('de-DE')} · Bild ${n}`,
-          `data:image/jpeg;base64,${bild}`, r);
+        mhdTestHinzu(`Live ${new Date().toLocaleTimeString('de-DE')} · Bild ${n}`, bild, r);
       },
     });
   } catch (e) { toast(e.message, 'warn'); }
 });
 
+// Eine ZIP-Datei mit ergebnisse.json und den Bildern, so wie der Server sie
+// bekam - zum Weitergeben, damit sich ein Fehlgriff nachstellen laesst.
 $('#mhd-test-json').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(mhdTest.ergebnisse, null, 2)], { type: 'application/json' });
+  const blob = zipBlob([
+    { name: 'ergebnisse.json', daten: JSON.stringify(mhdTest.ergebnisse, null, 2) },
+    ...mhdTest.bilder.map((b) => ({ name: b.name, daten: base64ZuBytes(b.b64) })),
+  ]);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `mhd-test-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+  a.download = `mhd-test-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip`;
   a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 });
 
 $('#mhd-test-leeren').addEventListener('click', () => {
   mhdTest.ergebnisse = [];
+  mhdTest.bilder = [];
   $('#mhd-test-liste').innerHTML = '';
   $('#mhd-test-json').disabled = $('#mhd-test-leeren').disabled = true;
 });
