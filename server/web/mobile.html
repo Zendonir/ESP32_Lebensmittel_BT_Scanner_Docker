@@ -52,6 +52,15 @@
     }
     .swipe-inner .t { font-weight: 600; }
     .swipe-inner .s { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    /* Inventar kompakt: Name und Resttage in einer Zeile, darunter der Rest.
+       Die Etikettnummer steht nicht da - auf dem Etikett sieht man sie nicht,
+       gebraucht wird sie nur intern (data-label) fuer Auslagern/Nachdruck. */
+    .swipe-inner .kopf { display: flex; align-items: center; gap: 8px; }
+    .swipe-inner .kopf .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .swipe-inner .kopf .pill { flex: none; }
+    #m-list { gap: 6px; }
+    #m-list .swipe-inner { padding: 8px 12px; }
+    #m-list .swipe-inner .s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     nav.bottom {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
@@ -187,11 +196,13 @@ async function fillList() {
     <div class="swipe" data-label="${esc(i.label)}">
       <div class="swipe-action">auslagern</div>
       <div class="swipe-inner" role="button" tabindex="0" aria-expanded="false">
-        <div class="t">${esc(i.display_name || i.name)}${HAUSHALT && i.household !== HAUSHALT.name
-          ? ` <span class="pill warn">🏠 ${esc(i.household)}</span>` : ''}</div>
-        <div class="s">${esc(i.brand || '')}</div>
-        <div class="s">${fmtDate(i.expiry_date)} ${daysPill(i.days_left)} · ${esc(i.location)}</div>
-        <div class="s mono">${esc(i.label)}</div>
+        <div class="kopf">
+          <div class="t">${esc(i.display_name || i.name)}${HAUSHALT && i.household !== HAUSHALT.name
+            ? ` <span class="pill warn">🏠 ${esc(i.household)}</span>` : ''}</div>
+          ${daysPill(i.days_left)}
+        </div>
+        <div class="s">${[i.brand, i.unit && i.quantity ? `${String(+i.quantity).replace('.', ',')} ${i.unit}` : '',
+          i.location, fmtDate(i.expiry_date)].filter(Boolean).map(esc).join(' · ')}</div>
         <div class="acts" hidden>
           <button class="primary" data-act="remove">Auslagern</button>
           <button data-act="reprint">Etikett nachdrucken</button>
