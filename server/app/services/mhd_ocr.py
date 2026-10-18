@@ -216,10 +216,13 @@ _MUSTER = [
     ("voll", re.compile(rf"(?<!\d)(\d{{2}})(\d{{2}}){_T}(\d{{4}}|\d{{2}})(?!\d)")),
     # 28102027 - alle Trennzeichen weg; nur mit 20xx, sonst ist es eine Charge
     ("voll", re.compile(r"(?<!\d)(\d{2})(\d{2})(20\d{2})(?!\d)")),
+    # 13.91:292791:39 - Nadeldruck laeuft ineinander, das Jahr grenzt an die
+    # Uhrzeit. Nur vierstellig und nur, wenn nichts anderes passt.
+    ("voll", re.compile(rf"(?<!\d)(\d{{1,2}}){_T3}(\d{{1,2}}){_T3}(\d{{4}})")),
     # 01.2027 - nur Monat und Jahr: bis Monatsende. Nicht nach einem Trenn-
-    # zeichen: ".01.2028" ist ein Datum, dessen Tag nicht gelesen wurde -
-    # daraus den 31.01. zu machen, waere ein falsches MHD.
-    ("monat", re.compile(rf"(?<![\d.:·/\-])(\d{{1,2}}){_T}(20\d{{2}})(?!\d)")),
+    # zeichen, das einen verlorenen Tag abschliesst (".01.2028") - siehe
+    # _tag_verloren(). "BBE: 07/2028" dagegen ist ein Etikett mit Doppelpunkt.
+    ("monat", re.compile(rf"(?<!\d)(\d{{1,2}}){_T}(20\d{{2}})(?!\d)")),
     # 31.10. - ohne Jahr (Frischware). Nur mit Hinweiswort, siehe kandidaten(),
     # und nur zweistellig wie gedruckt: "1.1" war ein falsch gelesenes "1,15 g".
     ("ohne_jahr", re.compile(r"(?<![\d.,])(\d{2})\.\s*(\d{2})\.?(?![\d.]|\s*\d)")),
@@ -230,6 +233,43 @@ _HINWEIS = re.compile(r"mhd|haltbar|verbrauch|best|bis|exp|use by|bbe|ddm", re.I
 # Erkennung liefert Zeilen nach Hoehe sortiert; Spalten daneben ("Salz",
 # "Frische Rezepte") schieben sich dazwischen.
 _HINWEIS_ZEILEN_OHNE_JAHR = 4
+
+
+def _tag_verloren(text: str, start: int) -> bool:
+    """Steht vor Monat/Jahr ein Trenner, dessen Tag nicht gelesen wurde?
+
+    ".01.2028" und "8:01.2028": ja. "BBE: 07/2028" und "bis Ende 02/2027": nein
+    - ein Doppelpunkt nach Buchstaben ist ein Etikett, kein Datumsteil.
+    """
+    vor = text[:start].rstrip()
+    if not vor:
+        return False
+    if vor[-1] in ".·/-":
+        return True
+    return vor[-1] == ":" and (len(vor) == 1 or vor[-2].isdigit())
+
+
+def _nullen(tag: str, monat: str, jahr: str, heute: date) -> str:
+    """Nadeldruck-Nullen mit Punkt in der Mitte liest die Erkennung als 9 oder 8.
+
+    Nur wenn das gelesene Datum unmoeglich ist ("13.91.2927"), und nur wenn
+    genau eine Lesart mit 0 statt 9/8 ein gueltiges Datum ergibt.
+    """
+    teile = tag + "|" + monat + "|" + jahr
+    stellen = [i for i, c in enumerate(teile) if c in "98"]
+    if not stellen or len(stellen) > 4:
+        return ""
+    treffer = set()
+    for maske in range(1, 1 << len(stellen)):
+        z = list(teile)
+        for k, i in enumerate(stellen):
+            if maske >> k & 1:
+                z[i] = "0"
+        t, m, j = "".join(z).split("|")
+        iso = mhd_aus_teilen(t, m, j, heute)
+        if iso:
+            treffer.add(iso)
+    return treffer.pop() if len(treffer) == 1 else ""
 
 
 def _kandidaten(text: str, heute: date, ohne_jahr: bool) -> list[tuple[str, str]]:
@@ -245,10 +285,16 @@ def _kandidaten(text: str, heute: date, ohne_jahr: bool) -> list[tuple[str, str]
             if any(a < m.end() and m.start() < b for a, b in belegt):
                 continue        # schon als vollstaendiges Datum gelesen
             if art == "voll":
-                iso = mhd_aus_teilen(m.group(1), m.group(2), m.group(3), heute)
+                iso = (mhd_aus_teilen(m.group(1), m.group(2), m.group(3), heute)
+                       or _nullen(m.group(1), m.group(2), m.group(3), heute))
             elif art == "monat":
+                if _tag_verloren(sauber, m.start()):
+                    continue
                 iso = mhd_aus_teilen(0, m.group(1), m.group(2), heute)
             else:
+                # "261007 23.04": Uhrzeit hinter einer Charge, kein Datum.
+                if re.search(r"\d{4,}\s*$", sauber[:m.start()]):
+                    continue
                 iso = mhd_ohne_jahr(m.group(1), m.group(2), heute)
             if iso:
                 gefunden.append((iso, m.group(0)))
@@ -264,9 +310,12 @@ def kandidaten(texte: list[str], heute: date | None = None) -> list[dict]:
         hinweis = bool(_HINWEIS.search(text + " " + (texte[i - 1] if i else "")))
         # Ein Datum ohne Jahr ist nur eins, wenn ein Hinweiswort in der Naehe
         # steht - sonst waere jede Angabe wie "22.5" in den Naehrwerten verdaechtig.
-        nah = any(_HINWEIS.search(t) for t in texte[max(0, i - _HINWEIS_ZEILEN_OHNE_JAHR):i + 1])
+        # Auch darunter: "05.10." und darunter "haltbar bis: siehe Aufdruck" (Mascarpone).
+        nah = any(_HINWEIS.search(t) for t in texte[max(0, i - _HINWEIS_ZEILEN_OHNE_JAHR):i + 3])
         for iso, gelesen in _kandidaten(text, heute, ohne_jahr=nah):
-            liste.append({"datum": iso, "gelesen": gelesen.strip(), "zeile": i, "hinweis": hinweis or nah})
+            # Fuer die Rangfolge zaehlt nur ein Hinweis davor - sonst gewinnt
+            # bei "Hergestellt … / haltbar bis / Datum" das Herstelldatum.
+            liste.append({"datum": iso, "gelesen": gelesen.strip(), "zeile": i, "hinweis": hinweis})
     # Stehen mehrere Daten da, gewinnt eins mit Hinweiswort davor
     # ("mindestens haltbar bis"), sonst das spaeteste - ein Herstell- oder
     # Abpackdatum liegt immer vor dem MHD.

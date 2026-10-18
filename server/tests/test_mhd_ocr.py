@@ -76,6 +76,28 @@ def test_abgeschnittenes_datum_wird_nicht_geraten(texte):
     assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == ""
 
 
+@pytest.mark.parametrize("texte, datum", [
+    # Live-Bilder vom Handy (ZIP von der Testseite)
+    (["BBE:07/2028", "261007 23.04"], "2028-07-31"),                       # Dosenboden
+    (["13.91:292791:39/6", "0.3421829885309"], "2027-01-13"),             # Nullen mit Punkt
+    (["MASCARP", "05.10", "BYL142416:51", "haltbar bis: siehe Aufdruck."], "2026-10-05"),
+    (["ffnet bei-18C mindestens haltbar bis.(MHD):/Eingefroren am (EFD):", "EFD:11.08.2026", "DE",
+      "EV840", "MHD:11.08.2027"], "2027-08-11"),                           # MHD, nicht Einfrierdatum
+    (["Bei-18°Cmindestenshaltbarbis Ende/Lot:siehe oben", "02/2028", "LFE623312FR00:30"], "2028-02-29"),
+    (["haltbar bis Ende:", "L330029", "02/2027 07:10"], "2027-02-28"),
+])
+def test_mhd_aus_live_bildern(texte, datum):
+    assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == datum
+
+
+def test_uhrzeit_hinter_charge_ist_kein_datum():
+    assert mhd_ocr.mhd_finden(["BBE", "261007 23.04"], HEUTE)["datum"] == ""
+
+
+def test_nullen_nur_bei_eindeutiger_lesart():
+    assert mhd_ocr.mhd_finden(["19.98.2928"], HEUTE)["datum"] == ""     # 10.08.? 19.08.? - zu viele
+
+
 def test_ohne_jahr_nur_mit_hinweiswort():
     # Naehrwerte sehen aus wie Tag.Monat - ohne Hinweis nie ein MHD.
     assert mhd_ocr.mhd_finden(["Fett 3.5", "Eiweiss 1.12", "22.10"], HEUTE)["datum"] == ""
