@@ -21,6 +21,7 @@ import asyncio
 import logging
 import re
 import threading
+import time
 from datetime import date
 
 from .dates import mhd_aus_teilen
@@ -52,25 +53,28 @@ def _ocr():
         return _engine
 
 
-def _texte_sync(bild: bytes) -> list[str]:
+def _erkennen_sync(bild: bytes) -> tuple[list[tuple[str, float]], list[int]]:
+    """Textzeilen mit Sicherheit (0-1) und die Groesse, in der gelesen wurde."""
     import cv2
     import numpy as np
 
     img = cv2.imdecode(np.frombuffer(bild, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
-        return []
+        return [], [0, 0]
     # Groesser als 1600 Pixel bringt nichts ausser Rechenzeit.
     faktor = 1600 / max(img.shape[:2])
     if faktor < 1:
         img = cv2.resize(img, None, fx=faktor, fy=faktor, interpolation=cv2.INTER_AREA)
     ergebnis, _ = _ocr()(img)
-    return [str(r[1]) for r in (ergebnis or [])]
+    zeilen = [(str(r[1]), float(r[2])) for r in (ergebnis or [])]
+    return zeilen, [int(img.shape[1]), int(img.shape[0])]
 
 
 async def texte_lesen(bild: bytes) -> list[str]:
     """Alle erkannten Textzeilen eines JPEG/PNG, oben nach unten."""
     async with _reihe:
-        return await asyncio.to_thread(_texte_sync, bild)
+        zeilen, _ = await asyncio.to_thread(_erkennen_sync, bild)
+    return [text for text, _ in zeilen]
 
 
 # ------------------------------------------------------------------- Regeln
@@ -110,25 +114,47 @@ def _kandidaten(text: str, heute: date) -> list[tuple[str, str]]:
     return gefunden
 
 
-def mhd_finden(texte: list[str], heute: date | None = None) -> dict:
-    """Das MHD unter den erkannten Texten: {"datum": ISO oder "", "gelesen": …}.
-
-    Stehen mehrere Daten da, gewinnt eins mit Hinweiswort davor ("mindestens
-    haltbar bis"), sonst das spaeteste - ein Herstell- oder Abpackdatum liegt
-    immer vor dem MHD.
-    """
+def kandidaten(texte: list[str], heute: date | None = None) -> list[dict]:
+    """Alle Daten in den Texten, das gewaehlte zuerst - fuer mhd_finden und die Testseite."""
     heute = heute or date.today()
-    beste: tuple[bool, str, str] | None = None
+    liste = []
     for i, text in enumerate(texte):
         umfeld = text + " " + (texte[i - 1] if i else "")
         hinweis = bool(_HINWEIS.search(umfeld))
         for iso, gelesen in _kandidaten(text, heute):
-            kandidat = (hinweis, iso, gelesen)
-            if beste is None or kandidat[:2] > beste[:2]:
-                beste = kandidat
-    if beste is None:
+            liste.append({"datum": iso, "gelesen": gelesen.strip(), "zeile": i, "hinweis": hinweis})
+    # Stehen mehrere Daten da, gewinnt eins mit Hinweiswort davor
+    # ("mindestens haltbar bis"), sonst das spaeteste - ein Herstell- oder
+    # Abpackdatum liegt immer vor dem MHD.
+    liste.sort(key=lambda k: (k["hinweis"], k["datum"]), reverse=True)
+    return liste
+
+
+def mhd_finden(texte: list[str], heute: date | None = None) -> dict:
+    """Das MHD unter den erkannten Texten: {"datum": ISO oder "", "gelesen": …}."""
+    liste = kandidaten(texte, heute)
+    if not liste:
         return {"datum": "", "gelesen": ""}
-    return {"datum": beste[1], "gelesen": beste[2].strip()}
+    return {"datum": liste[0]["datum"], "gelesen": liste[0]["gelesen"]}
+
+
+async def pruefen(bild: bytes) -> dict | None:
+    """Alles, was die Erkennung sieht - fuer die Testseite unter System."""
+    if not verfuegbar():
+        return None
+    start = time.perf_counter()
+    async with _reihe:
+        zeilen, groesse = await asyncio.to_thread(_erkennen_sync, bild)
+    texte = [text for text, _ in zeilen]
+    liste = kandidaten(texte)
+    return {
+        "datum": liste[0]["datum"] if liste else "",
+        "gelesen": liste[0]["gelesen"] if liste else "",
+        "kandidaten": liste,
+        "texte": [{"text": text, "sicher": round(sicher, 2)} for text, sicher in zeilen],
+        "groesse": groesse,
+        "ms": round((time.perf_counter() - start) * 1000),
+    }
 
 
 async def mhd_lesen(bild: bytes) -> dict | None:

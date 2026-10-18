@@ -116,3 +116,22 @@ def test_echte_texterkennung_an_einem_bild():
 
     ergebnis = asyncio.run(mhd_ocr.mhd_lesen(puffer.getvalue()))
     assert ergebnis["datum"] == "2026-11-16"
+
+
+def test_kandidaten_zeigen_alle_daten_gewaehltes_zuerst():
+    liste = mhd_ocr.kandidaten(["Hergestellt 01.09.2027", "Mindestens haltbar bis", "15.03.2027"], HEUTE)
+    assert [k["datum"] for k in liste] == ["2027-03-15", "2027-09-01"]
+    assert liste[0]["hinweis"] is True and liste[0]["zeile"] == 2
+
+
+def test_testseite_zeigt_zwischenschritte(client, monkeypatch):
+    bild = base64.b64encode(b"\xff\xd8" + b"x" * 200).decode()
+
+    async def pruefen(roh):
+        return {"datum": "2027-10-07", "gelesen": "07/10/27", "kandidaten": [], "texte": [], "ms": 5}
+    monkeypatch.setattr(mhd_ocr, "pruefen", pruefen)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    r = client.post("/api/mhd/test", json={"bild": bild, "ki": True})
+    assert r.status_code == 200
+    assert r.json()["lokal"]["datum"] == "2027-10-07" and r.json()["ki"] is None   # KI nicht eingerichtet

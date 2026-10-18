@@ -376,6 +376,34 @@ async def mhd_foto(body: _MhdBild, session: AsyncSession = Depends(get_session))
     return {"datum": "", "gelesen": (lokal or {}).get("gelesen", ""), "quelle": ""}
 
 
+@router.post("/mhd/test")
+async def mhd_test(body: _MhdBild, session: AsyncSession = Depends(get_session)):
+    """Testseite unter System: lokal mit allen Zwischenschritten, auf Wunsch die KI daneben."""
+    import base64
+    import binascii
+    import time
+
+    from ..services import ki, mhd_ocr
+
+    if body.typ not in ki.BILDTYPEN:
+        raise HTTPException(422, "Bildformat nicht unterstützt")
+    try:
+        roh = base64.b64decode(body.bild, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(422, "Bild ist kein gültiges Base64") from None
+    try:
+        lokal = await mhd_ocr.pruefen(roh)
+    except Exception as e:      # kaputtes Bild - auf der Testseite zeigen statt 500
+        lokal = {"fehler": str(e)[:200]}
+    antwort = {"lokal": lokal, "ki": None}
+    if body.ki and await ki.aktiv(session):
+        start = time.perf_counter()
+        aus_ki = await ki.mhd_lesen(body.bild, body.typ)
+        antwort["ki"] = {**(aus_ki or {"datum": "", "gelesen": "", "fehler": "keine Antwort"}),
+                         "ms": round((time.perf_counter() - start) * 1000)}
+    return antwort
+
+
 @router.get("/products", response_model=list[ProductOut])
 async def list_products(
     session: AsyncSession = Depends(get_session),

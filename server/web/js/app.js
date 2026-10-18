@@ -1247,6 +1247,100 @@ $('#layout-picker')?.addEventListener('keydown', (ev) => {
   if (el && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); chooseLayout(el); }
 });
 
+// ------------------------------------------------- MHD-Erkennung testen
+// Mehrere Fotos auf einmal durch die Texterkennung des Containers schicken -
+// mit allen Zwischenschritten: jede gelesene Zeile, jedes gefundene Datum und
+// welches davon gewaehlt wurde. Zum Nachvollziehen, warum ein Aufdruck nicht
+// erkannt wird, und als Material zum Nachschaerfen der Regeln.
+const mhdTest = { ergebnisse: [] };
+
+async function mhdTestStatus() {
+  const el = $('#mhd-test-status');
+  try {
+    const w = await get('/api/mhd');
+    el.textContent = `Texterkennung im Container: ${w.lokal ? 'bereit' : 'nicht installiert'}`
+      + ` · KI: ${w.ki ? 'eingerichtet' : 'nicht eingerichtet'}`;
+    $('#mhd-test-ki').disabled = !w.ki;
+  } catch (e) { el.textContent = e.message; }
+}
+
+function mhdTestBild(datei) {
+  // Wie am Handy: hoechstens 1600 Pixel, JPEG - mehr liest der Server nicht.
+  return createImageBitmap(datei).then((bild) => {
+    const f = Math.min(1, 1600 / Math.max(bild.width, bild.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bild.width * f);
+    c.height = Math.round(bild.height * f);
+    c.getContext('2d').drawImage(bild, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.9).split(',')[1];
+  });
+}
+
+const mhdDatum = (iso) => (iso ? iso.split('-').reverse().join('.') : '–');
+
+function mhdTestKarte(name, url, r) {
+  const l = r.lokal || {};
+  const gewaehlt = new Set((l.kandidaten || []).slice(0, 1).map((k) => k.zeile));
+  const markiert = new Set((l.kandidaten || []).map((k) => k.zeile));
+  const zeilen = (l.texte || []).map((t, i) => `<tr${gewaehlt.has(i) ? ' style="font-weight:600"' : ''}>
+      <td class="mono">${esc(t.text)}</td><td class="right muted">${Math.round(t.sicher * 100)} %</td>
+      <td>${markiert.has(i) ? (gewaehlt.has(i) ? '✔ gewählt' : 'Datum') : ''}</td></tr>`).join('');
+  const kand = (l.kandidaten || []).map((k, i) => `<li>${i === 0 ? '<b>' : ''}${mhdDatum(k.datum)}${i === 0 ? '</b>' : ''}
+      <span class="muted">aus „${esc(k.gelesen)}“, Zeile ${k.zeile + 1}${k.hinweis ? ', mit Hinweiswort' : ''}</span></li>`).join('');
+  const ki = r.ki ? `<div>KI: <b>${mhdDatum(r.ki.datum)}</b>
+      <span class="muted">${r.ki.gelesen ? `„${esc(r.ki.gelesen)}“ · ` : ''}${r.ki.ms} ms${r.ki.fehler ? ` · ${esc(r.ki.fehler)}` : ''}</span></div>` : '';
+  const lokalText = l.fehler ? `<span style="color:var(--danger)">${esc(l.fehler)}</span>`
+    : r.lokal === null ? '<span class="muted">Texterkennung nicht installiert</span>'
+      : `<b style="color:${l.datum ? 'var(--success)' : 'var(--danger)'}">${l.datum ? mhdDatum(l.datum) : 'kein Datum'}</b>
+        <span class="muted">${l.gelesen ? `„${esc(l.gelesen)}“ · ` : ''}${l.ms} ms · ${(l.groesse || []).join('×')} px</span>`;
+  return `<div class="row" style="align-items:flex-start;gap:12px;border-top:1px solid var(--border);padding-top:10px">
+    <img src="${url}" alt="" style="width:120px;max-height:160px;object-fit:contain;border-radius:8px;background:#000">
+    <div style="flex:1;min-width:0">
+      <div class="muted" style="font-size:12px">${esc(name)}</div>
+      <div>Lokal: ${lokalText}</div>${ki}
+      ${kand ? `<ul style="margin:6px 0 0 18px;padding:0">${kand}</ul>` : ''}
+      ${zeilen ? `<details style="margin-top:6px"><summary class="muted">${(l.texte || []).length} gelesene Zeilen</summary>
+        <div class="table-wrap"><table><tbody>${zeilen}</tbody></table></div></details>` : ''}
+    </div></div>`;
+}
+
+$('#mhd-test-dateien').addEventListener('change', async (ev) => {
+  const dateien = [...ev.target.files];
+  ev.target.value = '';
+  const liste = $('#mhd-test-liste');
+  const mitKi = $('#mhd-test-ki').checked;
+  for (const datei of dateien) {
+    const url = URL.createObjectURL(datei);
+    const platz = document.createElement('div');
+    platz.innerHTML = `<div class="muted">${esc(datei.name)} wird gelesen …</div>`;
+    liste.prepend(platz);
+    try {
+      const r = await post('/api/mhd/test', { bild: await mhdTestBild(datei), typ: 'image/jpeg', ki: mitKi });
+      platz.innerHTML = mhdTestKarte(datei.name, url, r);
+      mhdTest.ergebnisse.push({ datei: datei.name, ...r });
+    } catch (e) {
+      platz.innerHTML = `<div style="color:var(--danger)">${esc(datei.name)}: ${esc(e.message)}</div>`;
+    }
+    $('#mhd-test-json').disabled = $('#mhd-test-leeren').disabled = !mhdTest.ergebnisse.length;
+  }
+});
+
+$('#mhd-test-json').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(mhdTest.ergebnisse, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `mhd-test-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+  a.click();
+});
+
+$('#mhd-test-leeren').addEventListener('click', () => {
+  mhdTest.ergebnisse = [];
+  $('#mhd-test-liste').innerHTML = '';
+  $('#mhd-test-json').disabled = $('#mhd-test-leeren').disabled = true;
+});
+
+$('#mhd-test').addEventListener('toggle', (ev) => { if (ev.target.open) mhdTestStatus(); });
+
 $('#notify-test').addEventListener('click', async () => {
   try {
     const r = await post('/api/notify/test');

@@ -415,6 +415,22 @@
         wiederherstellen. Die JSON-Datei ist zum Weiterverarbeiten gedacht.</p>
     </div>
 
+    <details class="card" style="margin-top:14px" id="mhd-test">
+      <summary><h2 style="display:inline">MHD-Erkennung testen</h2>
+        <span class="muted"> – Fotos durch die Texterkennung schicken und sehen, was sie liest</span></summary>
+      <p class="muted" id="mhd-test-status">…</p>
+      <div class="row">
+        <input type="file" id="mhd-test-dateien" accept="image/*" multiple>
+        <label class="row tight"><input type="checkbox" id="mhd-test-ki"> auch die KI fragen</label>
+        <button class="ghost" id="mhd-test-json" disabled>Ergebnisse herunterladen</button>
+        <button class="ghost" id="mhd-test-leeren" disabled>Leeren</button>
+      </div>
+      <p class="hint">Am besten so fotografieren wie beim Scannen: nah am Datum. Im Container
+        wird gelesen, was im Bild steht – bei kleinem Druck auf Flaschen hilft ein enger Ausschnitt.
+        Die heruntergeladene Datei enthält nur Text und Ergebnisse, keine Bilder.</p>
+      <div id="mhd-test-liste" style="display:grid;gap:12px;margin-top:10px"></div>
+    </details>
+
     <details class="card" style="margin-top:14px">
       <summary><h2 style="display:inline">Bestand aus Version 1 übernehmen</h2>
         <span class="muted"> – nur einmal beim Umstieg nötig</span></summary>
