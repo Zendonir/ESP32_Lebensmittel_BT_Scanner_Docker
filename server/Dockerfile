@@ -11,6 +11,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Texterkennung fuer "MHD vom Foto", eigene Schicht. Begruendung fuer das
+# --no-deps steht in requirements-ocr.txt.
+COPY requirements-ocr.txt .
+RUN pip install --no-cache-dir -r requirements-ocr.txt && \
+    pip install --no-cache-dir --no-deps rapidocr_onnxruntime==1.4.4 && \
+    python -c "import rapidocr_onnxruntime, cv2, onnxruntime"
+
 COPY app ./app
 COPY web ./web
 

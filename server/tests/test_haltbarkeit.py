@@ -208,7 +208,7 @@ def test_vorschlag_mit_vorlage_ueber_die_api(client):
 def test_mhd_aus_den_teilen_des_aufdrucks():
     from datetime import date
     heute = date(2026, 10, 18)
-    teile = ki.mhd_aus_teilen
+    from app.services.dates import mhd_aus_teilen as teile
     assert teile(0, 1, 2027, heute) == "2027-01-31"        # "01.2027": bis Monatsende
     assert teile(28, 10, 2027, heute) == "2027-10-28"      # "28/10/2027"
     assert teile(7, 10, 27, heute) == "2027-10-07"         # "07/10/27"

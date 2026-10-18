@@ -1,0 +1,14 @@
+# Texterkennung fuer "MHD vom Foto" (services/mhd_ocr.py), lokal im Container.
+#
+# rapidocr_onnxruntime selbst wird im Dockerfile mit --no-deps installiert:
+# es verlangt opencv-python, das Grafikbibliotheken (libGL) nachzieht, die es
+# im schlanken Abbild nicht gibt und die hier niemand braucht. Die headless-
+# Variante liefert dasselbe cv2-Modul ohne sie. Rund 300 MB zusammen.
+onnxruntime==1.31.0
+opencv-python-headless==5.0.0.93
+numpy==2.4.6
+pyclipper==1.4.0
+shapely==2.2.0
+pyyaml==6.0.3
+six==1.17.0
+tqdm==4.70.1

@@ -23,7 +23,7 @@ server/app/
   services/      inventory · labels · calibration · categories · openfoodfacts ·
                  notify · scheduler · dates · settings_store · seed · importer ·
                  firmware · updates · deploy · zeichen · hochformat · haushalte ·
-                 druckertest
+                 druckertest · mhd_ocr (MHD vom Foto, lokal)
   fonts/         DejaVu Sans fuer das Hochformat-Bild (im Repo, damit Test und
                  Container gleich umbrechen)
 server/web/      index.html · mobile.html · js/ · css/ (kein Build-Schritt)
@@ -213,7 +213,7 @@ cd firmware && pio run --target upload # flashen
 | Terminal "haengt" ohne Server | Jeder vergebliche TCP-Aufbau blockiert bis `WEBSOCKETS_TCP_TIMEOUT`. Deshalb: Abstand waechst 5/10/20 s (`WS_RECONNECT_MAX_MS`), und waehrend der Bedienung (`Net::noteUserActivity`, `USER_QUIET_MS`) wird ohne Verbindung gar nicht verbunden. Das selbsttaetig geoeffnete Portal laeuft nebenher und legt Scanner/Touch nicht mehr still |
 | Offline-Betrieb | Ohne Server sammelt `OfflineQueue` (NVS, 40 Eintraege, uebersteht Neustarts) die Scans, der Schirm zeigt sie (lokaler Bildschirm, id -1). Nach dem Verbinden geht eine `offline`-Nachricht hinaus, erst `offline_ack` loescht. Server: Etiketten auslagern (nie wieder einbuchen), Produkte als `OfflineScan` unter "Nachtragen" auf der Startseite. Druckergebnisse ohne Verbindung werden nachgereicht |
 | Tipp ohne sichtbare Reaktion | `Screen::setBusy()` nach Tipp/Scan: ab 350 ms Balken unter der Statusleiste, nach 10 s "Server antwortet nicht". Ohne Verbindung sagt ein Tipp das sofort |
-| MHD vom Foto (Handy) | `POST /api/ki/mhd` mit verkleinertem JPEG (1280 px, passt durch 1-MB-Proxygrenzen). Claude liefert nur Tag/Monat/Jahr wie aufgedruckt; `ki.mhd_aus_teilen()` rechnet um ("01.2027" = Monatsletzter, zweistellige Jahre = 20xx, Unplausibles = leer). Browser-OCR liest Nadeldruck und Chargennummern zu unzuverlaessig |
+| MHD vom Foto (Handy) | Lokal im Container: `services/mhd_ocr.py` (RapidOCR/ONNX, `requirements-ocr.txt`, im Dockerfile `rapidocr_onnxruntime --no-deps` wegen opencv-headless). Handy zeigt Live-Kamera mit Zielrahmen und schickt nur den Ausschnitt, etwa jede Sekunde (`POST /api/mhd/foto`); nach 6 s ohne Treffer einmal mit `ki: true` (Claude, falls eingerichtet). Welche Zahl das MHD ist, entscheidet `mhd_finden()` (Hinweiswort vor spaetestem Datum, Uhrzeit/Charge/Barcode nie); Umrechnung `dates.mhd_aus_teilen()`. Ganze Fotos verlieren kleinen Flaschendruck - deshalb der Rahmen |
 | Letztes Etikett nachdrucken | `workflow.letztes_etikett()` (juengster Druckauftrag mit Artikel dahinter - Test/Messstreifen zaehlen nicht, je Haushalt) + `workflow.nachdrucken()` (einziger Weg fuer Nachdrucke, auch `/reprint/{label}`). Terminal: Kachel "Nachdruck" und "Nochmal drucken" nach dem Speichern, druckt am eigenen Terminal; Handy: Reiter Einlagern, `POST /api/labels/reprint-last` |
 | Menge und Etikettenzahl verwechselt | „Menge“ (`draft.quantity` + Einheit der Vorlage) ist, was in **einer** Packung steckt, `count` die Zahl der Etiketten = Packungen. 2 Packungen zu je 3 Wuerstchen = 2 Etiketten mit "3 St." |
 | Ein haengender Browser friert das Terminal ein | Jeder Sendevorgang hat eine Zeitgrenze (`hub.SEND_TIMEOUT_S`) |

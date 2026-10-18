@@ -14,17 +14,16 @@ Gefragt wird nur mit Produktname und Marke - nie mit Bestand oder Haushalt.
 from __future__ import annotations
 
 import asyncio
-import calendar
 import json
 import logging
 import os
-from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Category, Product
 from . import haltbarkeit, settings_store
+from .dates import mhd_aus_teilen
 
 log = logging.getLogger(__name__)
 
@@ -161,34 +160,6 @@ _SCHEMA_MHD = {
 }
 
 BILDTYPEN = ("image/jpeg", "image/png", "image/webp")
-
-
-def mhd_aus_teilen(tag: int, monat: int, jahr: int, heute: date | None = None) -> str:
-    """Tag/Monat/Jahr vom Aufdruck als ISO-Datum, "" wenn es keins sein kann.
-
-    Nur Monat und Jahr ("01.2027", "mindestens haltbar bis Ende") heisst: bis
-    zum Monatsletzten. Zweistellige Jahre liegen in diesem Jahrhundert. Was
-    mehr als ein Jahr zurueck oder zwanzig Jahre voraus liegt, ist eher eine
-    falsch gelesene Chargennummer als ein MHD.
-    """
-    heute = heute or date.today()
-    try:
-        tag, monat, jahr = int(tag), int(monat), int(jahr)
-    except (TypeError, ValueError):
-        return ""
-    if 0 <= jahr < 100:
-        jahr += 2000
-    if not 1 <= monat <= 12 or not 2000 <= jahr <= 2100:
-        return ""
-    letzter = calendar.monthrange(jahr, monat)[1]
-    if tag == 0:
-        tag = letzter
-    if not 1 <= tag <= letzter:
-        return ""
-    datum = date(jahr, monat, tag)
-    if (datum - heute).days < -366 or (datum - heute).days > 20 * 366:
-        return ""
-    return datum.isoformat()
 
 
 async def mhd_lesen(bild_b64: str, typ: str = "image/jpeg") -> dict | None:

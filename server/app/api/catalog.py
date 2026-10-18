@@ -333,6 +333,49 @@ async def ki_mhd(body: _MhdFoto, session: AsyncSession = Depends(get_session)):
     return ergebnis
 
 
+class _MhdBild(BaseModel):
+    bild: str = Field(min_length=100, max_length=6_000_000)
+    typ: str = "image/jpeg"
+    # Im Sekundentakt der Live-Kamera nur lokal lesen; die KI erst, wenn
+    # das Handy nach einer Weile ausdruecklich darum bittet.
+    ki: bool = False
+
+
+@router.get("/mhd")
+async def mhd_wege(session: AsyncSession = Depends(get_session)):
+    """Welche Wege das Handy zum Lesen des MHD anbieten kann."""
+    from ..services import ki, mhd_ocr
+
+    return {"lokal": mhd_ocr.verfuegbar(), "ki": await ki.aktiv(session)}
+
+
+@router.post("/mhd/foto")
+async def mhd_foto(body: _MhdBild, session: AsyncSession = Depends(get_session)):
+    """MHD aus einem Foto: erst lokal im Container, auf Wunsch danach die KI."""
+    import base64
+    import binascii
+
+    from ..services import ki, mhd_ocr
+
+    if body.typ not in ki.BILDTYPEN:
+        raise HTTPException(422, "Bildformat nicht unterstützt")
+    try:
+        roh = base64.b64decode(body.bild, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(422, "Bild ist kein gültiges Base64") from None
+
+    lokal = await mhd_ocr.mhd_lesen(roh)
+    if lokal and lokal["datum"]:
+        return {**lokal, "quelle": "lokal"}
+    if body.ki and await ki.aktiv(session):
+        aus_ki = await ki.mhd_lesen(body.bild, body.typ)
+        if aus_ki and aus_ki["datum"]:
+            return {**aus_ki, "quelle": "ki"}
+    if lokal is None and not await ki.aktiv(session):
+        raise HTTPException(503, "Weder Texterkennung noch KI verfügbar")
+    return {"datum": "", "gelesen": (lokal or {}).get("gelesen", ""), "quelle": ""}
+
+
 @router.get("/products", response_model=list[ProductOut])
 async def list_products(
     session: AsyncSession = Depends(get_session),
