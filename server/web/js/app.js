@@ -2,6 +2,7 @@
 // bleibt klein und die Dateien sind das, was ausgeliefert wird.
 
 import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from './api.js';
+import { mhdKamera } from './mhdkamera.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -1323,6 +1324,34 @@ $('#mhd-test-dateien').addEventListener('change', async (ev) => {
     }
     $('#mhd-test-json').disabled = $('#mhd-test-leeren').disabled = !mhdTest.ergebnisse.length;
   }
+});
+
+function mhdTestHinzu(name, url, r) {
+  const platz = document.createElement('div');
+  platz.innerHTML = mhdTestKarte(name, url, r);
+  $('#mhd-test-liste').prepend(platz);
+  mhdTest.ergebnisse.push({ datei: name, ...r });
+  $('#mhd-test-json').disabled = $('#mhd-test-leeren').disabled = false;
+}
+
+$('#mhd-test-kamera').addEventListener('click', async () => {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    toast('Live-Kamera braucht HTTPS (oder localhost) – Fotos gehen trotzdem', 'warn');
+    return;
+  }
+  let n = 0;
+  try {
+    // KI wie in der Praxis: nur wenn angehakt, und dann einmal nach 6 s ohne Treffer.
+    await mhdKamera({
+      test: true,
+      kiErlaubt: $('#mhd-test-ki').checked,
+      beiBild: (bild, r) => {
+        n += 1;
+        mhdTestHinzu(`Live ${new Date().toLocaleTimeString('de-DE')} · Bild ${n}`,
+          `data:image/jpeg;base64,${bild}`, r);
+      },
+    });
+  } catch (e) { toast(e.message, 'warn'); }
 });
 
 $('#mhd-test-json').addEventListener('click', () => {

@@ -112,6 +112,7 @@
 <div id="toasts"></div>
 <script type="module">
 import { get, post, del, put, toast, auslagern, fmtDate, daysPill, esc, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from '/static/js/api.js';
+import { mhdKamera, jpegAus } from '/static/js/mhdkamera.js';
 
 // Wer die Handyansicht oeffnet, hat sich fuer sie entschieden - die
 // Weiterleitung auf der grossen Seite gilt dann wieder (siehe index.html).
@@ -458,92 +459,6 @@ function plusTage(tage) {
   const d = new Date(); d.setDate(d.getDate() + tage);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-// Ausschnitt eines Bildes (Video oder Foto) als JPEG in Base64, hoechstens
-// 1280 Pixel breit - passt durch einen Reverse Proxy mit 1-MB-Grenze.
-function jpegAus(quelle, x, y, w, h) {
-  const faktor = Math.min(1, 1280 / Math.max(w, h));
-  const leinwand = document.createElement('canvas');
-  leinwand.width = Math.round(w * faktor);
-  leinwand.height = Math.round(h * faktor);
-  leinwand.getContext('2d').drawImage(quelle, x, y, w, h, 0, 0, leinwand.width, leinwand.height);
-  return leinwand.toDataURL('image/jpeg', 0.85).split(',')[1];
-}
-
-// Vollbild-Kamera mit Zielrahmen. Liefert {datum, gelesen, quelle} oder null
-// (abgebrochen). Gelesen wird nur, was im Rahmen liegt: kleiner Aufdruck auf
-// einer Flasche geht im ganzen Bild unter, im Ausschnitt nicht.
-async function mhdLive(kiErlaubt) {
-  const KI_NACH_MS = 6000;
-  const ebene = document.createElement('div');
-  ebene.innerHTML = `<div style="position:fixed;inset:0;z-index:60;background:#000;display:flex;flex-direction:column">
-    <div style="position:relative;flex:1;overflow:hidden">
-      <video playsinline muted autoplay style="width:100%;height:100%;object-fit:cover"></video>
-      <div class="ziel" style="position:absolute;left:8%;right:8%;top:36%;height:24%;border:3px solid #fff;
-        border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,.5)"></div>
-    </div>
-    <div style="padding:14px 16px calc(14px + env(safe-area-inset-bottom));display:grid;gap:10px;background:#111">
-      <div class="info" style="text-align:center;color:#fff">Datum in den Rahmen halten</div>
-      <button type="button" class="ghost">Abbrechen</button>
-    </div></div>`;
-  document.body.appendChild(ebene);
-  const video = ebene.querySelector('video');
-  const ziel = ebene.querySelector('.ziel');
-  const info = ebene.querySelector('.info');
-  let offen = true, kamera = null;
-  const ende = () => {
-    offen = false;
-    kamera?.getTracks().forEach((t) => t.stop());
-    ebene.remove();
-  };
-  ebene.querySelector('button').addEventListener('click', ende);
-  try {
-    kamera = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
-    });
-  } catch (e) {
-    ende();
-    toast(`Kamera nicht verfügbar: ${e.message}`, 'warn');
-    return null;
-  }
-  video.srcObject = kamera;
-  video.play?.().catch(() => {});
-
-  // Rahmen (Bildschirm) -> Videopixel; object-fit: cover schneidet ab.
-  function ausschnitt() {
-    const vw = video.videoWidth, vh = video.videoHeight;
-    if (!vw) return null;
-    const flaeche = video.getBoundingClientRect(), r = ziel.getBoundingClientRect();
-    const s = Math.max(flaeche.width / vw, flaeche.height / vh);
-    const ox = (flaeche.width - vw * s) / 2, oy = (flaeche.height - vh * s) / 2;
-    const x = Math.max(0, (r.left - flaeche.left - ox) / s);
-    const y = Math.max(0, (r.top - flaeche.top - oy) / s);
-    return jpegAus(video, x, y, Math.min(vw - x, r.width / s), Math.min(vh - y, r.height / s));
-  }
-
-  const start = Date.now();
-  let kiVersucht = false;
-  while (offen) {
-    const t0 = Date.now();
-    const bild = ausschnitt();
-    if (bild) {
-      const mitKi = kiErlaubt && !kiVersucht && Date.now() - start > KI_NACH_MS;
-      if (mitKi) { kiVersucht = true; info.textContent = 'Frage die KI …'; }
-      try {
-        const r = await post('/api/mhd/foto', { bild, ki: mitKi });
-        if (!offen) return null;
-        if (r.datum) { ende(); return r; }
-        if (mitKi) info.textContent = 'Nicht erkannt – näher ran, Licht von der Seite';
-      } catch (e) {
-        if (!offen) return null;
-        info.textContent = e.message;
-      }
-    }
-    // Hoechstens etwa ein Bild pro Sekunde - der Server rechnet je Bild rund 0,5 s.
-    await new Promise((ok) => setTimeout(ok, Math.max(150, 900 - (Date.now() - t0))));
-  }
-  return null;
-}
-
 // Kopf der Maske ohne Vorlage: alles frei einzugeben.
 function freierKopf(p, kategorien, kiStatus, opt, mhdKnoepfe, mhdWege) {
   const vorlage = null;
@@ -704,10 +619,9 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
     quelle.textContent = 'von Hand gesetzt';
   }));
 
-  // MHD scannen: Live-Kamera mit Zielrahmen, der Ausschnitt geht etwa
-  // sekuendlich an den Server, der ihn lokal liest (services/mhd_ocr.py).
-  // Klappt das nach einigen Sekunden nicht, fragt ein Bild die KI - falls
-  // eingerichtet. Ohne Live-Kamera (http) ein einzelnes Foto, gleich mit KI.
+  // MHD scannen: Live-Kamera mit Zielrahmen (js/mhdkamera.js - dieselbe wie
+  // auf der Testseite unter System). Ohne Live-Kamera (http) ein einzelnes
+  // Foto, gleich mit KI.
   const fotoKnopf = document.getElementById('mhd-foto');
   const fotoDatei = document.getElementById('mhd-datei');
   function mhdUebernehmen(r) {
@@ -719,8 +633,10 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
   }
   fotoKnopf?.addEventListener('click', async () => {
     if (!kameraMoeglich()) { fotoDatei.click(); return; }
-    const r = await mhdLive(mhdWege.ki);
-    if (r) mhdUebernehmen(r);
+    try {
+      const r = await mhdKamera({ kiErlaubt: mhdWege.ki });
+      if (r) mhdUebernehmen(r);
+    } catch (e) { toast(e.message, 'warn'); }
   });
   fotoDatei?.addEventListener('change', async () => {
     const datei = fotoDatei.files?.[0];
