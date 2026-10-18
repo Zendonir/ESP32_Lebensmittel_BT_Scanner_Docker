@@ -77,8 +77,9 @@ def mhd_aus_teilen(tag: int, monat: int, jahr: int, heute: date | None = None) -
 
     Nur Monat und Jahr ("01.2027", "mindestens haltbar bis Ende") heisst: bis
     zum Monatsletzten. Zweistellige Jahre liegen in diesem Jahrhundert. Was
-    mehr als ein Jahr zurueck oder zwanzig Jahre voraus liegt, ist eher eine
-    falsch gelesene Chargennummer als ein MHD.
+    mehr als 90 Tage zurueck oder zwanzig Jahre voraus liegt, ist eher falsch
+    gelesen als ein MHD: wer einlagert, hat selten etwas seit Monaten
+    Abgelaufenes - aber ein verwackeltes "2026" liest sich gern als "2025".
     """
     heute = heute or date.today()
     try:
@@ -95,7 +96,7 @@ def mhd_aus_teilen(tag: int, monat: int, jahr: int, heute: date | None = None) -
     if not 1 <= tag <= letzter:
         return ""
     datum = date(jahr, monat, tag)
-    if (datum - heute).days < -366 or (datum - heute).days > 20 * 366:
+    if (datum - heute).days < -90 or (datum - heute).days > 20 * 366:
         return ""
     return datum.isoformat()
 

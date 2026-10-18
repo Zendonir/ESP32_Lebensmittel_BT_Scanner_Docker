@@ -90,6 +90,17 @@ def test_mhd_aus_live_bildern(texte, datum):
     assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == datum
 
 
+@pytest.mark.parametrize("texte, datum", [
+    (["030727", "L0936.08:27"], "2027-07-03"),          # Glasdeckel "03 07 27", Leerzeichen verschluckt
+    (["03 07 27", "L0936 08:27"], "2027-07-03"),
+    (["03.11.2025"], ""),                                # verwackeltes 2026 - ueber 90 Tage zurueck
+    (["Unter+7°C", "mindestens haltbar bis:", "03.11.2026"], "2026-11-03"),
+    (["407855"], ""), (["261007"], ""), (["8053971"], ""),   # Chargen, keine Daten
+])
+def test_mhd_aus_live_bildern_runde_2(texte, datum):
+    assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == datum
+
+
 def test_uhrzeit_hinter_charge_ist_kein_datum():
     assert mhd_ocr.mhd_finden(["BBE", "261007 23.04"], HEUTE)["datum"] == ""
 

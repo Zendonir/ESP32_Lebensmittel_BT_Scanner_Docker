@@ -216,6 +216,11 @@ _MUSTER = [
     ("voll", re.compile(rf"(?<!\d)(\d{{2}})(\d{{2}}){_T}(\d{{4}}|\d{{2}})(?!\d)")),
     # 28102027 - alle Trennzeichen weg; nur mit 20xx, sonst ist es eine Charge
     ("voll", re.compile(r"(?<!\d)(\d{2})(\d{2})(20\d{2})(?!\d)")),
+    # 03 07 27 - Leerzeichen als Trenner (Glasdeckel), nur zweistellige Teile
+    ("voll", re.compile(r"(?<!\d)(\d{2}) (\d{2}) (\d{4}|\d{2})(?![\d.:])")),
+    # 030727 - dasselbe, die Leerzeichen verschluckt. Nur, wenn die Zahl allein
+    # auf ihrer Zeile steht; Chargen wie "261007" (2007) verwirft die Pruefung.
+    ("voll", re.compile(r"^\s*(\d{2})(\d{2})(\d{2})\s*$")),
     # 13.91:292791:39 - Nadeldruck laeuft ineinander, das Jahr grenzt an die
     # Uhrzeit. Nur vierstellig und nur, wenn nichts anderes passt.
     ("voll", re.compile(rf"(?<!\d)(\d{{1,2}}){_T3}(\d{{1,2}}){_T3}(\d{{4}})")),
