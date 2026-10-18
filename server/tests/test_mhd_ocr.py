@@ -42,6 +42,38 @@ def test_mhd_aus_echten_aufdrucken(texte, datum):
     assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == datum
 
 
+@pytest.mark.parametrize("texte, datum", [
+    # More-Sirup, Punktdruck, nach "Punkte verdicken"
+    (["Mindestens haltbar bis/ LOT:", "Best before / LOT:", "08.01.2028", "DMA0122602", "07:26"], "2028-01-08"),
+    # Skyr-Deckel, schraeg
+    (["milu", "28.10.26", "SKY", "R", "NATUR"], "2026-10-28"),
+    # Creme fraiche: Datum, darunter Charge und Uhrzeit
+    (["CREME", "18.10.26", "161F35 21:31 3", "8053971"], "2026-10-18"),
+    # Milram: kein Jahr, Hinweis drei Zeilen davor, Spalte "Salz" dazwischen
+    (["Bei +8oC mindestens haltbar bis:", "Salz", "Frische Reze", "31.10", "aufmilram.d", "23:15"],
+     "2026-10-31"),
+    (["MHD 31.10."], "2026-10-31"),
+])
+def test_mhd_aus_weiteren_aufdrucken(texte, datum):
+    assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == datum
+
+
+def test_ohne_jahr_nur_mit_hinweiswort():
+    # Naehrwerte sehen aus wie Tag.Monat - ohne Hinweis nie ein MHD.
+    assert mhd_ocr.mhd_finden(["Fett 3.5", "Eiweiss 1.12", "22.10"], HEUTE)["datum"] == ""
+    # Miree: "1,15 g" als "1.1" gelesen, zufaellig unter "haltbar bis:"
+    assert mhd_ocr.mhd_finden(["bis +8Cmindestens", "haltbar bis:", "Eiweis", "1.1", "9"], HEUTE)["datum"] == ""
+
+
+def test_jahr_wird_ergaenzt():
+    from app.services.dates import mhd_ohne_jahr
+    assert mhd_ohne_jahr(31, 10, HEUTE) == "2026-10-31"
+    assert mhd_ohne_jahr(5, 10, HEUTE) == "2026-10-05"      # eben abgelaufen
+    assert mhd_ohne_jahr(5, 3, HEUTE) == "2027-03-05"       # im Maerz naechstes Jahr
+    assert mhd_ohne_jahr(29, 2, HEUTE) == ""                 # 2026 und 2027 ohne 29.2.
+    assert mhd_ohne_jahr(31, 4, HEUTE) == ""
+
+
 def test_hinweiswort_schlaegt_spaeteres_datum():
     texte = ["Hergestellt 01.09.2027", "Mindestens haltbar bis", "15.03.2027"]
     assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == "2027-03-15"
@@ -66,7 +98,7 @@ def test_foto_endpunkt_lokal_dann_ki(client, monkeypatch):
     bild = base64.b64encode(b"\xff\xd8" + b"x" * 200).decode()
     aufrufe = []
 
-    async def lokal(roh):
+    async def lokal(roh, gruendlich=False):
         aufrufe.append("lokal")
         return {"datum": "", "gelesen": ""}
 
@@ -127,7 +159,7 @@ def test_kandidaten_zeigen_alle_daten_gewaehltes_zuerst():
 def test_testseite_zeigt_zwischenschritte(client, monkeypatch):
     bild = base64.b64encode(b"\xff\xd8" + b"x" * 200).decode()
 
-    async def pruefen(roh):
+    async def pruefen(roh, gruendlich=True):
         return {"datum": "2027-10-07", "gelesen": "07/10/27", "kandidaten": [], "texte": [], "ms": 5}
     monkeypatch.setattr(mhd_ocr, "pruefen", pruefen)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

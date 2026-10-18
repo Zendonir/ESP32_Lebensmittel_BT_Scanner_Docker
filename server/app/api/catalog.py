@@ -339,6 +339,8 @@ class _MhdBild(BaseModel):
     # Im Sekundentakt der Live-Kamera nur lokal lesen; die KI erst, wenn
     # das Handy nach einer Weile ausdruecklich darum bittet.
     ki: bool = False
+    # Einzelfoto: auch feste Drehwinkel probieren (dauert einige Sekunden).
+    gruendlich: bool = False
 
 
 @router.get("/mhd")
@@ -364,7 +366,7 @@ async def mhd_foto(body: _MhdBild, session: AsyncSession = Depends(get_session))
     except (binascii.Error, ValueError):
         raise HTTPException(422, "Bild ist kein gültiges Base64") from None
 
-    lokal = await mhd_ocr.mhd_lesen(roh)
+    lokal = await mhd_ocr.mhd_lesen(roh, body.gruendlich)
     if lokal and lokal["datum"]:
         return {**lokal, "quelle": "lokal"}
     if body.ki and await ki.aktiv(session):
@@ -392,7 +394,8 @@ async def mhd_test(body: _MhdBild, session: AsyncSession = Depends(get_session))
     except (binascii.Error, ValueError):
         raise HTTPException(422, "Bild ist kein gültiges Base64") from None
     try:
-        lokal = await mhd_ocr.pruefen(roh)
+        # Fotos gruendlich wie ein Einzelfoto, die Live-Kamera schnell wie beim Scannen.
+        lokal = await mhd_ocr.pruefen(roh, body.gruendlich)
     except Exception as e:      # kaputtes Bild - auf der Testseite zeigen statt 500
         lokal = {"fehler": str(e)[:200]}
     antwort = {"lokal": lokal, "ki": None}

@@ -1293,7 +1293,9 @@ function mhdTestKarte(name, url, r) {
   const lokalText = l.fehler ? `<span style="color:var(--danger)">${esc(l.fehler)}</span>`
     : r.lokal === null ? '<span class="muted">Texterkennung nicht installiert</span>'
       : `<b style="color:${l.datum ? 'var(--success)' : 'var(--danger)'}">${l.datum ? mhdDatum(l.datum) : 'kein Datum'}</b>
-        <span class="muted">${l.gelesen ? `„${esc(l.gelesen)}“ · ` : ''}${l.ms} ms · ${(l.groesse || []).join('×')} px</span>`;
+        <span class="muted">${l.gelesen ? `„${esc(l.gelesen)}“ · ` : ''}${l.ms} ms · ${(l.groesse || []).join('×')} px</span>
+        ${(l.durchgaenge || []).length ? `<div class="muted" style="font-size:12px">Durchgänge: ${
+    l.durchgaenge.map((d) => (d.datum ? `<b>${esc(d.name)} ✔</b>` : esc(d.name))).join(' → ')}</div>` : ''}`;
   return `<div class="row" style="align-items:flex-start;gap:12px;border-top:1px solid var(--border);padding-top:10px">
     <img src="${url}" alt="" style="width:120px;max-height:160px;object-fit:contain;border-radius:8px;background:#000">
     <div style="flex:1;min-width:0">
@@ -1316,7 +1318,7 @@ $('#mhd-test-dateien').addEventListener('change', async (ev) => {
     platz.innerHTML = `<div class="muted">${esc(datei.name)} wird gelesen …</div>`;
     liste.prepend(platz);
     try {
-      const r = await post('/api/mhd/test', { bild: await mhdTestBild(datei), typ: 'image/jpeg', ki: mitKi });
+      const r = await post('/api/mhd/test', { bild: await mhdTestBild(datei), typ: 'image/jpeg', ki: mitKi, gruendlich: true });
       platz.innerHTML = mhdTestKarte(datei.name, url, r);
       mhdTest.ergebnisse.push({ datei: datei.name, ...r });
     } catch (e) {

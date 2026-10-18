@@ -646,7 +646,7 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
     quelle.textContent = 'Foto wird gelesen …';
     try {
       const bild = await createImageBitmap(datei);
-      const r = await post('/api/mhd/foto', { bild: jpegAus(bild, 0, 0, bild.width, bild.height), ki: true });
+      const r = await post('/api/mhd/foto', { bild: jpegAus(bild, 0, 0, bild.width, bild.height), ki: true, gruendlich: true });
       if (r.datum) mhdUebernehmen(r);
       else quelle.textContent = 'Kein Datum erkannt – näher ran?';
     } catch (e) {

@@ -106,7 +106,9 @@ export async function mhdKamera({ kiErlaubt = false, test = false, beiBild = nul
           ziel.style.borderColor = datum ? '#43a047' : '#fff';
           info.textContent = `Bild ${bilder} · ${treffer} Treffer`
             + (datum ? ` · zuletzt ${datumText(datum)}` : '');
-          debug.innerHTML = `${l.ms ?? '–'} ms lokal${r.ki ? ` · KI ${r.ki.ms} ms → ${esc(datumText(r.ki.datum) || 'nichts')}` : ''}<br>`
+          const weg = (l.durchgaenge || []).map((d) => d.name + (d.datum ? ' ✔' : '')).join(' → ');
+          debug.innerHTML = `${l.ms ?? '–'} ms lokal${r.ki ? ` · KI ${r.ki.ms} ms → ${esc(datumText(r.ki.datum) || 'nichts')}` : ''}`
+            + `${weg ? ` · ${esc(weg)}` : ''}<br>`
             + `<b>${esc(datumText(l.datum) || 'kein Datum')}</b>`
             + `${l.gelesen ? ` aus „${esc(l.gelesen)}“` : ''}<br>`
             + (l.texte || []).map((t) => `${esc(t.text)} <span style="opacity:.6">${Math.round(t.sicher * 100)}%</span>`)

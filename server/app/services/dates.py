@@ -98,3 +98,17 @@ def mhd_aus_teilen(tag: int, monat: int, jahr: int, heute: date | None = None) -
     if (datum - heute).days < -366 or (datum - heute).days > 20 * 366:
         return ""
     return datum.isoformat()
+
+
+def mhd_ohne_jahr(tag: int, monat: int, heute: date | None = None) -> str:
+    """"31.10." ohne Jahr (Frischware): das naechste solche Datum.
+
+    Noch dieses Jahr, wenn es hoechstens einen Monat zurueckliegt - ein eben
+    abgelaufener Joghurt ist wahrscheinlicher als einer, der elf Monate haelt.
+    """
+    heute = heute or date.today()
+    for jahr in (heute.year, heute.year + 1):
+        iso = mhd_aus_teilen(tag, monat, jahr, heute)
+        if iso and (date.fromisoformat(iso) - heute).days >= -31:
+            return iso
+    return ""
