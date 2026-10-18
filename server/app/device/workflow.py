@@ -374,6 +374,7 @@ async def _screen_home(session, sess, sid, status) -> dict:
         {"id": "templates", "label": "Kategorie", "sub": "ohne Barcode", "color": "#4c9eff"},
         {"id": "manual_entry", "label": "Manuelle Eingabe", "color": "#2eb048"},
         {"id": "inventory", "label": "Inventar", "color": "#cc9218"},
+        {"id": "nachdruck", "label": "Nachdruck", "sub": "letztes Etikett", "color": "#8e5bd0"},
         {"id": "system", "label": "System", "color": "#1c222a"},
     ]
     offen = await _offline_offen(session, sess)
@@ -571,7 +572,8 @@ def _screen_result(sess, sid, status) -> dict:
         title="Gespeichert",
         subtitle=sess.draft.name,
         lines=sess.last_result,
-        items=[{"id": "home", "label": "Weiter", "color": "#2eb048"}],
+        items=[{"id": "home", "label": "Weiter", "color": "#2eb048"},
+               {"id": "nachdruck", "label": "Nochmal drucken", "color": "#8e5bd0"}],
         status=status,
     )
 
@@ -1050,6 +1052,8 @@ async def _tap_home(session, sess, item) -> None:
         sess.push(ROLL_NEW)
     elif item == "nachtrag":
         sess.push(NACHTRAG)
+    elif item == "nachdruck":
+        await _letztes_nachdrucken(session, sess)
 
 
 async def _tap_subcategory(session, sess, item) -> None:
@@ -1187,6 +1191,9 @@ async def _tap_date(session, sess, item) -> None:
 
 
 async def _tap_result(session, sess, item) -> None:
+    if item == "nachdruck":
+        await _letztes_nachdrucken(session, sess)
+        return
     sess.reset()
 
 
@@ -1476,6 +1483,65 @@ PRINT_BATCH = 4
 # ein Auftrag, der nur langsam war, waere erneut gesendet und doppelt
 # gedruckt worden.
 PRINT_STALE_SECONDS = 180
+
+
+async def letztes_etikett(session: AsyncSession, haushalt: str) -> InventoryItem | None:
+    """Artikel zum zuletzt gedruckten Etikett - Test- und Messstreifen zaehlen nicht."""
+    stmt = (select(InventoryItem)
+            .join(PrintJob, PrintJob.label == InventoryItem.label)
+            .order_by(PrintJob.id.desc()).limit(1))
+    if haushalt:
+        stmt = stmt.where(PrintJob.household == haushalt)
+    return (await session.execute(stmt)).scalars().first()
+
+
+async def nachdrucken(session: AsyncSession, item: InventoryItem,
+                      device_id: str | None = None) -> dict:
+    """Etikett eines Artikels neu drucken, ohne zweiten Bestandseintrag.
+
+    Im ersten Projekt gab es nur "letztes Etikett erneut drucken" aus einem
+    RAM-Puffer; nach einem Neustart war die Vorlage weg. Hier wird aus dem
+    Artikel neu gerendert - mit den aktuellen Druckereinstellungen.
+    """
+    printer_cfg = await settings_store.get(session, "printer", {})
+    payload = labels.render_label(
+        {
+            "label": item.label,
+            "name": item.name,
+            "brand": item.brand,
+            "subcategory": item.subcategory,
+            "expiry_date": item.expiry_date,
+            "added_date": item.added_date,
+            "quantity": item.quantity,
+            "unit": item.unit,
+            "location": item.location,
+        },
+        printer_cfg,
+    )
+    target, pk = await druckziel(session, item.household or "", device_id)
+    job = PrintJob(label=item.label, payload=payload, status="queued",
+                   household=item.household or "", device_pk=pk)
+    session.add(job)
+    # Ein Nachdruck verbraucht ein Etikett wie jeder andere Druck auch.
+    await labels.consume_roll(session, 1)
+    await inv.log_event(session, "print", label=item.label, name=item.name)
+    await session.commit()
+
+    if target is None and pk is None:
+        target = terminal_fuer(item.household) or (
+            hub.online_ids()[0] if hub.online_ids() else None)
+    sent = await flush_print_queue(session, target) if target else 0
+    return {"ok": True, "job": job.id, "sent": bool(sent), "label": item.label, "name": item.name}
+
+
+async def _letztes_nachdrucken(session: AsyncSession, sess: DeviceSession) -> None:
+    item = await letztes_etikett(session, sess.household or "")
+    if item is None:
+        await hub.send_to(sess.device_id, proto.toast("Noch kein Etikett gedruckt", "warn"))
+        return
+    # Am eigenen Terminal drucken - dort steht, wer gerade nachdruckt.
+    await nachdrucken(session, item, sess.device_id)
+    await hub.send_to(sess.device_id, proto.toast(f"Nachdruck {item.label}", "success"))
 
 
 async def flush_print_queue(

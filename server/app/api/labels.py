@@ -177,36 +177,21 @@ async def reprint(
     ).scalar_one_or_none()
     if item is None:
         raise HTTPException(404, "Etikett unbekannt")
+    return await workflow.nachdrucken(session, item, device_id)
 
-    printer_cfg = await settings_store.get(session, "printer", {})
-    payload = label_service.render_label(
-        {
-            "label": item.label,
-            "name": item.name,
-            "brand": item.brand,
-            "subcategory": item.subcategory,
-            "expiry_date": item.expiry_date,
-            "added_date": item.added_date,
-            "quantity": item.quantity,
-            "unit": item.unit,
-            "location": item.location,
-        },
-        printer_cfg,
-    )
-    target, pk = await workflow.druckziel(session, item.household or "", device_id)
-    job = PrintJob(label=item.label, payload=payload, status="queued",
-                   household=item.household or "", device_pk=pk)
-    session.add(job)
-    # Ein Nachdruck verbraucht ein Etikett wie jeder andere Druck auch.
-    await label_service.consume_roll(session, 1)
-    await inv.log_event(session, "print", label=item.label, name=item.name)
-    await session.commit()
 
-    if target is None and pk is None:
-        target = workflow.terminal_fuer(item.household) or (
-            hub.online_ids()[0] if hub.online_ids() else None)
-    sent = await workflow.flush_print_queue(session, target) if target else 0
-    return {"ok": True, "job": job.id, "sent": bool(sent)}
+@router.post("/reprint-last")
+async def reprint_last(
+    request: Request,
+    device_id: str | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Das zuletzt gedruckte Etikett des Haushalts noch einmal drucken."""
+    item = await workflow.letztes_etikett(
+        session, await haushalte.aus_anfrage(request, session) or "")
+    if item is None:
+        raise HTTPException(404, "Noch kein Etikett gedruckt")
+    return await workflow.nachdrucken(session, item, device_id)
 
 
 @router.post("/test-print")

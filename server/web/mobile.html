@@ -749,12 +749,24 @@ async function renderEinlagern(kategorie = null) {
   title.textContent = kategorie || TITLES.ein;
   const [kategorien, vorlagen] = await Promise.all([get('/api/categories'), get('/api/templates')]);
   if (!kategorie) {
-    view.innerHTML = `<div class="kacheln">${kategorien.map((k) => {
+    view.innerHTML = `<button class="ghost" id="nachdruck" style="width:100%;margin-bottom:10px">🖨️ Letztes Etikett nachdrucken</button>
+      <div class="kacheln">${kategorien.map((k) => {
       const n = vorlagen.filter((t) => t.category === k.name).length;
       return `<button class="kachel" data-kat="${esc(k.name)}" style="--farbe:${esc(k.color)}">
         <b>${esc(k.name)}</b><span>${n ? `${n} Vorlage${n === 1 ? '' : 'n'}` : 'frei eingeben'}</span></button>`;
     }).join('')}</div>`;
     view.querySelectorAll('[data-kat]').forEach((b) => b.addEventListener('click', () => renderEinlagern(b.dataset.kat)));
+    document.getElementById('nachdruck').addEventListener('click', async (ev) => {
+      ev.currentTarget.disabled = true;
+      try {
+        const r = await post('/api/labels/reprint-last');
+        toast(`${r.name} · ${r.label} ${r.sent ? 'druckt' : 'Druck wartet'}`, 'success');
+      } catch (e) {
+        toast(e.message, 'error');
+      } finally {
+        ev.currentTarget.disabled = false;
+      }
+    });
     return;
   }
   const passend = vorlagen.filter((t) => t.category === kategorie);
