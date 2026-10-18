@@ -175,7 +175,11 @@ def test_wege(client, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.setattr(mhd_ocr, "verfuegbar", lambda: True)
-    assert client.get("/api/mhd").json() == {"lokal": True, "ki": False}
+    assert client.get("/api/mhd").json() == {"lokal": True, "ki": False, "nach_scan": False}
+    # Einstellung "nach dem Scan gleich das MHD scannen"
+    assert client.patch("/api/settings/mobil", json={"mhd_nach_scan": True}).status_code == 200
+    assert client.get("/api/mhd").json()["nach_scan"] is True
+    client.patch("/api/settings/mobil", json={"mhd_nach_scan": False})
 
 
 @pytest.mark.skipif(not mhd_ocr.verfuegbar(), reason="Texterkennung nicht installiert (requirements-ocr.txt)")

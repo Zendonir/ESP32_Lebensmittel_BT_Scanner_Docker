@@ -348,7 +348,11 @@ async def mhd_wege(session: AsyncSession = Depends(get_session)):
     """Welche Wege das Handy zum Lesen des MHD anbieten kann."""
     from ..services import ki, mhd_ocr
 
-    return {"lokal": mhd_ocr.verfuegbar(), "ki": await ki.aktiv(session)}
+    from ..services import settings_store
+
+    mobil = await settings_store.get(session, "mobil", {}) or {}
+    return {"lokal": mhd_ocr.verfuegbar(), "ki": await ki.aktiv(session),
+            "nach_scan": bool(mobil.get("mhd_nach_scan"))}
 
 
 @router.post("/mhd/foto")

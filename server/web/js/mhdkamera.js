@@ -29,7 +29,9 @@ const datumText = (iso) => (iso ? iso.split('-').reverse().join('.') : '');
 // Test (`test: true`): laeuft bis "Beenden", schickt jedes Bild an
 // /api/mhd/test und meldet es an `beiBild(bild, antwort)` - die Testseite
 // entscheidet, was sie davon aufhebt.
-export async function mhdKamera({ kiErlaubt = false, test = false, beiBild = null } = {}) {
+// `endeText`: Beschriftung des Knopfs zum Verlassen - "Ueberspringen", wenn die
+// Kamera nach einem Barcode von selbst aufging (das MHD bleibt dann der Vorschlag).
+export async function mhdKamera({ kiErlaubt = false, test = false, beiBild = null, endeText = null } = {}) {
   const ebene = document.createElement('div');
   ebene.innerHTML = `<div style="position:fixed;inset:0;z-index:60;background:#000;display:flex;flex-direction:column">
     <div style="position:relative;flex:1;overflow:hidden">
@@ -43,7 +45,7 @@ export async function mhdKamera({ kiErlaubt = false, test = false, beiBild = nul
       <div class="info" style="text-align:center;color:#fff">Datum in den Rahmen halten – quer oder hochkant</div>
       <div style="display:flex;gap:10px">
         ${test ? '<button type="button" class="merken" style="flex:1">Bild merken</button>' : ''}
-        <button type="button" class="ghost ende" style="flex:1">${test ? 'Beenden' : 'Abbrechen'}</button>
+        <button type="button" class="ghost ende" style="flex:1">${esc(endeText || (test ? 'Beenden' : 'Abbrechen'))}</button>
       </div>
     </div></div>`;
   document.body.appendChild(ebene);

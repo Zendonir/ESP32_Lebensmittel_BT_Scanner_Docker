@@ -35,6 +35,9 @@ DEFAULTS: dict[str, Any] = {
     # ANTHROPIC_API_KEY in der Umgebung steht - der Schluessel gehoert nicht
     # hierher.
     "ki": {"aktiv": True},
+    # Handy: nach einem Produkt-Barcode gleich die MHD-Kamera oeffnen
+    # (mit "Ueberspringen"), statt erst auf "MHD scannen" tippen zu muessen.
+    "mobil": {"mhd_nach_scan": False},
     "printer": {
         "enabled": True,
         "baud": 9600,

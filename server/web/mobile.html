@@ -638,7 +638,7 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
   function mhdUebernehmen(r) {
     form.expiry_date.value = r.datum;
     mhdVonHand = true;
-    quelle.textContent = `gescannt: ${r.datum.split('-').reverse().join('.')}`
+    quelle.textContent = `gescannt – bitte prüfen: ${r.datum.split('-').reverse().join('.')}`
       + (r.gelesen ? ` (gelesen „${r.gelesen}“${r.quelle === 'ki' ? ', KI' : ''})` : '');
     navigator.vibrate?.(40);
   }
@@ -649,6 +649,15 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
       if (r) mhdUebernehmen(r);
     } catch (e) { toast(e.message, 'warn'); }
   });
+  // Einstellung "nach dem Scan gleich das MHD scannen" (System -> Handy):
+  // nur nach einem Barcode, die Maske steht schon dahinter. "Ueberspringen"
+  // laesst den Vorschlag aus Ort/Kategorie stehen; ein erkanntes Datum
+  // landet im Feld und bleibt dort aenderbar wie jedes andere.
+  if (code && mhdWege.nach_scan && fotoKnopf && kameraMoeglich()) {
+    mhdKamera({ kiErlaubt: mhdWege.ki, endeText: 'Überspringen' })
+      .then((r) => { if (r) mhdUebernehmen(r); })
+      .catch((e) => toast(e.message, 'warn'));
+  }
   fotoDatei?.addEventListener('change', async () => {
     const datei = fotoDatei.files?.[0];
     fotoDatei.value = '';
