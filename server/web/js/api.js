@@ -123,6 +123,32 @@ export function daysPill(days) {
   return `<span class="pill ${cls}">${daysText(days)}</span>`;
 }
 
+// ------------------------------------------------------- Gleiches gruppieren
+// Fuenf Packungen Bratwurst sind eine Zeile, aufklappbar zu den einzelnen
+// Etiketten. Gleich heisst: gleicher angezeigter Name, gleiche Marke, gleiche
+// Einheit, gleicher Haushalt. Die Gruppe steht dort, wo ihr erster Artikel in
+// der (vom Server sortierten) Liste stand - die Sortierung bleibt also gueltig.
+export function gruppieren(rows) {
+  const gruppen = new Map();
+  for (const i of rows) {
+    const key = [i.display_name || i.name, i.brand || '', i.unit || '', i.household || '']
+      .map((t) => String(t).trim().toLowerCase()).join('\u0001');
+    if (!gruppen.has(key)) gruppen.set(key, { key, items: [] });
+    gruppen.get(key).items.push(i);
+  }
+  return [...gruppen.values()].map((g) => {
+    const mitMhd = g.items.filter((i) => i.expiry_date);
+    const erster = mitMhd.length
+      ? mitMhd.reduce((a, b) => (b.expiry_date < a.expiry_date ? b : a)) : g.items[0];
+    const orte = [...new Set(g.items.map((i) => i.location).filter(Boolean))];
+    const menge = g.items.reduce((s, i) => s + (+i.quantity || 0), 0);
+    return { ...g, erster, orte, menge };
+  });
+}
+
+export const mengeText = (menge, einheit) =>
+  (einheit && menge ? `${String(Math.round(menge * 10) / 10).replace('.', ',')} ${einheit}` : '');
+
 // ------------------------------------------------------- Ereignisse lesbar
 // Im Protokoll standen die internen Kennungen ("add", "scan_unknown") und die
 // Rohdaten als JSON. Beides ist fuer die Fehlersuche da, nicht zum Lesen.

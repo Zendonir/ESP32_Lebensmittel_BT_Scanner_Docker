@@ -1,7 +1,7 @@
 // Admin-Oberflaeche. Bewusst ohne Framework und ohne Build-Schritt: das Image
 // bleibt klein und die Dateien sind das, was ausgeliefert wird.
 
-import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from './api.js';
+import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, gruppieren, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from './api.js';
 import { mhdKamera } from './mhdkamera.js';
 import { zipBlob, base64ZuBytes } from './zip.js';
 
@@ -145,14 +145,16 @@ async function loadInventory() {
 
   const rows = await get(`/api/inventory?${params}`);
   $('#inv-empty').hidden = rows.length > 0;
-  $('#inv-body').innerHTML = rows.map((i) => `<tr>
+  const fremd = (i) => (HAUSHALT && i.household !== HAUSHALT.name
+    ? ` <span class="pill warn" title="gehört einem anderen Haushalt – Auslagern ist eine Fremdentnahme">🏠 ${esc(i.household)}</span>` : '');
+  const menge = (q, unit) => `${q % 1 === 0 ? q : q.toFixed(1)} ${esc(unit)}`;
+  const zeile = (i, gruppe = '') => `<tr${gruppe ? ` class="inv-kind" data-gruppe="${esc(gruppe)}"${offeneGruppen.has(gruppe) ? '' : ' hidden'}` : ''}>
     <td class="mono">${esc(i.label)}</td>
-    <td class="name"><b>${esc(i.display_name || i.name)}</b>${HAUSHALT && i.household !== HAUSHALT.name
-      ? ` <span class="pill warn" title="gehört einem anderen Haushalt – Auslagern ist eine Fremdentnahme">🏠 ${esc(i.household)}</span>` : ''}${i.brand ? `<br><span class="muted">${esc(i.brand)}</span>` : ''}</td>
-    <td>${esc(i.category)}</td>
+    <td class="name">${gruppe ? '<span class="muted">└</span>' : `<b>${esc(i.display_name || i.name)}</b>${fremd(i)}${i.brand ? `<br><span class="muted">${esc(i.brand)}</span>` : ''}`}</td>
+    <td>${gruppe ? '' : esc(i.category)}</td>
     <td>${fmtDate(i.expiry_date)}</td>
     <td>${daysPill(i.days_left)}</td>
-    <td>${i.quantity % 1 === 0 ? i.quantity : i.quantity.toFixed(1)} ${esc(i.unit)}</td>
+    <td>${menge(i.quantity, i.unit)}</td>
     <td>${ortMitFarbe(i.location)}</td>
     <td class="right">
       <button class="sm" data-edit="${esc(i.label)}">Ändern</button>
@@ -160,8 +162,38 @@ async function loadInventory() {
       ${i.status === 'active'
         ? `<button class="sm" data-remove="${esc(i.label)}">Auslagern</button>`
         : `<button class="sm" data-restore="${esc(i.label)}">Zurück</button>`}
-    </td></tr>`).join('');
+    </td></tr>`;
+  // Gleiche Produkte als eine aufklappbare Zeile (Summe, fruehestes MHD).
+  const kopf = (g) => {
+    const e = g.erster, offen = offeneGruppen.has(g.key);
+    return `<tr class="inv-gruppe" data-gruppe="${esc(g.key)}" aria-expanded="${offen}">
+    <td class="mono muted">${offen ? '▾' : '▸'} ${g.items.length}×</td>
+    <td class="name"><b>${esc(e.display_name || e.name)}</b>${fremd(e)}${e.brand ? `<br><span class="muted">${esc(e.brand)}</span>` : ''}</td>
+    <td>${esc(e.category)}</td>
+    <td>${e.expiry_date ? `ab ${fmtDate(e.expiry_date)}` : ''}</td>
+    <td>${daysPill(e.days_left)}</td>
+    <td>${menge(g.menge, e.unit)}</td>
+    <td>${g.orte.map(ortMitFarbe).join('<br>')}</td>
+    <td class="right muted">${offen ? 'zuklappen' : 'aufklappen'}</td></tr>`;
+  };
+  $('#inv-body').innerHTML = gruppieren(rows).map((g) => (g.items.length > 1
+    ? kopf(g) + g.items.map((i) => zeile(i, g.key)).join('')
+    : zeile(g.items[0]))).join('');
 }
+
+// Aufgeklappte Gruppen bleiben offen, wenn die Tabelle neu geladen wird.
+const offeneGruppen = new Set();
+$('#inv-body').addEventListener('click', (ev) => {
+  const kopf = ev.target.closest('tr.inv-gruppe');
+  if (!kopf) return;
+  const key = kopf.dataset.gruppe;
+  const offen = !offeneGruppen.has(key);
+  if (offen) offeneGruppen.add(key); else offeneGruppen.delete(key);
+  kopf.setAttribute('aria-expanded', String(offen));
+  kopf.cells[0].textContent = `${offen ? '▾' : '▸'} ${kopf.cells[0].textContent.split(' ')[1]}`;
+  kopf.cells[7].textContent = offen ? 'zuklappen' : 'aufklappen';
+  document.querySelectorAll('#inv-body tr.inv-kind').forEach((tr) => { if (tr.dataset.gruppe === key) tr.hidden = !offen; });
+});
 
 if (HAUSHALT) {
   const lbl = document.createElement('label');

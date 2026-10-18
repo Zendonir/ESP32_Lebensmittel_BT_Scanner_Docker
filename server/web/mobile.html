@@ -59,6 +59,17 @@
     .swipe-inner .kopf .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .swipe-inner .kopf .pill { flex: none; }
     #m-list { gap: 6px; }
+    /* Gruppe gleicher Produkte: Kopf wie eine Karte, aufgeklappt die
+       einzelnen Packungen eingerueckt darunter. */
+    .gruppe { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    .gruppe .gkopf { cursor: pointer; }
+    .gruppe .gkopf .t::before { content: '▸ '; color: var(--muted); }
+    .gruppe .gkopf[aria-expanded="true"] .t::before { content: '▾ '; }
+    .gruppe .pill.anzahl { background: var(--surface-2, rgba(127,127,127,.18)); }
+    .gruppe .gliste { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin-left: 14px; }
+    .gruppe .gliste .t { font-weight: 500; font-size: 14px; }
+    .gruppe .gliste[hidden] { display: none; }
+    .gruppe .gliste .swipe-inner { padding: 6px 12px; }
     /* Einlagern-Maske: muss ohne Scrollen auf einen Handybildschirm passen. */
     #einlagern { display: grid; gap: 8px; padding: 12px; }
     #einlagern label.field { gap: 2px; font-size: 11px; min-width: 0; }
@@ -144,7 +155,7 @@
 
 <div id="toasts"></div>
 <script type="module">
-import { get, post, del, put, toast, auslagern, fmtDate, daysPill, esc, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from '/static/js/api.js';
+import { get, post, del, put, toast, auslagern, fmtDate, daysPill, esc, gruppieren, mengeText, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from '/static/js/api.js';
 import { mhdKamera, jpegAus } from '/static/js/mhdkamera.js';
 
 // Wer die Handyansicht oeffnet, hat sich fuer sie entschieden - die
@@ -182,6 +193,9 @@ async function render() {
 let suche = '';
 let listUrl = '';
 let ueberall = false;
+// Aufgeklappte Gruppen bleiben offen, wenn die Liste neu gefuellt wird
+// (Suche, Auslagern, Live-Aktualisierung).
+const offeneGruppen = new Set();
 
 async function renderList(url) {
   listUrl = url;
@@ -214,25 +228,48 @@ async function fillList() {
     + (ueberall && suche ? '&alle=true' : ''));
   count.textContent = rows.length;
   const leer = suche ? `Nichts gefunden für „${esc(suche)}“.` : 'Nichts vorhanden.';
-  box.innerHTML = rows.length ? `
-    <div class="hint">Antippen für Aktionen · nach links wischen lagert aus</div>
-    ${rows.map((i) => `
+  const fremd = (i) => (HAUSHALT && i.household !== HAUSHALT.name
+    ? ` <span class="pill warn">🏠 ${esc(i.household)}</span>` : '');
+  const karte = (i, titel, zeile) => `
     <div class="swipe" data-label="${esc(i.label)}">
       <div class="swipe-action">auslagern</div>
       <div class="swipe-inner" role="button" tabindex="0" aria-expanded="false">
-        <div class="kopf">
-          <div class="t">${esc(i.display_name || i.name)}${HAUSHALT && i.household !== HAUSHALT.name
-            ? ` <span class="pill warn">🏠 ${esc(i.household)}</span>` : ''}</div>
-          ${daysPill(i.days_left)}
-        </div>
-        <div class="s">${[i.brand, i.unit && i.quantity ? `${String(+i.quantity).replace('.', ',')} ${i.unit}` : '',
-          i.location, fmtDate(i.expiry_date)].filter(Boolean).map(esc).join(' · ')}</div>
+        <div class="kopf"><div class="t">${titel}</div>${daysPill(i.days_left)}</div>
+        ${zeile ? `<div class="s">${zeile}</div>` : ''}
         <div class="acts" hidden>
           <button class="primary" data-act="remove">Auslagern</button>
           <button data-act="reprint">Etikett nachdrucken</button>
         </div>
       </div>
-    </div>`).join('')}` : `<div class="empty">${leer}</div>`;
+    </div>`;
+  const einzeln = (i) => karte(i, esc(i.display_name || i.name) + fremd(i),
+    [i.brand, mengeText(+i.quantity, i.unit), i.location, fmtDate(i.expiry_date)].filter(Boolean).map(esc).join(' · '));
+  // In der Gruppe stehen Name und Marke schon oben - je Packung bleibt, was
+  // sich unterscheidet: Menge, Ort, MHD.
+  const packung = (i) => karte(i,
+    [mengeText(+i.quantity, i.unit), i.location, fmtDate(i.expiry_date)].filter(Boolean).map(esc).join(' · ') || esc(i.name), '');
+  const gruppe = (g) => {
+    const e = g.erster, offen = offeneGruppen.has(g.key);
+    return `<div class="gruppe" data-key="${esc(g.key)}">
+      <div class="swipe-inner gkopf" role="button" tabindex="0" aria-expanded="${offen}">
+        <div class="kopf"><div class="t">${esc(e.display_name || e.name)}${fremd(e)}</div>
+          <span class="pill anzahl">${g.items.length}×</span>${daysPill(e.days_left)}</div>
+        <div class="s">${[e.brand, mengeText(g.menge, e.unit), g.orte.join(', '),
+          e.expiry_date ? `ab ${fmtDate(e.expiry_date)}` : ''].filter(Boolean).map(esc).join(' · ')}</div>
+      </div>
+      <div class="gliste"${offen ? '' : ' hidden'}>${g.items.map(packung).join('')}</div>
+    </div>`;
+  };
+  box.innerHTML = rows.length ? `
+    <div class="hint">Antippen für Aktionen · nach links wischen lagert aus</div>
+    ${gruppieren(rows).map((g) => (g.items.length > 1 ? gruppe(g) : einzeln(g.items[0]))).join('')}`
+    : `<div class="empty">${leer}</div>`;
+  box.querySelectorAll('.gkopf').forEach((kopf) => kopf.addEventListener('click', () => {
+    const g = kopf.closest('.gruppe'), liste = g.querySelector('.gliste');
+    liste.hidden = !liste.hidden;
+    kopf.setAttribute('aria-expanded', String(!liste.hidden));
+    if (liste.hidden) offeneGruppen.delete(g.dataset.key); else offeneGruppen.add(g.dataset.key);
+  }));
   attachSwipe();
   attachTap();
 }
@@ -257,8 +294,7 @@ function attachTap() {
       try {
         if (btn.dataset.act === 'remove') {
           await auslagern(card.dataset.label, 'mobile', fillList);
-          card.remove();
-          count.textContent = view.querySelectorAll('.swipe').length;
+          await fillList(); // Gruppe zaehlt neu
         } else {
           const r = await post(`/api/labels/reprint/${encodeURIComponent(card.dataset.label)}`);
           toast(r.sent ? 'Druckauftrag gesendet' : 'Eingereiht – kein Terminal online', r.sent ? 'success' : 'warn');
@@ -297,8 +333,7 @@ function attachSwipe() {
         inner.style.transform = 'translateX(-100%)';
         try {
           await auslagern(card.dataset.label, 'mobile', fillList);
-          card.remove();
-          count.textContent = view.querySelectorAll('.swipe').length;
+          await fillList(); // Gruppe zaehlt neu
         } catch (e) { toast(e.message, 'error'); inner.style.transform = ''; }
       } else {
         inner.style.transform = '';
