@@ -52,7 +52,7 @@ Ablaufend-Liste am Gerät, per Wischgeste am Handy oder im Web-Interface.
 per MQTT für Home Assistant, Übersichtsseite mit Statistik.
 
 **Verwalten** – Inventar, Vorlagen, Kategorien, Lagerorte, Produkt-Cache,
-Einkaufsliste, Etikettenrolle und Druckwarteschlange im Browser. Mobile PWA mit
+Etikettenrolle und Druckwarteschlange im Browser. Mobile PWA mit
 Kamera-Scan über die BarcodeDetector-API.
 
 ---

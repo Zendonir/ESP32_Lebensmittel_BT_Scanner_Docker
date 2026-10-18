@@ -1,4 +1,4 @@
-"""Geraete, Einkaufsliste, Einstellungen, Diagnose."""
+"""Geraete, Einstellungen, Diagnose."""
 
 from __future__ import annotations
 
@@ -26,13 +26,11 @@ from ..db import get_session
 from ..device import protocol as proto
 from ..device import workflow
 from ..device.hub import hub
-from ..models import Device, Event, InventoryItem, ShoppingItem
+from ..models import Device, Event, InventoryItem
 from ..schemas import (
     DeviceOut,
     DevicePatch,
     EventOut,
-    ShoppingIn,
-    ShoppingOut,
 )
 from ..services import importer as importer_service
 from ..services import inventory as inv
@@ -139,49 +137,6 @@ async def forget_device(device_id: str, session: AsyncSession = Depends(get_sess
     await hub.notify_ui("devices")
     return {"ok": True}
 
-
-# --------------------------------------------------------------- Einkaufsliste
-@router.get("/shopping", response_model=list[ShoppingOut])
-async def list_shopping(session: AsyncSession = Depends(get_session)):
-    return (
-        await session.execute(
-            select(ShoppingItem).order_by(ShoppingItem.done, ShoppingItem.name)
-        )
-    ).scalars().all()
-
-
-@router.post("/shopping", response_model=ShoppingOut, status_code=201)
-async def add_shopping(body: ShoppingIn, session: AsyncSession = Depends(get_session)):
-    row = ShoppingItem(**body.model_dump())
-    session.add(row)
-    await session.commit()
-    await hub.notify_ui("shopping")
-    return row
-
-
-@router.put("/shopping/{item_id}", response_model=ShoppingOut)
-async def update_shopping(
-    item_id: int, body: ShoppingIn, session: AsyncSession = Depends(get_session)
-):
-    row = await session.get(ShoppingItem, item_id)
-    if row is None:
-        raise HTTPException(404, "Eintrag unbekannt")
-    for key, value in body.model_dump().items():
-        setattr(row, key, value)
-    await session.commit()
-    await hub.notify_ui("shopping")
-    return row
-
-
-@router.delete("/shopping/{item_id}")
-async def delete_shopping(item_id: int, session: AsyncSession = Depends(get_session)):
-    row = await session.get(ShoppingItem, item_id)
-    if row is None:
-        raise HTTPException(404, "Eintrag unbekannt")
-    await session.delete(row)
-    await session.commit()
-    await hub.notify_ui("shopping")
-    return {"ok": True}
 
 
 # ------------------------------------------------------------- Einstellungen
@@ -488,7 +443,6 @@ async def export_json(session: AsyncSession = Depends(get_session)):
         "templates": await dump(Template),
         "products": await dump(Product),
         "inventory": await dump(InventoryItem),
-        "shopping": await dump(ShoppingItem),
         "settings": await settings_store.all_settings(session),
     }
     body = json.dumps(payload, ensure_ascii=False, indent=2)

@@ -192,18 +192,6 @@ class Event(Base):
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
-class ShoppingItem(Base, TimestampMixin):
-    __tablename__ = "shopping_list"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(255))
-    quantity: Mapped[float] = mapped_column(Float, default=1.0)
-    unit: Mapped[str] = mapped_column(String(16), default="")
-    note: Mapped[str] = mapped_column(String(255), default="")
-    done: Mapped[bool] = mapped_column(Boolean, default=False)
-    auto_added: Mapped[bool] = mapped_column(Boolean, default=False)
-
-
 # --------------------------------------------------------------------------
 # Geraete & Betrieb
 # --------------------------------------------------------------------------

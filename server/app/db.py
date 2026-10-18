@@ -104,6 +104,8 @@ async def init_db() -> None:
             # _sqlite_pragmas.
             await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
         await conn.run_sync(_add_missing_columns)
+        # Die Einkaufsliste gibt es nicht mehr; ihre Tabelle faellt weg.
+        await conn.exec_driver_sql("DROP TABLE IF EXISTS shopping_list")
         await conn.run_sync(Base.metadata.create_all)
     log.info("Datenbank bereit (%s)", settings.database_url.split("://", 1)[0])
 

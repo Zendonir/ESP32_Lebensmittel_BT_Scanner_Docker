@@ -140,7 +140,6 @@
   <h1 id="m-title">Inventar</h1>
   <span class="pill" id="m-count">–</span>
   <a class="linkbtn" href="/?desktop=1" title="Zur vollen Verwaltung">🖥️ Verwaltung</a>
-  <a class="linkbtn" href="/logout" data-nur-anmeldung hidden title="Abmelden">⏻</a>
 </header>
 
 <div id="m-view"></div>
@@ -157,6 +156,7 @@
 <script type="module">
 import { get, post, del, put, toast, auslagern, fmtDate, daysPill, esc, gruppieren, mengeText, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from '/static/js/api.js';
 import { mhdKamera, jpegAus } from '/static/js/mhdkamera.js';
+import { kameraHolen, kameraFreigeben } from '/static/js/kamera.js';
 
 // Wer die Handyansicht oeffnet, hat sich fuer sie entschieden - die
 // Weiterleitung auf der grossen Seite gilt dann wieder (siehe index.html).
@@ -425,9 +425,7 @@ async function treffer(value) {
 async function startCamera() {
   const hint = document.getElementById('scanhint');
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment' },
-    });
+    stream = await kameraHolen();
   } catch (e) {
     toast(`Kamera nicht verfügbar: ${e.message}`, 'warn');
     return;
@@ -474,7 +472,9 @@ async function startCamera() {
     ZXing.BarcodeFormat.QR_CODE,
   ]);
   zxingReader = new ZXing.BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 250 });
-  zxingReader.decodeFromStream(stream, cam, (result) => {
+  // Eine Kopie des Stroms: reset() beendet die Spuren, die der Decoder bekam -
+  // das Original bleibt fuer die naechste Kamera stehen (kamera.js).
+  zxingReader.decodeFromStream(stream.clone(), cam, (result) => {
     if (result) treffer(result.getText());
   }).catch((e) => toast(`Erkennung fehlgeschlagen: ${e.message}`, 'error'));
 }
@@ -489,7 +489,9 @@ function stopCamera() {
     try { zxingReader.reset(); } catch { /* schon beendet */ }
     zxingReader = null;
   }
-  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  const cam = document.getElementById('cam');
+  if (cam) cam.srcObject = null;
+  if (stream) { kameraFreigeben(); stream = null; }
 }
 
 async function sendScan(code) {
@@ -995,12 +997,6 @@ liveConnect((msg) => {
 
 render();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-</script>
-<script>
-  // "Abmelden" nur, wenn eine Anmeldung gilt (UI_PASSWORD gesetzt).
-  if (document.querySelector('meta[name="anmeldung"]')) {
-    document.querySelectorAll('[data-nur-anmeldung]').forEach((el) => { el.hidden = false; });
-  }
 </script>
 </body>
 </html>

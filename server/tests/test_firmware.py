@@ -80,7 +80,7 @@ def test_datenbanksicherung_ist_eine_lesbare_vollstaendige_datenbank(tmp_path):
     geschrieben - eine schlichte Kopie wuerde diese Zeile verlieren.
     """
     with TestClient(app) as client:
-        client.post("/api/shopping", json={"name": "Pruefartikel Sicherung"})
+        client.post("/api/categories", json={"name": "Pruefartikel Sicherung"})
 
         response = client.get("/api/backup/db")
         assert response.status_code == 200
@@ -97,7 +97,7 @@ def test_datenbanksicherung_ist_eine_lesbare_vollstaendige_datenbank(tmp_path):
         assert {"inventory", "events", "devices", "print_jobs"} <= tabellen
 
         namen = [
-            r[0] for r in con.execute("SELECT name FROM shopping_list")
+            r[0] for r in con.execute("SELECT name FROM categories")
         ]
         assert "Pruefartikel Sicherung" in namen
         con.close()

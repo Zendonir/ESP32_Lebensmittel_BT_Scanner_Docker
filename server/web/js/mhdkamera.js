@@ -8,6 +8,7 @@
 // im ganzen Bild unter), etwa ein Bild pro Sekunde. Ohne Treffer fragt nach
 // KI_NACH_MS genau ein Bild die KI - falls erlaubt.
 import { post, esc } from './api.js';
+import { kameraHolen, kameraFreigeben } from './kamera.js';
 
 export const KI_NACH_MS = 6000;
 const TAKT_MS = 900;
@@ -56,15 +57,14 @@ export async function mhdKamera({ kiErlaubt = false, test = false, beiBild = nul
   let offen = true, kamera = null, merken = false;
   const ende = () => {
     offen = false;
-    kamera?.getTracks().forEach((t) => t.stop());
+    if (video) video.srcObject = null;
+    if (kamera) kameraFreigeben();
     ebene.remove();
   };
   ebene.querySelector('.ende').addEventListener('click', ende);
   ebene.querySelector('.merken')?.addEventListener('click', () => { merken = true; });
   try {
-    kamera = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
-    });
+    kamera = await kameraHolen();
   } catch (e) {
     ende();
     throw new Error(`Kamera nicht verfügbar: ${e.message}`);

@@ -209,6 +209,6 @@ stand währenddessen der gesamte Webserver des Geräts still.
 ## Browser-Verbindung
 
 `ws://<server>:8080/ws/ui` ist einseitig: der Server meldet nur, *was* sich
-geändert hat (`inventory`, `catalog`, `devices`, `shopping`, `settings`), und die
+geändert hat (`inventory`, `catalog`, `devices`, `settings`), und die
 Seite lädt die betroffene Ansicht neu. Es werden bewusst keine Daten über diesen
 Kanal geschickt – so kann im Browser kein halbaktueller Zustand hängenbleiben.

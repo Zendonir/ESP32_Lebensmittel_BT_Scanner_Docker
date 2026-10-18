@@ -49,7 +49,7 @@ Vorgänger: dort musste der aktuelle Bestand über einen View aus dem Event-Stro
 rekonstruiert werden, was bei jedem Sync-Aussetzer eine andere Antwort gab.
 
 Weitere Tabellen: `products` (Stammsatz und OpenFoodFacts-Cache), `templates`,
-`categories`, `locations`, `shopping_list`, `devices`, `print_jobs`, `settings`.
+`categories`, `locations`, `devices`, `print_jobs`, `settings`.
 
 Voreinstellung ist SQLite mit WAL – für einen Haushalt mit ein paar tausend
 Zeilen völlig ausreichend und ohne zweiten Container zu sichern. PostgreSQL ist

@@ -216,25 +216,6 @@ class ScanRequest(BaseModel):
     device_id: str | None = None
 
 
-# --------------------------------------------------------------------- Einkaufsliste
-class ShoppingIn(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    quantity: float = 1.0
-    unit: str = ""
-    note: str = ""
-    done: bool = False
-
-
-class ShoppingOut(ORMModel):
-    id: int
-    name: str
-    quantity: float
-    unit: str
-    note: str
-    done: bool
-    auto_added: bool
-
-
 # --------------------------------------------------------------------- Geraete
 class DeviceOut(ORMModel):
     id: int

@@ -701,44 +701,6 @@ $('#loc-new').addEventListener('click', async () => {
   }
 });
 
-// --------------------------------------------------------------------- Einkauf
-async function loadShopping() {
-  const rows = await get('/api/shopping');
-  $('#shop-body').innerHTML = rows.length ? rows.map((s) => `<tr>
-    <td><input type="checkbox" data-shop-done="${s.id}" ${s.done ? 'checked' : ''}></td>
-    <td class="name" style="${s.done ? 'text-decoration:line-through;opacity:.55' : ''}">
-      ${esc(s.name)} <span class="muted">${s.quantity % 1 === 0 ? s.quantity : s.quantity} ${esc(s.unit)}</span></td>
-    <td class="right"><button class="sm danger" data-shop-del="${s.id}">Löschen</button></td>
-  </tr>`).join('') : '<tr><td class="muted">Liste ist leer.</td></tr>';
-}
-
-$('#shop-form').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const f = new FormData(ev.target);
-  await post('/api/shopping', {
-    name: f.get('name'), quantity: parseFloat(f.get('quantity')) || 1,
-    unit: f.get('unit') || '', note: '', done: false,
-  });
-  ev.target.reset();
-  await loadShopping();
-});
-
-document.addEventListener('change', async (ev) => {
-  const cb = ev.target.closest('input[data-shop-done]');
-  if (!cb) return;
-  const rows = await get('/api/shopping');
-  const item = rows.find((r) => r.id === +cb.dataset.shopDone);
-  await put(`/api/shopping/${item.id}`, { ...item, done: cb.checked });
-  await loadShopping();
-});
-
-document.addEventListener('click', async (ev) => {
-  const b = ev.target.closest('button[data-shop-del]');
-  if (!b) return;
-  await del(`/api/shopping/${b.dataset.shopDel}`);
-  await loadShopping();
-});
-
 // ------------------------------------------------------------------- Terminals
 
 // Noch kein Terminal: statt einer leeren Zeile die Schritte, mit denen eins
@@ -1521,7 +1483,6 @@ const PAGE_LOADERS = {
   labels: loadLabels,
   templates: loadTemplates,
   catalog: loadCatalogPage,
-  shopping: loadShopping,
   // Erst die Abbilder, dann die Geraete: updateHint() vergleicht die laufende
   // Version mit der hinterlegten und braucht state.firmware bereits gefuellt.
   devices: async () => { await loadFirmware(); await loadDevices(); },
@@ -1544,7 +1505,6 @@ liveConnect(
       inventory: ['dashboard', 'inventory', 'labels'],
       catalog: ['catalog', 'templates', 'labels'],
       devices: ['devices', 'dashboard', 'labels'],
-      shopping: ['shopping'],
       settings: ['system', 'labels'],
     }[msg.event] || [];
     if (relevant.includes(activePage())) refreshActive().catch(() => {});
