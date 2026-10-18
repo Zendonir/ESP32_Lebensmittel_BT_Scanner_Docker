@@ -59,6 +59,30 @@
     .swipe-inner .kopf .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .swipe-inner .kopf .pill { flex: none; }
     #m-list { gap: 6px; }
+    /* Einlagern-Maske: muss ohne Scrollen auf einen Handybildschirm passen. */
+    #einlagern { display: grid; gap: 8px; padding: 12px; }
+    #einlagern label.field { gap: 2px; font-size: 11px; min-width: 0; }
+    #einlagern input:not([type="checkbox"]), #einlagern select {
+      width: 100%; min-width: 0; padding: 7px 9px; font-size: 16px;      /* 16px: kein Zoom am iPhone */
+      height: 40px; box-sizing: border-box; }
+    #einlagern input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+    #einlagern input[type="number"]::-webkit-inner-spin-button,
+    #einlagern input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    #einlagern .ef-knopf { height: 40px; }
+    #einlagern .ef-code { display: flex; gap: 8px; align-items: baseline; font-size: 13px; min-width: 0; }
+    #einlagern .ef-code .mono { font-size: 16px; letter-spacing: .03em; color: var(--text); }
+    #einlagern .ef-zeile { display: flex; gap: 8px; align-items: flex-end; min-width: 0; }
+    #einlagern .ef-drei { display: grid; grid-template-columns: 1fr 1fr .8fr; gap: 8px; }
+    #einlagern .ef-hinweis { font-size: 12px; margin-top: -4px; }
+    #einlagern .ef-hinweis:empty { display: none; }
+    #einlagern .ef-knopf { padding: 7px 10px; font-size: 15px; white-space: nowrap; flex: none; }
+    #einlagern .ef-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin-top: -2px; }
+    #einlagern .ef-chips::-webkit-scrollbar { display: none; }
+    #einlagern .ef-chips button { flex: none; white-space: nowrap; padding: 5px 9px; }
+    #einlagern .ef-stepper { display: flex; gap: 4px; }
+    #einlagern .ef-stepper input { width: 44px; text-align: center; padding: 7px 2px; }
+    #einlagern .ef-stepper .ef-knopf { width: 36px; padding: 0; }
+    #einlagern .ef-druck { flex: none; padding-bottom: 8px; font-size: 14px; }
     #m-list .swipe-inner { padding: 8px 12px; }
     #m-list .swipe-inner .s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -472,30 +496,30 @@ function plusTage(tage) {
 }
 // Kopf der Maske ohne Vorlage: alles frei einzugeben.
 function freierKopf(p, kategorien, kiStatus, opt, mhdKnoepfe, mhdWege) {
-  const vorlage = null;
-  const vorlageSorten = [];
   return `
-    <label class="field">Name<input name="name" value="${esc(p.name || '')}" required ${p.name ? '' : 'autofocus'}></label>
-    ${kiStatus.aktiv && !vorlage ? `<div class="row" style="gap:8px;margin-top:-4px">
-      <button type="button" class="sm" id="ki-knopf">✨ KI-Vorschlag</button>
-      <span class="muted" id="ki-text" style="font-size:13px;flex:1"></span></div>` : ''}
-    <label class="field">Marke<input name="brand" list="marken" value="${esc(p.brand || '')}">
-      <datalist id="marken">${(vorlage?.brands || []).map((m) => `<option value="${esc(m)}">`).join('')}</datalist></label>
-    <div class="row" style="gap:10px">
-      <label class="field" style="flex:1">Kategorie<select name="category"><option value=""></option>${
-        opt(kategorien.map((k) => k.name), p.category || '')}</select></label>
-      ${vorlage?.use_sorten ? `<label class="field" style="flex:1">Was ist es?<select name="subcategory" required>
-        <option value="">bitte wählen</option>${opt(vorlageSorten, '')}</select></label>`
-    : `<label class="field" style="flex:1">Sorte<input name="subcategory" list="sorten" value="${esc(p.subcategory || '')}">
-        <datalist id="sorten"></datalist></label>`}
+    <div class="ef-zeile">
+      <label class="field" style="flex:1">Name<input name="name" value="${esc(p.name || '')}" required
+        ${p.name ? '' : 'autofocus'}></label>
+      ${kiStatus.aktiv ? '<button type="button" class="ef-knopf" id="ki-knopf" title="KI-Vorschlag">✨</button>' : ''}
     </div>
-    <label class="field">MHD<input name="expiry_date" type="date" value="${esc(p.expiry_date || '')}">
-      <span class="muted" id="mhd-quelle" style="font-size:12px"></span></label>
-    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:-4px">
+    ${kiStatus.aktiv ? '<div class="muted ef-hinweis" id="ki-text"></div>' : ''}
+    <div class="ef-drei">
+      <label class="field">Marke<input name="brand" list="marken" value="${esc(p.brand || '')}">
+        <datalist id="marken"></datalist></label>
+      <label class="field">Kategorie<select name="category"><option value=""></option>${
+        opt(kategorien.map((k) => k.name), p.category || '')}</select></label>
+      <label class="field">Sorte<input name="subcategory" list="sorten" value="${esc(p.subcategory || '')}">
+        <datalist id="sorten"></datalist></label>
+    </div>
+    <div class="ef-zeile">
+      <label class="field" style="flex:1">MHD<input name="expiry_date" type="date" value="${esc(p.expiry_date || '')}"></label>
+      ${mhdWege.lokal || mhdWege.ki ? `<button type="button" class="ef-knopf" id="mhd-foto">📷 scannen</button>
+        <input type="file" accept="image/*" capture="environment" id="mhd-datei" hidden>` : ''}
+    </div>
+    <div class="muted ef-hinweis" id="mhd-quelle"></div>
+    <div class="ef-chips">
       ${mhdKnoepfe.map(([t, d]) => `<button type="button" class="sm" data-tage="${d}">${t}</button>`).join('')}
       <button type="button" class="sm ghost" data-tage="">kein MHD</button>
-      ${mhdWege.lokal || mhdWege.ki ? `<button type="button" class="sm" id="mhd-foto">📷 MHD scannen</button>
-        <input type="file" accept="image/*" capture="environment" id="mhd-datei" hidden>` : ''}
     </div>
 `;
 }
@@ -546,36 +570,31 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
     : (kategorien.find((k) => k.name === vorlage.category)?.subcategories || [])) : [];
   const mhdKnoepfe = [['+3 T', 3], ['+1 W', 7], ['+2 W', 14], ['+1 M', 30], ['+3 M', 90], ['+6 M', 180], ['+1 J', 365]];
 
-  view.innerHTML = `<form class="card" id="einlagern" style="display:grid;gap:12px">
-    ${code ? `<div>
-      <div class="muted" style="font-size:13px">Erkannt</div>
-      <div class="mono" style="font-size:20px;letter-spacing:.03em">${esc(code)}</div>
-      ${produkt ? '' : '<div class="muted" style="margin-top:4px">Produkt unbekannt – bitte Namen eingeben.</div>'}
-    </div>` : vorlage ? '' : `<div class="muted" style="font-size:13px">Ohne Vorlage · ${esc(p.category || '')}</div>`}
+  // Alles auf einen Bildschirm: kleine Feldnamen, mehrere Felder je Zeile,
+  // die MHD-Knoepfe in einer seitlich wischbaren Reihe (Stil #einlagern oben).
+  view.innerHTML = `<form class="card" id="einlagern">
+    ${code ? `<div class="ef-code"><span class="mono">${esc(code)}</span>
+      <span class="muted">${produkt ? 'erkannt' : 'unbekannt – bitte Namen eingeben'}</span></div>`
+    : vorlage ? '' : `<div class="ef-code muted">Ohne Vorlage · ${esc(p.category || '')}</div>`}
     ${vorlage ? vorlageKopf(vorlage, p, vorlageSorten) : freierKopf(p, kategorien, kiStatus, opt, mhdKnoepfe, mhdWege)}
-    ${vorlage?.unit ? `<label class="field">Menge
-      <div class="row" style="gap:8px;align-items:center">
-        <input name="quantity" type="number" step="any" min="0" value="1" inputmode="decimal" style="flex:1">
-        <span style="min-width:40px">${esc(vorlage.unit)}</span></div>
-      <span class="muted" style="font-size:12px">Was in einer Packung steckt, z. B. 3 Würstchen</span>
-      <input type="hidden" name="unit" value="${esc(vorlage.unit)}"></label>`
-    : `<div class="row" style="gap:10px">
-      <label class="field" style="flex:1">Menge<input name="quantity" type="number" step="any" min="0"
-        placeholder="${esc(p.amount || 'optional')}"></label>
-      <label class="field" style="width:96px">Einheit<select name="unit">
-        <option value=""></option><option>g</option><option>kg</option><option>ml</option><option>l</option><option>St.</option>
-      </select></label>
-    </div>`}
-    <div class="field" style="display:flex;align-items:center;gap:10px">
-      <span style="flex:1;font-size:12px;color:var(--muted)">Anzahl Etiketten<br>
-        <span style="font-size:11px">eins je Packung</span></span>
-      <button type="button" class="sm" data-anzahl="-1" style="width:44px">−</button>
-      <input name="count" type="number" min="1" max="20" value="1" inputmode="numeric"
-        style="width:60px;text-align:center;font-size:18px">
-      <button type="button" class="sm" data-anzahl="1" style="width:44px">+</button>
+    <div class="ef-zeile">
+      ${vorlage?.unit ? `<label class="field" style="flex:1">Menge (${esc(vorlage.unit)})
+        <input name="quantity" type="number" step="any" min="0" value="1" inputmode="decimal">
+        <input type="hidden" name="unit" value="${esc(vorlage.unit)}"></label>`
+    : `<label class="field" style="flex:1">Menge<input name="quantity" type="number" step="any" min="0"
+          inputmode="decimal" placeholder="${esc(p.amount || 'optional')}"></label>
+        <label class="field" style="width:76px">Einheit<select name="unit">
+          <option value=""></option><option>g</option><option>kg</option><option>ml</option><option>l</option><option>St.</option>
+        </select></label>`}
+      <label class="field">Etiketten<span class="ef-stepper">
+        <button type="button" class="ef-knopf" data-anzahl="-1">−</button>
+        <input name="count" type="number" min="1" max="20" value="1" inputmode="numeric">
+        <button type="button" class="ef-knopf" data-anzahl="1">+</button></span></label>
     </div>
-    <label class="field">Lagerort<select name="location">${opt(orte.map((o) => o.name), ort)}</select></label>
-    <label class="row tight"><input type="checkbox" name="print" checked> Etikett drucken</label>
+    <div class="ef-zeile">
+      <label class="field" style="flex:1">Lagerort<select name="location">${opt(orte.map((o) => o.name), ort)}</select></label>
+      <label class="row tight ef-druck"><input type="checkbox" name="print" checked> drucken</label>
+    </div>
     <label class="field" id="terminal-wahl" ${terminals.length > 1 ? '' : 'hidden'}>Drucken an
       <select name="device_id">${terminals.map((t) => `<option value="${esc(t.device_id)}">${esc(t.name)}</option>`).join('')}</select></label>
     <div class="row" style="gap:10px">
