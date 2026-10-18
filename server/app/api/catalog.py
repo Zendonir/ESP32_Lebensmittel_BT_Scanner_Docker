@@ -311,6 +311,28 @@ async def ki_vorschlag(body: _KiFrage, session: AsyncSession = Depends(get_sessi
     return vorschlag
 
 
+class _MhdFoto(BaseModel):
+    # Base64 ohne "data:"-Vorspann. Das Handy verkleinert vorher auf rund
+    # 1600 Pixel - mehr braucht es fuer ein Datum nicht.
+    bild: str = Field(min_length=100, max_length=6_000_000)
+    typ: str = "image/jpeg"
+
+
+@router.post("/ki/mhd")
+async def ki_mhd(body: _MhdFoto, session: AsyncSession = Depends(get_session)):
+    """MHD aus einem Foto der Verpackung lesen."""
+    from ..services import ki
+
+    if not await ki.aktiv(session):
+        raise HTTPException(503, "KI ist nicht eingerichtet (ANTHROPIC_API_KEY fehlt) oder aus")
+    if body.typ not in ki.BILDTYPEN:
+        raise HTTPException(422, "Bildformat nicht unterstützt")
+    ergebnis = await ki.mhd_lesen(body.bild, body.typ)
+    if ergebnis is None:
+        raise HTTPException(502, "Die KI hat das Foto nicht gelesen")
+    return ergebnis
+
+
 @router.get("/products", response_model=list[ProductOut])
 async def list_products(
     session: AsyncSession = Depends(get_session),

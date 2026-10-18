@@ -482,6 +482,8 @@ function freierKopf(p, kategorien, kiStatus, opt, mhdKnoepfe) {
     <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:-4px">
       ${mhdKnoepfe.map(([t, d]) => `<button type="button" class="sm" data-tage="${d}">${t}</button>`).join('')}
       <button type="button" class="sm ghost" data-tage="">kein MHD</button>
+      ${kiStatus.aktiv ? `<button type="button" class="sm" id="mhd-foto">📷 vom Foto lesen</button>
+        <input type="file" accept="image/*" capture="environment" id="mhd-datei" hidden>` : ''}
     </div>
 `;
 }
@@ -614,6 +616,42 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
     mhdVonHand = true;
     quelle.textContent = 'von Hand gesetzt';
   }));
+
+  // MHD vom Foto: Kamera auf, Bild verkleinern, die KI liest das Datum.
+  // Kleiner als 1280 Pixel, damit es auch durch einen Reverse Proxy mit
+  // 1-MB-Grenze passt - fuer ein aufgedrucktes Datum reicht das.
+  const fotoKnopf = document.getElementById('mhd-foto');
+  const fotoDatei = document.getElementById('mhd-datei');
+  fotoKnopf?.addEventListener('click', () => fotoDatei.click());
+  fotoDatei?.addEventListener('change', async () => {
+    const datei = fotoDatei.files?.[0];
+    fotoDatei.value = '';
+    if (!datei) return;
+    fotoKnopf.disabled = true;
+    quelle.textContent = 'Foto wird gelesen …';
+    try {
+      const bild = await createImageBitmap(datei);
+      const faktor = Math.min(1, 1280 / Math.max(bild.width, bild.height));
+      const leinwand = document.createElement('canvas');
+      leinwand.width = Math.round(bild.width * faktor);
+      leinwand.height = Math.round(bild.height * faktor);
+      leinwand.getContext('2d').drawImage(bild, 0, 0, leinwand.width, leinwand.height);
+      const daten = leinwand.toDataURL('image/jpeg', 0.85).split(',')[1];
+      const r = await post('/api/ki/mhd', { bild: daten, typ: 'image/jpeg' });
+      if (r.datum) {
+        form.expiry_date.value = r.datum;
+        mhdVonHand = true;
+        quelle.textContent = `vom Foto: ${r.gelesen || r.datum.split('-').reverse().join('.')}`;
+        navigator.vibrate?.(40);
+      } else {
+        quelle.textContent = r.gelesen ? `Kein Datum erkannt („${r.gelesen}“)` : 'Kein Datum erkannt – näher ran?';
+      }
+    } catch (e) {
+      quelle.textContent = e.message;
+    } finally {
+      fotoKnopf.disabled = false;
+    }
+  });
 
   // KI: Kategorie, Sorte und Haltbarkeit je Lagerart vorschlagen. Gefuellt
   // wird nur, was leer ist - Eingetragenes bleibt.

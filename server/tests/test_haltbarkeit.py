@@ -203,3 +203,33 @@ def test_vorschlag_mit_vorlage_ueber_die_api(client):
     _ort(client, f"T-{tag}", "tiefkuehl")
     v = client.get("/api/haltbarkeit/vorschlag", params={"ort": f"T-{tag}", "vorlage": tpl["id"]}).json()
     assert v["tage"] == 120 and v["quelle"].startswith("Vorlage")
+
+
+def test_mhd_aus_den_teilen_des_aufdrucks():
+    from datetime import date
+    heute = date(2026, 10, 18)
+    teile = ki.mhd_aus_teilen
+    assert teile(0, 1, 2027, heute) == "2027-01-31"        # "01.2027": bis Monatsende
+    assert teile(28, 10, 2027, heute) == "2027-10-28"      # "28/10/2027"
+    assert teile(7, 10, 27, heute) == "2027-10-07"         # "07/10/27"
+    assert teile(0, 2, 28, heute) == "2028-02-29"          # Schaltjahr
+    assert teile(31, 4, 2027, heute) == ""                 # gibt es nicht
+    assert teile(15, 3, 2020, heute) == ""                 # eher Charge als MHD
+    assert teile("x", 1, 2027, heute) == ""
+
+
+def test_mhd_foto_ohne_ki_und_mit_ki(client, monkeypatch):
+    bild = "A" * 200
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    assert client.post("/api/ki/mhd", json={"bild": bild}).status_code == 503
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+
+    async def lesen(b, typ):
+        assert b == bild and typ == "image/jpeg"
+        return {"datum": "2026-11-16", "gelesen": "16.11.2026"}
+    monkeypatch.setattr(ki, "mhd_lesen", lesen)
+    r = client.post("/api/ki/mhd", json={"bild": bild})
+    assert r.status_code == 200 and r.json()["datum"] == "2026-11-16"
+    assert client.post("/api/ki/mhd", json={"bild": bild, "typ": "image/gif"}).status_code == 422

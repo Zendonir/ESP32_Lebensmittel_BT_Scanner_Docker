@@ -14,9 +14,11 @@ Gefragt wird nur mit Produktname und Marke - nie mit Bestand oder Haushalt.
 from __future__ import annotations
 
 import asyncio
+import calendar
 import json
 import logging
 import os
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -125,6 +127,113 @@ async def vorschlagen(name: str, marke: str, kategorien: list[str]) -> dict | No
         "haltbarkeit": haltbarkeit.bereinigen(daten.get("haltbarkeit")),
         "hinweis": (daten.get("hinweis") or "").strip()[:300],
     }
+
+
+# ------------------------------------------------------------ MHD vom Foto
+# Aufdrucke auf Verpackungen sind Nadeldrucker-Ziffern auf Folie, gemischt mit
+# Chargennummern und Uhrzeiten ("61520335 07:08", "L.2814"). Eine reine
+# Texterkennung im Browser liest davon zu wenig zuverlaessig; Claude liest
+# das Foto und sagt, welche Zahl das MHD ist. Umgerechnet wird hier - die KI
+# liefert nur Tag, Monat und Jahr, wie sie dastehen.
+
+_SYSTEM_MHD = (
+    "Du liest auf dem Foto einer Lebensmittelverpackung das Mindesthaltbarkeitsdatum "
+    "(MHD, 'mindestens haltbar bis', 'zu verbrauchen bis', 'best before', 'EXP'). "
+    "Ignoriere Chargen-/Losnummern (L..., lange Ziffernfolgen), Uhrzeiten und "
+    "Herstelldaten. Gib Tag, Monat und Jahr so an, wie sie aufgedruckt sind: Jahr "
+    "zwei- oder vierstellig, Tag 0 wenn nur Monat und Jahr dastehen (z. B. '01.2027'). "
+    "Deutsche Reihenfolge Tag/Monat/Jahr, ausser der Aufdruck zeigt eindeutig etwas "
+    "anderes. 'gelesen' ist der Aufdruck woertlich. Ist kein Datum zu erkennen: "
+    "gefunden false und alle Zahlen 0."
+)
+
+_SCHEMA_MHD = {
+    "type": "object",
+    "properties": {
+        "gefunden": {"type": "boolean"},
+        "tag": {"type": "integer"},
+        "monat": {"type": "integer"},
+        "jahr": {"type": "integer"},
+        "gelesen": {"type": "string"},
+    },
+    "required": ["gefunden", "tag", "monat", "jahr", "gelesen"],
+    "additionalProperties": False,
+}
+
+BILDTYPEN = ("image/jpeg", "image/png", "image/webp")
+
+
+def mhd_aus_teilen(tag: int, monat: int, jahr: int, heute: date | None = None) -> str:
+    """Tag/Monat/Jahr vom Aufdruck als ISO-Datum, "" wenn es keins sein kann.
+
+    Nur Monat und Jahr ("01.2027", "mindestens haltbar bis Ende") heisst: bis
+    zum Monatsletzten. Zweistellige Jahre liegen in diesem Jahrhundert. Was
+    mehr als ein Jahr zurueck oder zwanzig Jahre voraus liegt, ist eher eine
+    falsch gelesene Chargennummer als ein MHD.
+    """
+    heute = heute or date.today()
+    try:
+        tag, monat, jahr = int(tag), int(monat), int(jahr)
+    except (TypeError, ValueError):
+        return ""
+    if 0 <= jahr < 100:
+        jahr += 2000
+    if not 1 <= monat <= 12 or not 2000 <= jahr <= 2100:
+        return ""
+    letzter = calendar.monthrange(jahr, monat)[1]
+    if tag == 0:
+        tag = letzter
+    if not 1 <= tag <= letzter:
+        return ""
+    datum = date(jahr, monat, tag)
+    if (datum - heute).days < -366 or (datum - heute).days > 20 * 366:
+        return ""
+    return datum.isoformat()
+
+
+async def mhd_lesen(bild_b64: str, typ: str = "image/jpeg") -> dict | None:
+    """MHD vom Foto: {"datum": ISO oder "", "gelesen": Aufdruck}, None bei Fehler."""
+    if not bild_b64 or not verfuegbar() or typ not in BILDTYPEN:
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        log.warning("KI: Paket 'anthropic' fehlt")
+        return None
+    try:
+        async with anthropic.AsyncAnthropic(timeout=ZEITGRENZE_S, max_retries=1) as client:
+            antwort = await client.beta.messages.create(
+                model=MODELL,
+                max_tokens=2000,
+                system=_SYSTEM_MHD,
+                messages=[{"role": "user", "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": typ, "data": bild_b64}},
+                    {"type": "text", "text": "Welches MHD steht hier?"},
+                ]}],
+                output_config={"effort": "low",
+                               "format": {"type": "json_schema", "schema": _SCHEMA_MHD}},
+                betas=["server-side-fallback-2026-07-01"],
+                fallbacks="default",
+            )
+    except anthropic.APIStatusError as e:
+        log.warning("KI: MHD-Anfrage abgelehnt (%s): %s", e.status_code, e.message)
+        return None
+    except anthropic.APIConnectionError as e:
+        log.warning("KI: keine Verbindung: %s", e)
+        return None
+    if antwort.stop_reason == "refusal":
+        return None
+    text = next((b.text for b in antwort.content if b.type == "text"), "")
+    try:
+        daten = json.loads(text)
+    except json.JSONDecodeError:
+        log.warning("KI: MHD-Antwort ist kein JSON: %r", text[:200])
+        return None
+    gelesen = (daten.get("gelesen") or "").strip()[:60]
+    if not daten.get("gefunden"):
+        return {"datum": "", "gelesen": gelesen}
+    return {"datum": mhd_aus_teilen(daten.get("tag"), daten.get("monat"), daten.get("jahr")),
+            "gelesen": gelesen}
 
 
 async def _kategorien(session: AsyncSession) -> list[str]:
