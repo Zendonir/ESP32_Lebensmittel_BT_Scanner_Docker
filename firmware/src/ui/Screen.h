@@ -98,6 +98,7 @@ private:
     void drawHome();
     void drawCards();
     void drawDatePad();
+    void drawNumberPad();
 
     // Welche Ziffern an der aktuellen Stelle ueberhaupt moeglich sind.
     // Bit N gesetzt = Ziffer N erlaubt.
@@ -134,6 +135,7 @@ private:
     String   _dateValue;
     String   _dateDigits;      // bis zu 6 getippte Ziffern (TTMMJJ)
     float    _numberValue = 1;
+    String   _numDigits;       // auf dem Ziffernblock getippt ("" = Vorgabe)
     String   _textValue;
     bool     _kbShift   = false;   // Grossbuchstaben
     bool     _kbNumeric = false;   // Ziffern/Symbole statt Buchstaben

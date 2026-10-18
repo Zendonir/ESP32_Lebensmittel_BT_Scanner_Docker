@@ -545,6 +545,10 @@ def _screen_date(sess, sid, status) -> dict:
     )
 
 
+def _menge_text(menge: float) -> str:
+    return f"{menge:g}".replace(".", ",")
+
+
 def _screen_qty(sess, sid, status) -> dict:
     draft = sess.draft
     return proto.screen(
@@ -552,7 +556,8 @@ def _screen_qty(sess, sid, status) -> dict:
         kind="number",
         title="Anzahl Etiketten",
         subtitle=draft.name or draft.barcode,
-        lines=[f"MHD {to_display(draft.expiry_date) or '-'}", f"Ort {sess.location or '-'}"],
+        lines=[f"MHD {to_display(draft.expiry_date) or '-'}", f"Ort {sess.location or '-'}",
+               *([f"Je Etikett {_menge_text(draft.quantity)} {draft.unit}"] if draft.unit else [])],
         value=draft.count,
         meta={"min": 1, "max": 20, "step": 1, "unit": "Stk"},
         status=status,
@@ -659,11 +664,15 @@ def _screen_tmpl_amount(sess, sid, status) -> dict:
     return proto.screen(
         screen_id=sid,
         kind="number",
-        title="Füllmenge",
+        title="Menge je Etikett",
         subtitle=f"{draft.name} {draft.brand}".strip(),
+        # Ueber einen Ziffernblock (pad), weil "3 Wuerstchen" oder "750 g"
+        # sich tippen schneller als mit +/- zusammenklicken lassen. Was in
+        # einer Packung steckt; wie viele Packungen, fragt ENTER_QTY.
+        lines=["Was steckt in einer Packung?", "Je Packung ein Etikett"],
         value=draft.quantity,
         meta={"min": 0, "max": 5000, "step": 50 if draft.unit in ("g", "ml") else 1,
-              "unit": draft.unit or "Stk"},
+              "unit": draft.unit or "Stk", "pad": True, "label": "Menge:"},
         status=status,
     )
 

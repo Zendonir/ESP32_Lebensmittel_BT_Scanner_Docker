@@ -110,3 +110,32 @@ def test_vorlage_fragt_kein_mhd_sondern_nimmt_den_ort(client, monkeypatch):
     assert danach == workflow.ENTER_QTY and mhd_kuehl == shift_iso(2)
     assert ende == workflow.RESULT and mhd_truhe == shift_iso(90)
     workflow.drop_session(f"mhd-{tag}")
+
+
+def test_menge_je_etikett_kommt_ueber_den_ziffernblock(client, monkeypatch):
+    async def senden(device_id, msg):
+        return None
+    monkeypatch.setattr(hub, "send_to", senden)
+
+    tag = uuid.uuid4().hex[:6]
+    tpl = client.post("/api/templates", json={"name": f"Würstchen {tag}", "category": "Fleisch & Fisch",
+                                              "unit": "St."}).json()["id"]
+    sess = workflow.session_for(f"pad-{tag}")
+    sess.location = "Kühlschrank"
+
+    async def ablauf():
+        async with session_scope() as session:
+            sess.stack = [workflow.HOME, workflow.TMPL_PRODUCT]
+            sess.draft = workflow.Draft()
+            await workflow.on_tap(session, sess, f"tpl:{tpl}")
+            menge = await workflow.render(session, sess)
+            await workflow.on_input(session, sess, "3")
+            await workflow.on_tap(session, sess, "ok")
+            anzahl = await workflow.render(session, sess)
+            return menge, anzahl, sess.draft.quantity
+    menge, anzahl, wert = _run(ablauf())
+    assert menge["kind"] == "number" and menge["meta"]["pad"] is True and menge["meta"]["unit"] == "St."
+    assert wert == 3.0
+    # Die Etikettenzahl ist etwas anderes: zwei Packungen zu je 3 Stueck.
+    assert anzahl["title"] == "Anzahl Etiketten" and "Je Etikett 3 St." in anzahl["lines"]
+    workflow.drop_session(f"pad-{tag}")

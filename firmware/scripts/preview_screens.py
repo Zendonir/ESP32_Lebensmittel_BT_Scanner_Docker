@@ -429,6 +429,45 @@ def draw_datepad(c, screen, digits=""):
         c.string(label, x + w // 2, ly2 + btn_h // 2, C_TEXT, "MC")
 
 
+def draw_numpad(c, screen, digits=""):
+    """number mit meta.pad - wie Screen::drawNumberPad()."""
+    DIV_X = 240
+    meta = screen.get("meta", {})
+    c.rect(DIV_X, c.body_y, 1, H - c.body_y, C_BORDER)
+    ly = c.body_y + 8
+    for i, line in enumerate(screen.get("lines", [])[:2]):
+        c.set_font(2)
+        c.string(fit_text(c, line, DIV_X - 20, 2), 10, ly,
+                 C_TEXT if i == 0 else C_MUTED, limit=DIV_X - 20, tag="Mengen-Zeile")
+        ly += 20
+    c.rect(10, c.body_y + 52, DIV_X - 20, 1, C_BORDER)
+    c.set_font(2)
+    c.string(meta.get("label", "Menge:"), 10, c.body_y + 58, C_MUTED)
+    bx, by, bw, bh = 10, c.body_y + 76, DIV_X - 20, 76
+    c.rrect(bx, by, bw, bh, 10, C_SURFACE, C_PRIMARY)
+    wert = digits or f"{screen.get('value', 1):g}".replace(".", ",")
+    unit = meta.get("unit", "")
+    text = f"{wert} {unit}" if unit else wert
+    c.string(fit_text(c, text, bw - 12, 6), bx + bw // 2, by + bh // 2,
+             C_PRIMARY if digits else C_MUTED, "MC", bw - 12, "Menge")
+    button(c, 10, H - 6 - 52, DIV_X - 20, 52, "Übernehmen", C_OK)
+    npx = DIV_X + 1
+    btn_w = (W - npx) // 3
+    btn_h = (H - c.body_y) // 4
+    dezimal = meta.get("step", 1) < 1 or unit in ("kg", "l")
+    tasten = [str(i) for i in range(1, 10)] + [",", "0", "<-"]
+    for i, label in enumerate(tasten):
+        x = npx + (i % 3) * btn_w
+        y = c.body_y + (i // 3) * btn_h
+        aus = label == "," and not dezimal
+        bg = C_DANGER if label == "<-" else (C_SURFACE if aus else C_SURFACE2)
+        c.rect(x, y, btn_w, btn_h, bg)
+        c.rect(x, y, btn_w, 1, C_BORDER)
+        c.rect(x, y, 1, btn_h, C_BORDER)
+        c.set_font(6)
+        c.string(label, x + btn_w // 2, y + btn_h // 2, C_MUTED if aus else C_TEXT, "MC")
+
+
 KB = ("qwertzuiop", "asdfghjkl", "yxcvbnm")
 
 
@@ -476,7 +515,9 @@ def render(screen) -> Canvas:
     draw_status(c, screen)
     draw_title(c, screen)
     kind = screen.get("kind", "message")
+    if kind == "number" and screen.get("meta", {}).get("pad"):
+        kind = "numpad"
     {"tiles": draw_tiles, "list": draw_list, "home": draw_home, "cards": draw_cards,
-     "datepad": draw_datepad, "keyboard": draw_keyboard,
+     "datepad": draw_datepad, "keyboard": draw_keyboard, "numpad": draw_numpad,
      "message": draw_message}.get(kind, draw_message)(c, screen)
     return c

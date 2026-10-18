@@ -121,6 +121,7 @@ void Screen::apply(JsonDocument &doc) {
         _dateValue = String(_screen["value"] | "");
     } else if (_kind == "number") {
         _numberValue = _screen["value"] | 1.0f;
+        _numDigits = "";
     } else if (_kind == "keyboard") {
         _textValue = String(_screen["value"] | "");
         _kbShift = false;
@@ -190,6 +191,7 @@ void Screen::redraw() {
     if (_kind == "tiles") drawTiles();
     else if (_kind == "list") drawList();
     else if (_kind == "date") drawDate();
+    else if (_kind == "number" && (_screen["meta"]["pad"] | false)) drawNumberPad();
     else if (_kind == "number") drawNumber();
     else if (_kind == "keyboard") drawKeyboard();
     else if (_kind == "home") drawHome();
@@ -592,6 +594,79 @@ void Screen::drawNumber() {
     button(14, H - 62, W - 28, 52, "Übernehmen", C_OK, "ok");
 }
 
+// Zahl ueber einen Ziffernblock statt +/-: links Wert und Uebernehmen, rechts
+// die Tasten - aufgebaut wie der MHD-Block, damit sich beide gleich bedienen.
+// Angefordert vom Server mit meta.pad; eine Firmware ohne das zeigt weiter
+// die +/--Knoepfe, der Wert kommt in beiden Faellen gleich an.
+void Screen::drawNumberPad() {
+    static constexpr int16_t DIV_X = 240;
+    _spr.fillRect(DIV_X, BODY_Y, 1, H - BODY_Y, C_BORDER);
+
+    JsonArray lines = _screen["lines"].as<JsonArray>();
+    int16_t ly = BODY_Y + 8;
+    int index = 0;
+    for (JsonVariant line : lines) {
+        if (index > 1) break;
+        _spr.setTextColor(index == 0 ? C_TEXT : C_MUTED, C_BG);
+        _spr.drawString(fitText(String(line.as<const char *>()), DIV_X - 20, 2), 10, ly);
+        ly += 20;
+        index++;
+    }
+
+    _spr.fillRect(10, BODY_Y + 52, DIV_X - 20, 1, C_BORDER);
+    _spr.setTextFont(2);
+    _spr.setTextColor(C_MUTED, C_BG);
+    _spr.drawString(String(_screen["meta"]["label"] | "Menge:"), 10, BODY_Y + 58);
+
+    const int16_t boxX = 10, boxY = BODY_Y + 76, boxW = DIV_X - 20, boxH = 76;
+    _spr.fillRoundRect(boxX, boxY, boxW, boxH, 10, C_SURFACE);
+    _spr.drawRoundRect(boxX, boxY, boxW, boxH, 10, C_PRIMARY);
+
+    // Noch nichts getippt: die Vorgabe des Servers gedimmt zeigen.
+    String shown = _numDigits;
+    if (shown.isEmpty()) {
+        char buf[16];
+        if (_numberValue == (long)_numberValue) snprintf(buf, sizeof(buf), "%ld", (long)_numberValue);
+        else snprintf(buf, sizeof(buf), "%.1f", _numberValue);
+        shown = buf;
+        shown.replace('.', ',');
+    }
+    const String unit = String(_screen["meta"]["unit"] | "");
+    _spr.setTextDatum(MC_DATUM);
+    _spr.setTextColor(_numDigits.isEmpty() ? C_MUTED : C_PRIMARY, C_SURFACE);
+    _spr.drawString(fitText(unit.isEmpty() ? shown : shown + " " + unit, boxW - 12, 6),
+                    boxX + boxW / 2, boxY + boxH / 2);
+    _spr.setTextDatum(TL_DATUM);
+
+    button(10, H - 6 - 52, DIV_X - 20, 52, "Übernehmen", C_OK, "ok");
+
+    const int16_t npX = DIV_X + 1;
+    const int16_t btnW = (W - npX) / 3;
+    const int16_t btnH = (H - BODY_Y) / 4;
+    const bool decimals = (_screen["meta"]["step"] | 1.0f) < 1.0f || unit == "kg" || unit == "l";
+
+    auto key = [&](int16_t x, int16_t y, const String &label, bool enabled,
+                   const String &id, uint16_t bg) {
+        _spr.fillRect(x, y, btnW, btnH, bg);
+        _spr.fillRect(x, y, btnW, 1, C_BORDER);
+        _spr.fillRect(x, y, 1, btnH, C_BORDER);
+        _spr.setTextDatum(MC_DATUM);
+        _spr.setTextColor(enabled ? C_TEXT : C_MUTED, bg);
+        _spr.drawString(fitText(label, btnW - 8, 6), x + btnW / 2, y + btnH / 2);
+        _spr.setTextDatum(TL_DATUM);
+        if (enabled) addHit(x, y, btnW, btnH, id);
+    };
+    for (int i = 0; i < 9; i++) {
+        key(npX + (i % 3) * btnW, BODY_Y + (i / 3) * btnH, String(i + 1), true,
+            "__np" + String(i + 1), C_SURFACE2);
+    }
+    const int16_t lastY = BODY_Y + 3 * btnH;
+    const bool commaOk = decimals && _numDigits.indexOf(',') < 0;
+    key(npX, lastY, ",", commaOk, "__np,", commaOk ? C_SURFACE2 : C_SURFACE);
+    key(npX + btnW, lastY, "0", true, "__np0", C_SURFACE2);
+    key(npX + 2 * btnW, lastY, "<-", true, "__npback", C_DANGER);
+}
+
 // Bildschirmtastatur: drei Reihen Buchstaben (oder im Ziffernmodus Ziffern und
 // Satzzeichen) plus eine Bedienreihe mit Umschalt/Modus, Leerzeichen und OK.
 // Reihen sind unterschiedlich breit wie bei einer echten Tastatur - das ist
@@ -992,6 +1067,28 @@ Action Screen::handleTouch(int16_t x, int16_t y) {
         if (id == "__d+") { _dateValue = shiftDate(_dateValue, 1, 0); redraw(); return action; }
         if (id == "__m-") { _dateValue = shiftDate(_dateValue, 0, -1); redraw(); return action; }
         if (id == "__m+") { _dateValue = shiftDate(_dateValue, 0, 1); redraw(); return action; }
+
+        // Ziffernblock vor "__n": beide Kennungen beginnen so.
+        if (id.startsWith("__np")) {
+            if (id == "__npback") {
+                if (_numDigits.length()) _numDigits.remove(_numDigits.length() - 1);
+            } else if (_numDigits.length() < 7) {
+                const char c = id[4];
+                if (c == '0' && _numDigits == "0") return action;   // keine 00
+                if (c == ',' && _numDigits.isEmpty()) _numDigits = "0";
+                _numDigits += c;
+            }
+            if (_numDigits.length()) {
+                String v = _numDigits;
+                v.replace(',', '.');
+                const float hi = _screen["meta"]["max"] | 9999.0f;
+                _numberValue = min(v.toFloat(), hi);
+            } else {
+                _numberValue = _screen["value"] | 1.0f;
+            }
+            redraw();
+            return action;
+        }
 
         if (id.startsWith("__n")) {
             const float step = _screen["meta"]["step"] | 1.0f;

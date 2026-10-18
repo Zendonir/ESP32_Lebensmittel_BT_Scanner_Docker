@@ -77,7 +77,8 @@ Der Zustand (`DeviceSession`) liegt im Arbeitsspeicher und wird beim Trennen
 verworfen – nach einem Reconnect steht das Gerät auf dem Startbildschirm.
 
 Die Firmware kennt diese Darstellungsarten: `tiles`, `list`, `date`, `number`,
-`message`, `keyboard`, `home`, `cards`, `datepad`. Wer eine weitere braucht,
+`message`, `keyboard`, `home`, `cards`, `datepad` – `number` mit `meta.pad`
+als Ziffernblock (ältere Firmware zeigt dann +/−). Wer eine weitere braucht,
 muss die Firmware anfassen – vorher prüfen, ob sich das Ziel mit den
 vorhandenen erreichen lässt.
 
@@ -212,6 +213,7 @@ cd firmware && pio run --target upload # flashen
 | Terminal "haengt" ohne Server | Jeder vergebliche TCP-Aufbau blockiert bis `WEBSOCKETS_TCP_TIMEOUT`. Deshalb: Abstand waechst 5/10/20 s (`WS_RECONNECT_MAX_MS`), und waehrend der Bedienung (`Net::noteUserActivity`, `USER_QUIET_MS`) wird ohne Verbindung gar nicht verbunden. Das selbsttaetig geoeffnete Portal laeuft nebenher und legt Scanner/Touch nicht mehr still |
 | Offline-Betrieb | Ohne Server sammelt `OfflineQueue` (NVS, 40 Eintraege, uebersteht Neustarts) die Scans, der Schirm zeigt sie (lokaler Bildschirm, id -1). Nach dem Verbinden geht eine `offline`-Nachricht hinaus, erst `offline_ack` loescht. Server: Etiketten auslagern (nie wieder einbuchen), Produkte als `OfflineScan` unter "Nachtragen" auf der Startseite. Druckergebnisse ohne Verbindung werden nachgereicht |
 | Tipp ohne sichtbare Reaktion | `Screen::setBusy()` nach Tipp/Scan: ab 350 ms Balken unter der Statusleiste, nach 10 s "Server antwortet nicht". Ohne Verbindung sagt ein Tipp das sofort |
+| Menge und Etikettenzahl verwechselt | Menge (`draft.quantity` + Einheit der Vorlage) ist, was in **einer** Packung steckt, `count` die Zahl der Etiketten = Packungen. 2 Packungen zu je 3 Wuerstchen = 2 Etiketten mit "3 St." |
 | Ein haengender Browser friert das Terminal ein | Jeder Sendevorgang hat eine Zeitgrenze (`hub.SEND_TIMEOUT_S`) |
 
 ## Entwicklungsregeln
