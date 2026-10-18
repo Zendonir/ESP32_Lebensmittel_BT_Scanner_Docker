@@ -557,7 +557,7 @@ def _screen_qty(sess, sid, status) -> dict:
         title="Anzahl Etiketten",
         subtitle=draft.name or draft.barcode,
         lines=[f"MHD {to_display(draft.expiry_date) or '-'}", f"Ort {sess.location or '-'}",
-               *([f"Je Etikett {_menge_text(draft.quantity)} {draft.unit}"] if draft.unit else [])],
+               *([f"Menge {_menge_text(draft.quantity)} {draft.unit}"] if draft.unit else [])],
         value=draft.count,
         meta={"min": 1, "max": 20, "step": 1, "unit": "Stk"},
         status=status,
@@ -664,7 +664,7 @@ def _screen_tmpl_amount(sess, sid, status) -> dict:
     return proto.screen(
         screen_id=sid,
         kind="number",
-        title="Menge je Etikett",
+        title="Menge",
         subtitle=f"{draft.name} {draft.brand}".strip(),
         # Ueber einen Ziffernblock (pad), weil "3 Wuerstchen" oder "750 g"
         # sich tippen schneller als mit +/- zusammenklicken lassen. Was in

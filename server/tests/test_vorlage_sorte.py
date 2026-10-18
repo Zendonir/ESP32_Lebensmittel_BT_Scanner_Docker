@@ -137,5 +137,5 @@ def test_menge_je_etikett_kommt_ueber_den_ziffernblock(client, monkeypatch):
     assert menge["kind"] == "number" and menge["meta"]["pad"] is True and menge["meta"]["unit"] == "St."
     assert wert == 3.0
     # Die Etikettenzahl ist etwas anderes: zwei Packungen zu je 3 Stueck.
-    assert anzahl["title"] == "Anzahl Etiketten" and "Je Etikett 3 St." in anzahl["lines"]
+    assert anzahl["title"] == "Anzahl Etiketten" and "Menge 3 St." in anzahl["lines"]
     workflow.drop_session(f"pad-{tag}")
