@@ -34,13 +34,13 @@ export async function mhdKamera({ kiErlaubt = false, test = false, beiBild = nul
   ebene.innerHTML = `<div style="position:fixed;inset:0;z-index:60;background:#000;display:flex;flex-direction:column">
     <div style="position:relative;flex:1;overflow:hidden">
       <video playsinline muted autoplay style="width:100%;height:100%;object-fit:cover"></video>
-      <div class="ziel" style="position:absolute;left:8%;right:8%;top:36%;height:24%;border:3px solid #fff;
+      <div class="ziel" style="position:absolute;left:8%;right:8%;top:32%;height:32%;border:3px solid #fff;
         border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,.5);transition:border-color .2s"></div>
       ${test ? `<div class="debug" style="position:absolute;left:0;right:0;top:0;padding:10px 12px;
         font:12px/1.4 ui-monospace,monospace;color:#fff;background:rgba(0,0,0,.65);max-height:34%;overflow:auto"></div>` : ''}
     </div>
     <div style="padding:14px 16px calc(14px + env(safe-area-inset-bottom));display:grid;gap:10px;background:#111">
-      <div class="info" style="text-align:center;color:#fff">Datum in den Rahmen halten</div>
+      <div class="info" style="text-align:center;color:#fff">Datum in den Rahmen halten – quer oder hochkant</div>
       <div style="display:flex;gap:10px">
         ${test ? '<button type="button" class="merken" style="flex:1">Bild merken</button>' : ''}
         <button type="button" class="ghost ende" style="flex:1">${test ? 'Beenden' : 'Abbrechen'}</button>

@@ -58,6 +58,24 @@ def test_mhd_aus_weiteren_aufdrucken(texte, datum):
     assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == datum
 
 
+@pytest.mark.parametrize("texte, datum", [
+    (["08.01·2028", "DMA0122602", "07:26"], "2028-01-08"),
+    (["92:20", "DMA0122602", "08:01:2028"], "2028-01-08"),
+    (["08·01·2028"], "2028-01-08"),
+])
+def test_nadeldruck_punkte_als_trenner(texte, datum):
+    assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == datum
+
+
+@pytest.mark.parametrize("texte", [
+    [".01.2028", "DMA0122602", "07:26"],       # Tag nicht gelesen - nicht der 31.01.!
+    [":01.2028"],
+    ["12:30:45"],                                 # Uhrzeit mit Sekunden
+])
+def test_abgeschnittenes_datum_wird_nicht_geraten(texte):
+    assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == ""
+
+
 def test_ohne_jahr_nur_mit_hinweiswort():
     # Naehrwerte sehen aus wie Tag.Monat - ohne Hinweis nie ein MHD.
     assert mhd_ocr.mhd_finden(["Fett 3.5", "Eiweiss 1.12", "22.10"], HEUTE)["datum"] == ""

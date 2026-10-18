@@ -47,8 +47,9 @@ _engine_lock = threading.Lock()
 # Handy schickt im Sekundentakt - parallel waere nur jedes einzelne langsamer.
 _reihe = asyncio.Semaphore(1)
 
-# Zusaetzliche Winkel fuer Einzelfotos, nach Haeufigkeit sortiert.
-_WINKEL_GRUENDLICH = (20, -20, 40, -40, 60, -60, 90, -90)
+# Zusaetzliche Winkel fuer Einzelfotos, nach Haeufigkeit sortiert (+-90
+# laufen immer, siehe _lesen_sync).
+_WINKEL_GRUENDLICH = (20, -20, 40, -40, 60, -60)
 # Danach gibt ein Einzelfoto auf - ein Durchgang dauert gut eine halbe Sekunde.
 _GRUENDLICH_HOECHSTENS_S = 10.0
 
@@ -86,12 +87,19 @@ def _laden(bild: bytes):
     return img
 
 
-def _punkte(img):
-    """Nadeldruck zu Strichen: dunkle Punkte um ein Pixel ausweiten."""
+def _punkte(img, grob: bool = False):
+    """Nadeldruck zu Strichen: dunkle Punkte um ein Pixel ausweiten.
+
+    `grob` rechnet vorher auf halbe Groesse - fuer grosse Punkte (nah
+    fotografiert), bei denen ein Pixel die Luecken nicht schliesst. Wie gross
+    die Punkte sind, haengt am Abstand der Kamera; deshalb beide Stufen.
+    """
     import cv2
     import numpy as np
 
     grau = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    if grob:
+        grau = cv2.resize(grau, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
     return cv2.cvtColor(cv2.erode(grau, np.ones((3, 3), np.uint8)), cv2.COLOR_GRAY2BGR)
 
 
@@ -156,7 +164,8 @@ def _lesen_sync(bild: bytes, gruendlich: bool) -> dict:
                             "texte": len(zeilen)})
         return zeilen, kand
 
-    plan = [("original", lambda: img), ("punkte", lambda: _punkte(img))]
+    plan = [("original", lambda: img), ("punkte", lambda: _punkte(img)),
+            ("punkte grob", lambda: _punkte(img, grob=True))]
     start = time.perf_counter()
     i = 0
     while i < len(plan) and time.perf_counter() - start < _GRUENDLICH_HOECHSTENS_S:
@@ -165,12 +174,16 @@ def _lesen_sync(bild: bytes, gruendlich: bool) -> dict:
         if kand:
             return {"datum": kand[0]["datum"], "gelesen": kand[0]["gelesen"], "kandidaten": kand,
                     "zeilen": zeilen, "durchgaenge": durchgaenge, "groesse": groesse}
-        if i == 1:
-            # Nach den ersten beiden: Richtungen aus dem, was bisher erkannt wurde.
+        if i == 2:
+            # Nach den ersten dreien: Richtungen aus dem, was bisher erkannt
+            # wurde, dann hochkant - manche Flaschen tragen das Datum um 90 Grad
+            # gedreht zum uebrigen Text (More-Sirup).
             for w in _winkel_aus(gesehen):
                 plan.append((f"punkte, {w:+.0f}°", lambda w=w: _punkte(_drehen(img, w))))
+            for w in (90, -90):
+                plan.append((f"punkte grob, {w:+d}°", lambda w=w: _punkte(_drehen(img, w), grob=True)))
             if gruendlich:
-                schon = [float(n.split(", ")[1].rstrip("°")) for n, _ in plan[2:]]
+                schon = [float(n.split(", ")[1].rstrip("°")) for n, _ in plan[3:]]
                 for w in _WINKEL_GRUENDLICH:
                     if all(abs(w - x) > 8 for x in schon):
                         plan.append((f"punkte, {w:+d}°", lambda w=w: _punkte(_drehen(img, w))))
@@ -193,15 +206,20 @@ async def texte_lesen(bild: bytes) -> list[str]:
 # ------------------------------------------------------------------- Regeln
 # Trennzeichen eines Datums. Kein Doppelpunkt: "07:08" ist eine Uhrzeit.
 _T = r"\s*[./\-]\s*"
+# Bei drei Teilen auch Doppelpunkt und Mittelpunkt: Nadeldruck-Punkte liest
+# die Erkennung als "08·01:2028". Eine Uhrzeit hat nur zwei Teile.
+_T3 = r"\s*[./\-:·]\s*"
 _MUSTER = [
-    # 16.11.2026 · 28/10/2027 · 07/10/27
-    ("voll", re.compile(rf"(?<!\d)(\d{{1,2}}){_T}(\d{{1,2}}){_T}(\d{{4}}|\d{{2}})(?!\d)")),
+    # 16.11.2026 · 28/10/2027 · 07/10/27 · 08·01:2028
+    ("voll", re.compile(rf"(?<!\d)(\d{{1,2}}){_T3}(\d{{1,2}}){_T3}(\d{{4}}|\d{{2}})(?!\d)")),
     # 2810/2027 - die Erkennung verschluckt bei Nadeldruck gern das erste Trennzeichen
     ("voll", re.compile(rf"(?<!\d)(\d{{2}})(\d{{2}}){_T}(\d{{4}}|\d{{2}})(?!\d)")),
     # 28102027 - alle Trennzeichen weg; nur mit 20xx, sonst ist es eine Charge
     ("voll", re.compile(r"(?<!\d)(\d{2})(\d{2})(20\d{2})(?!\d)")),
-    # 01.2027 - nur Monat und Jahr: bis Monatsende
-    ("monat", re.compile(rf"(?<!\d)(\d{{1,2}}){_T}(20\d{{2}})(?!\d)")),
+    # 01.2027 - nur Monat und Jahr: bis Monatsende. Nicht nach einem Trenn-
+    # zeichen: ".01.2028" ist ein Datum, dessen Tag nicht gelesen wurde -
+    # daraus den 31.01. zu machen, waere ein falsches MHD.
+    ("monat", re.compile(rf"(?<![\d.:·/\-])(\d{{1,2}}){_T}(20\d{{2}})(?!\d)")),
     # 31.10. - ohne Jahr (Frischware). Nur mit Hinweiswort, siehe kandidaten(),
     # und nur zweistellig wie gedruckt: "1.1" war ein falsch gelesenes "1,15 g".
     ("ohne_jahr", re.compile(r"(?<![\d.,])(\d{2})\.\s*(\d{2})\.?(?![\d.]|\s*\d)")),
