@@ -63,6 +63,10 @@
        einzelnen Packungen eingerueckt darunter. */
     .gruppe { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
     .gruppe .gkopf { cursor: pointer; }
+    #tpl-list { gap: 6px; }
+    #tpl-list .swipe-inner { padding: 8px 12px; }
+    .tpl-zeile { width: 100%; text-align: left; font: inherit; color: inherit; }
+    .tpl-zeile .s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .gruppe .gkopf .t::before { content: '▸ '; color: var(--muted); }
     .gruppe .gkopf[aria-expanded="true"] .t::before { content: '▾ '; }
     .gruppe .pill.anzahl { background: var(--surface-2, rgba(127,127,127,.18)); }
@@ -878,32 +882,78 @@ function haltKurz(t) {
     .map(([k, i]) => `${i} ${h[k] ? `${h[k]} T` : '–'}`).join(' · ');
 }
 
+// Vorlagen nach Kategorie, aufklappbar, mit Suche. Eine Zeile je Vorlage;
+// Antippen oeffnet sie zum Aendern (dort steht auch Loeschen).
+let tplSuche = '';
+let tplOffen = null; // Set der offenen Kategorien; null = noch nicht entschieden
+
+// Nur die gesetzten Haltbarkeiten - "🏠 – · ❄️ 7 T · 🧊 –" war zu lang.
+function haltKompakt(t) {
+  const h = t.haltbarkeit && Object.keys(t.haltbarkeit).length
+    ? t.haltbarkeit : (t.shelf_days ? { kuehl: t.shelf_days } : {});
+  return [['raum', '🏠'], ['kuehl', '❄️'], ['tiefkuehl', '🧊']]
+    .filter(([k]) => h[k]).map(([k, i]) => `${i} ${h[k]} T`).join(' ');
+}
+
 async function renderTemplates() {
   const rows = await get('/api/templates');
   count.textContent = rows.length;
-  view.innerHTML = `<div class="list">
-    <button class="primary" id="tpl-new">+ Neue Vorlage</button>
-    ${rows.map((t) => `<div class="swipe-inner">
-      <div class="t">${esc(t.name)}</div>
-      <div class="s">${esc(t.category)} · ${haltKurz(t)}${t.unit ? ` · ${esc(t.unit)}` : ''}</div>
-      ${(t.brands || []).length ? `<div class="tag-list" style="margin-top:6px">${
-        t.brands.map((b) => `<span class="tag">${esc(b)}</span>`).join('')}</div>` : ''}
-      ${(t.sorten || []).length ? `<div class="tag-list" style="margin-top:4px">${
-        t.sorten.map((s) => `<span class="tag">${esc(s)}</span>`).join('')}</div>` : ''}
-      <div class="row" style="margin-top:10px">
-        <button class="sm" data-edit="${t.id}">Ändern</button>
-        <button class="sm danger" data-del="${t.id}">Löschen</button>
-      </div></div>`).join('') || '<div class="empty">Noch keine Vorlage.</div>'}
-  </div>`;
+  if (tplOffen === null) {
+    // Wenige Vorlagen: alles offen. Viele: nur die Kategorien als Uebersicht.
+    tplOffen = new Set(rows.length <= 8 ? rows.map((t) => t.category) : []);
+  }
+  view.innerHTML = `
+    <div class="msearch"><input id="tpl-q" type="search" placeholder="Vorlage suchen: Name, Marke, Sorte"
+      value="${esc(tplSuche)}" autocomplete="off" enterkeyhint="search" aria-label="Vorlage suchen"></div>
+    <div class="list" id="tpl-list"></div>`;
+  let timer;
+  document.getElementById('tpl-q').addEventListener('input', (ev) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { tplSuche = ev.target.value.trim(); fillTemplates(rows); }, 200);
+  });
+  fillTemplates(rows);
+}
+
+function fillTemplates(rows) {
+  const box = document.getElementById('tpl-list');
+  if (!box) return;
+  const q = tplSuche.toLowerCase();
+  const passt = (t) => !q || [t.name, t.category, ...(t.brands || []), ...(t.sorten || [])]
+    .some((x) => String(x || '').toLowerCase().includes(q));
+  const gefunden = rows.filter(passt);
+  const kategorien = new Map();
+  for (const t of [...gefunden].sort((x, y) => x.name.localeCompare(y.name, 'de'))) {
+    const k = t.category || 'Ohne Kategorie';
+    if (!kategorien.has(k)) kategorien.set(k, []);
+    kategorien.get(k).push(t);
+  }
+  const zeile = (t) => {
+    const unter = [(t.brands || []).join(', '),
+      (t.sorten || []).length ? `${t.sorten.length} ${t.sorten.length === 1 ? 'Sorte' : 'Sorten'}` : '', haltKompakt(t)].filter(Boolean);
+    return `<button type="button" class="swipe-inner tpl-zeile" data-edit="${t.id}">
+      <div class="kopf"><div class="t">${esc(t.name)}</div>${t.unit ? `<span class="muted">${esc(t.unit)}</span>` : ''}</div>
+      ${unter.length ? `<div class="s">${unter.map(esc).join(' · ')}</div>` : ''}</button>`;
+  };
+  box.innerHTML = `<button class="primary" id="tpl-new">+ Neue Vorlage</button>
+    ${[...kategorien.entries()].sort(([a], [b]) => a.localeCompare(b, 'de')).map(([k, liste]) => {
+      const offen = !!q || tplOffen.has(k);
+      return `<div class="gruppe" data-kat="${esc(k)}">
+        <div class="swipe-inner gkopf" role="button" tabindex="0" aria-expanded="${offen}">
+          <div class="kopf"><div class="t">${esc(k)}</div><span class="pill anzahl">${liste.length}</span></div>
+        </div>
+        <div class="gliste"${offen ? '' : ' hidden'}>${liste.map(zeile).join('')}</div>
+      </div>`;
+    }).join('') || `<div class="empty">${q ? `Keine Vorlage zu „${esc(tplSuche)}“.` : 'Noch keine Vorlage.'}</div>`}`;
 
   document.getElementById('tpl-new').addEventListener('click', () => templateForm(null));
-  view.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click',
-    () => templateForm(rows.find((t) => t.id === +b.dataset.edit))));
-  view.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-    if (!confirm('Vorlage wirklich löschen?')) return;
-    try { await del(`/api/templates/${b.dataset.del}`); toast('Gelöscht'); renderTemplates(); }
-    catch (e) { toast(e.message, 'error'); }
+  box.querySelectorAll('.gkopf').forEach((kopf) => kopf.addEventListener('click', () => {
+    const g = kopf.closest('.gruppe'), liste = g.querySelector('.gliste');
+    liste.hidden = !liste.hidden;
+    kopf.setAttribute('aria-expanded', String(!liste.hidden));
+    if (liste.hidden) tplOffen.delete(g.dataset.kat); else tplOffen.add(g.dataset.kat);
   }));
+  box.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click',
+    () => templateForm(rows.find((t) => t.id === +b.dataset.edit))));
 }
 
 async function templateForm(tpl) {
@@ -942,7 +992,8 @@ async function templateForm(tpl) {
     <div class="row">
       <button type="button" class="ghost" id="tpl-cancel" style="flex:1">Abbrechen</button>
       <button class="primary" style="flex:1">Speichern</button>
-    </div></form>`;
+    </div>
+    ${tpl ? '<button type="button" class="danger" id="tpl-del">Vorlage löschen</button>' : ''}</form>`;
 
   // Platzhalter zeigen, was die gewaehlte Kategorie vorgibt.
   document.querySelector('#tplform [name="category"]').addEventListener('change', (ev) => {
@@ -959,6 +1010,16 @@ async function templateForm(tpl) {
     sortenFeld.hidden = !sortenHaken.checked;
     const kat = categories.find((c) => c.name === document.querySelector('#tplform [name="category"]').value);
     if (sortenHaken.checked && sorten.isEmpty() && kat?.subcategories?.length) sorten.set(kat.subcategories);
+  });
+
+  document.getElementById('tpl-del')?.addEventListener('click', async () => {
+    if (!confirm(`Vorlage „${tpl.name}“ wirklich löschen?`)) return;
+    try {
+      await del(`/api/templates/${tpl.id}`);
+      toast('Gelöscht');
+      title.textContent = TITLES.tpl;
+      renderTemplates();
+    } catch (e) { toast(e.message, 'error'); }
   });
 
   document.getElementById('tpl-cancel').addEventListener('click', () => {
