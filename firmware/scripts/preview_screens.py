@@ -323,12 +323,13 @@ def draw_home(c, screen):
 
     after = pill(4, "WLAN OK" if wifi else "WLAN FEHLT", C_OK if wifi else C_DANGER)
     pill(after, "BLE OK" if ble else "BLE ---", C_OK if ble else C_SURFACE2)
-    button(c, W - 120, y - 2, 116, 26, "Neue Rolle", C_SURFACE2)
+    if meta.get("roll_button", True):
+        button(c, W - 120, y - 2, 116, 26, "Neue Rolle", C_SURFACE2)
     y += 30
     items = screen.get("items", [])
     if not items:
         return
-    cols, gap = 2, 4
+    cols, gap = max(1, min(4, int(meta.get("cols", 2)))), 4
     rows = (len(items) + cols - 1) // cols
     tw = (W - gap * (cols + 1)) // cols
     th = max(40, (c.body_y + (H - c.body_y) - y - gap * (rows + 1)) // rows)

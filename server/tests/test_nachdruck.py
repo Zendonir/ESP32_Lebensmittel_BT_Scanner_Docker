@@ -66,3 +66,18 @@ def test_nachdruck_am_terminal(client, monkeypatch):
     assert danach == workflow.HOME
     assert any(m.get("t") == "toast" and etikett in m["text"] for m in gesendet)
     workflow.drop_session(geraet)
+
+
+def test_startseite_drei_spalten_nur_mit_home3():
+    async def bild(caps):
+        async with session_scope() as s:
+            sess = workflow.DeviceSession(device_id=f"t{uuid.uuid4().hex[:6]}")
+            sess.caps = caps
+            return await workflow._screen_home(s, sess, 1, {"scanner": False, "location": ""})
+
+    alt = _run(bild(None))
+    assert "cols" not in alt["meta"]
+    assert "new_roll" not in [i["id"] for i in alt["items"]]
+    neu = _run(bild({"home3"}))
+    assert neu["meta"]["cols"] == 3 and neu["meta"]["roll_button"] is False
+    assert len(neu["items"]) == 6 and "new_roll" in [i["id"] for i in neu["items"]]

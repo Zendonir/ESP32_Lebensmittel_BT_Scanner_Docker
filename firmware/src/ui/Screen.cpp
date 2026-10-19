@@ -820,14 +820,20 @@ void Screen::drawHome() {
     };
     const int16_t afterWifi = pill(4, wifiOk ? "WLAN OK" : "WLAN FEHLT", wifiOk ? C_OK : C_DANGER);
     pill(afterWifi, bleOk ? "BLE OK" : "BLE ---", bleOk ? C_OK : C_SURFACE2);
-    button(W - 120, y - 2, 116, 26, "Neue Rolle", C_SURFACE2, "new_roll");
+    // "Neue Rolle" kommt vom Server als Kachel, wenn er meta.roll_button =
+    // false schickt; der kleine Knopf neben den Pillen war kaum zu treffen.
+    if (_screen["meta"]["roll_button"] | true) {
+        button(W - 120, y - 2, 116, 26, "Neue Rolle", C_SURFACE2, "new_roll");
+    }
     y += 30;
 
     // Kachelraster mit den verbleibenden Bildschirmaktionen.
     JsonArray items = _screen["items"].as<JsonArray>();
     const int count = items.size();
     if (count == 0) return;
-    const int cols = 2;
+    // Spalten bestimmt der Server (meta.cols): fuenf Kacheln in zwei Spalten
+    // liessen eine allein in der letzten Reihe stehen.
+    const int cols = constrain((int)(_screen["meta"]["cols"] | 2), 1, 4);
     const int rows = (count + cols - 1) / cols;
     const int16_t gap = 4;
     const int16_t tw = (W - gap * (cols + 1)) / cols;

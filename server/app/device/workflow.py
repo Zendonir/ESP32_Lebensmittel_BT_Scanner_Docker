@@ -370,12 +370,21 @@ async def render(session: AsyncSession, sess: DeviceSession) -> dict:
 async def _screen_home(session, sess, sid, status) -> dict:
     counts = await inv.stats(session)
     roll = await labels.roll_state(session)
+    # Neuere Firmware ("home3"): drei Spalten, "Neue Rolle" als sechste
+    # Kachel - zwei Reihen gleich grosser Kacheln statt fuenf in zwei Spalten
+    # mit einer allein in der letzten Reihe und einem winzigen Knopf daneben.
+    drei = "home3" in (sess.caps or set())
     items = [
         {"id": "templates", "label": "Kategorie", "sub": "ohne Barcode", "color": "#4c9eff"},
-        {"id": "manual_entry", "label": "Manuelle Eingabe", "color": "#2eb048"},
-        {"id": "inventory", "label": "Inventar", "color": "#cc9218"},
+        {"id": "manual_entry", "label": "Manuell" if drei else "Manuelle Eingabe",
+         **({"sub": "Name tippen"} if drei else {}), "color": "#2eb048"},
+        {"id": "inventory", "label": "Inventar", **({"sub": "Bestand"} if drei else {}),
+         "color": "#cc9218"},
         {"id": "nachdruck", "label": "Nachdruck", "sub": "letztes Etikett", "color": "#8e5bd0"},
-        {"id": "system", "label": "System", "color": "#1c222a"},
+        *([{"id": "new_roll", "label": "Neue Rolle", "sub": "Etiketten", "color": "#2c3e50"}]
+          if drei else []),
+        {"id": "system", "label": "System", **({"sub": "WLAN · Scanner"} if drei else {}),
+         "color": "#1c222a"},
     ]
     offen = await _offline_offen(session, sess)
     if offen:
@@ -406,6 +415,7 @@ async def _screen_home(session, sess, sid, status) -> dict:
             "stats": stats,
             "wifi": True,
             "ble": bool(status["scanner"]),
+            **({"cols": 3, "roll_button": False} if drei else {}),
         },
         status=status,
     )

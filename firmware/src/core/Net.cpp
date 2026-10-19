@@ -278,10 +278,13 @@ void Net::sendHello() {
     //            ueber mehrere Loop-Durchlaeufe verteilt gesendet
     //   baud:    Baudrate zum Drucker je Auftrag ("baud" im print)
     //   raw:     Block "raw" - rohe Bytes fuer die Testknoepfe
+    //   home3:   Startseite mit meta.cols und meta.roll_button (Kachelraster
+    //            in drei Spalten, "Neue Rolle" als Kachel statt Knopf)
     JsonArray caps = doc["caps"].to<JsonArray>();
     caps.add("raster2");
     caps.add("baud");
     caps.add("raw");
+    caps.add("home3");
 
     // Statische Geraetedaten fuers System-Panel - aendern sich nicht waehrend
     // der Verbindung, deshalb hier statt in der periodischen Telemetrie.
