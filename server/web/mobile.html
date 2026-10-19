@@ -72,6 +72,8 @@
     .gruppe .pill.anzahl { background: var(--surface-2, rgba(127,127,127,.18)); }
     .gruppe .gliste { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin-left: 14px; }
     .gruppe .gliste .t { font-weight: 500; font-size: 14px; }
+    .gruppe .g-ort { font-size: 12px; color: var(--muted); padding: 4px 2px 0;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .gruppe .gliste[hidden] { display: none; }
     .gruppe .gliste .swipe-inner { padding: 6px 12px; }
     /* Einlagern-Maske: muss ohne Scrollen auf einen Handybildschirm passen. */
@@ -258,20 +260,32 @@ async function fillList() {
     </div>`;
   const einzeln = (i) => karte(i, esc(i.display_name || i.name) + fremd(i),
     [i.brand, mengeText(+i.quantity, i.unit), i.location, fmtDate(i.expiry_date)].filter(Boolean).map(esc).join(' · '));
-  // In der Gruppe stehen Name und Marke schon oben - je Packung bleibt, was
-  // sich unterscheidet: Menge, Ort, MHD.
+  // In der Gruppe stehen Name und Marke schon oben, der Ort als
+  // Zwischenueberschrift - je Packung bleibt Menge und MHD. Lange Ortsnamen
+  // ("Gefriertruhe (extern)") schnitten sonst das Datum ab.
   const packung = (i) => karte(i,
-    [mengeText(+i.quantity, i.unit), i.location, fmtDate(i.expiry_date)].filter(Boolean).map(esc).join(' · ') || esc(i.name), '');
+    [mengeText(+i.quantity, i.unit), fmtDate(i.expiry_date)].filter(Boolean).map(esc).join(' · ') || esc(i.name), '');
+  const nachOrt = (items) => {
+    const orte = new Map();
+    for (const i of items) {
+      const o = i.location || 'ohne Ort';
+      if (!orte.has(o)) orte.set(o, []);
+      orte.get(o).push(i);
+    }
+    return [...orte.entries()].map(([o, liste]) => `<div class="g-ort">📍 ${esc(o)}${
+      liste.length > 1 ? ` <span class="muted">· ${liste.length}</span>` : ''}</div>${liste.map(packung).join('')}`).join('');
+  };
   const gruppe = (g) => {
     const e = g.erster, offen = offeneGruppen.has(g.key);
     return `<div class="gruppe" data-key="${esc(g.key)}">
       <div class="swipe-inner gkopf" role="button" tabindex="0" aria-expanded="${offen}">
         <div class="kopf"><div class="t">${esc(e.display_name || e.name)}${fremd(e)}</div>
           <span class="pill anzahl">${g.items.length}×</span>${daysPill(e.days_left)}</div>
-        <div class="s">${[e.brand, mengeText(g.menge, e.unit), g.orte.join(', '),
+        <div class="s">${[e.brand, mengeText(g.menge, e.unit),
+          g.orte.length > 1 ? `${g.orte.length} Orte` : g.orte[0],
           e.expiry_date ? `ab ${fmtDate(e.expiry_date)}` : ''].filter(Boolean).map(esc).join(' · ')}</div>
       </div>
-      <div class="gliste"${offen ? '' : ' hidden'}>${g.items.map(packung).join('')}</div>
+      <div class="gliste"${offen ? '' : ' hidden'}>${nachOrt(g.items)}</div>
     </div>`;
   };
   box.innerHTML = rows.length ? `
