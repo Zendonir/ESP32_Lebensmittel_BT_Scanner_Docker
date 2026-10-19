@@ -29,7 +29,7 @@ from ..models import (
 )
 from ..services import inventory as inv
 from ..services import categories as cat
-from ..services import firmware, haltbarkeit, ki, labels, openfoodfacts, settings_store
+from ..services import firmware, haltbarkeit, ki, labels, mengen, openfoodfacts, settings_store
 from ..services import scanner as scanner_info
 from ..services.dates import days_left, shift_iso, to_display, to_iso_date
 from . import protocol as proto
@@ -546,10 +546,6 @@ def _screen_date(sess, sid, status) -> dict:
     )
 
 
-def _menge_text(menge: float) -> str:
-    return f"{menge:g}".replace(".", ",")
-
-
 def _screen_qty(sess, sid, status) -> dict:
     draft = sess.draft
     return proto.screen(
@@ -558,7 +554,7 @@ def _screen_qty(sess, sid, status) -> dict:
         title="Anzahl Etiketten",
         subtitle=draft.name or draft.barcode,
         lines=[f"MHD {to_display(draft.expiry_date) or '-'}", f"Ort {sess.location or '-'}",
-               *([f"Menge {_menge_text(draft.quantity)} {draft.unit}"] if draft.unit else [])],
+               *([f"Menge {mengen.text(draft.quantity, draft.unit)}"] if draft.unit else [])],
         value=draft.count,
         meta={"min": 1, "max": 20, "step": 1, "unit": "Stk"},
         status=status,
@@ -750,7 +746,7 @@ async def _screen_inventory(session, sess, sid, status) -> dict:
             color = "#fb8c00"
         else:
             color = "#2eb048"
-        qty = f"{g['qty']:g} {g['unit']}".strip() if g["unit"] else f"{int(g['qty'])}x"
+        qty = mengen.text(g["qty"], g["unit"]) if g["unit"] else f"{int(g['qty'])}x"
         parts = [g["category"] or "-"]
         if g["location"]:
             parts.append(g["location"])
@@ -1447,6 +1443,11 @@ async def _scan_barcode(session, sess, code) -> None:
         draft.brand = product.brand
         draft.category = product.category
         draft.subcategory = product.subcategory
+        # "1l" aus der Produktdatenbank: Menge einer Packung, steht so auf
+        # dem Etikett ("1 l"). Ohne lesbare Angabe bleibt es beim Stueck.
+        angabe = mengen.aus_angabe(product.amount)
+        if angabe:
+            draft.quantity, draft.unit = angabe
         # Je nach Lagerart des Orts: im Gefrierschrank haelt dasselbe Produkt
         # Monate, im Kuehlschrank Tage (services/haltbarkeit.py).
         draft.expiry_date = (await haltbarkeit.vorschlag(

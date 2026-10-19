@@ -95,6 +95,20 @@ def _add_missing_columns(sync_conn) -> None:
         sync_conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
+def _mengen_umstellen(conn) -> None:
+    from sqlalchemy import inspect
+
+    tabellen = inspect(conn).get_table_names()
+    for alt, neu, faktor in (("kg", "g", 1000), ("l", "ml", 1000)):
+        if "inventory" in tabellen:
+            conn.exec_driver_sql(
+                f"UPDATE inventory SET quantity = quantity * {faktor}, unit = '{neu}' "
+                f"WHERE lower(unit) = '{alt}'")
+        if "templates" in tabellen:
+            conn.exec_driver_sql(
+                f"UPDATE templates SET unit = '{neu}' WHERE lower(unit) = '{alt}'")
+
+
 async def init_db() -> None:
     """Schema anlegen und SQLite auf WAL stellen."""
     async with engine.begin() as conn:
@@ -106,6 +120,8 @@ async def init_db() -> None:
         await conn.run_sync(_add_missing_columns)
         # Die Einkaufsliste gibt es nicht mehr; ihre Tabelle faellt weg.
         await conn.exec_driver_sql("DROP TABLE IF EXISTS shopping_list")
+        # Mengen nur noch in g/ml (services/mengen.py): alte kg/l umrechnen.
+        await conn.run_sync(_mengen_umstellen)
         await conn.run_sync(Base.metadata.create_all)
     log.info("Datenbank bereit (%s)", settings.database_url.split("://", 1)[0])
 

@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
+from .services import mengen
 from .services.dates import to_iso_date
 
 
@@ -100,6 +101,12 @@ class TemplateIn(BaseModel):
     use_sorten: bool = False
     sorten: list[str] = Field(default_factory=list)
     sort_order: int = 0
+
+    # Vorlagen kennen nur g/ml/St. - aus "kg" wird "g" (services/mengen.py).
+    @field_validator("unit")
+    @classmethod
+    def _einheit(cls, v: str) -> str:
+        return mengen.einheit(v)
 
 
 class TemplateOut(ORMModel):

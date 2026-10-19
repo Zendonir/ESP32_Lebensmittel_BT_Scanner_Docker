@@ -21,7 +21,7 @@ server/app/
   api/           inventory · catalog · labels · system · firmware · haushalte
   device/        protocol · hub · workflow · routes
   services/      inventory · labels · calibration · categories · openfoodfacts ·
-                 notify · scheduler · dates · settings_store · seed · importer ·
+                 notify · scheduler · dates · mengen · settings_store · seed · importer ·
                  firmware · updates · deploy · zeichen · hochformat · haushalte ·
                  druckertest · mhd_ocr (MHD vom Foto, lokal)
   fonts/         DejaVu Sans fuer das Hochformat-Bild (im Repo, damit Test und
@@ -218,6 +218,7 @@ cd firmware && pio run --target upload # flashen
 | Menge und Etikettenzahl verwechselt | „Menge“ (`draft.quantity` + Einheit der Vorlage) ist, was in **einer** Packung steckt, `count` die Zahl der Etiketten = Packungen. 2 Packungen zu je 3 Wuerstchen = 2 Etiketten mit "3 St." |
 | Gleiche Produkte stehen x-mal in der Liste | Handy (Inventar/Ablaufend) und Verwaltung gruppieren ueber `gruppieren()` in `web/js/api.js`: gleicher angezeigter Name, Marke, Einheit, Haushalt. Kopf mit Anzahl, Summe, Orten und fruehestem MHD, aufgeklappt die einzelnen Packungen mit ihren Aktionen. Das Terminal gruppiert selbst in `_screen_inventory` |
 | Safari fragt bei jedem Scan nach der Kamera | Jeder neue `getUserMedia` fragt bei "Fragen" erneut. Deshalb holt alles die Kamera ueber `web/js/kamera.js`: ein Strom je Seite, nach Gebrauch nur pausiert (`track.enabled = false`), beendet erst nach 60 s (Safari) bzw. 30 min (Web-App vom Home-Bildschirm - dort gilt Safaris Website-Erlaubnis nicht und laesst sich nicht fest erteilen; beim Verbergen bleibt der Strom dort stehen); ZXing bekommt `stream.clone()`, weil sein `reset()` die Spuren beendet. Ganz ohne Abfrage nur ueber die Safari-Einstellung der Website (Kamera: Erlauben) |
+| Mengen in kg/l, Summen falsch, "1l" aus der Produktdatenbank nicht uebernommen | Gespeichert wird nur in g/ml/St. (`services/mengen.py`): `normalisieren()` in `add_items`, PATCH und Vorlagen-Schema, Altbestand stellt `db._mengen_umstellen` beim Start um. Angezeigt/gedruckt ueber `mengen.text()` bzw. `mengeText()` in `api.js` - ab 1000 als kg/l. `aus_angabe()` liest die OpenFoodFacts-Menge ("6 x 330 ml" = 330 ml je Packung); Scan-Antwort traegt `menge`/`einheit`, das Terminal setzt sie in den Entwurf |
 | Ein haengender Browser friert das Terminal ein | Jeder Sendevorgang hat eine Zeitgrenze (`hub.SEND_TIMEOUT_S`) |
 
 ## Entwicklungsregeln

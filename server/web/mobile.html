@@ -98,6 +98,16 @@
     #einlagern .ef-stepper input { width: 44px; text-align: center; padding: 7px 2px; }
     #einlagern .ef-stepper .ef-knopf { width: 36px; padding: 0; }
     #einlagern .ef-druck { flex: none; padding-bottom: 8px; font-size: 14px; }
+    /* MHD: Datum und Kamera als ein Feld. iOS zeichnet ein Datumsfeld
+       eigen (hoeher, Text mittig) - deshalb feste Hoehe, ohne eigene Optik,
+       Text links; der Knopf streckt sich auf dieselbe Hoehe. */
+    #einlagern .ef-mhd { display: flex; align-items: stretch; height: 40px; }
+    #einlagern .ef-mhd input[type="date"] { flex: 1; min-width: 0; height: 40px; -webkit-appearance: none; appearance: none;
+      border-top-right-radius: 0; border-bottom-right-radius: 0; text-align: left; }
+    #einlagern .ef-mhd input[type="date"]::-webkit-date-and-time-value { text-align: left; }
+    #einlagern .ef-mhd input[type="date"]:only-child { border-radius: var(--radius); }
+    #einlagern .ef-mhd button { flex: none; width: 52px; padding: 0; font-size: 20px; margin-left: -1px;
+      border-top-left-radius: 0; border-bottom-left-radius: 0; }
     #m-list .swipe-inner { padding: 8px 12px; }
     #m-list .swipe-inner .s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -158,7 +168,7 @@
 
 <div id="toasts"></div>
 <script type="module">
-import { get, post, del, put, toast, auslagern, fmtDate, daysPill, esc, gruppieren, mengeText, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from '/static/js/api.js';
+import { get, post, del, put, toast, auslagern, fmtDate, daysPill, esc, gruppieren, mengeText, EINHEITEN, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from '/static/js/api.js';
 import { mhdKamera, jpegAus } from '/static/js/mhdkamera.js';
 import { kameraHolen, kameraFreigeben } from '/static/js/kamera.js';
 
@@ -552,11 +562,12 @@ function freierKopf(p, kategorien, kiStatus, opt, mhdKnoepfe, mhdWege) {
       <label class="field">Sorte<input name="subcategory" list="sorten" value="${esc(p.subcategory || '')}">
         <datalist id="sorten"></datalist></label>
     </div>
-    <div class="ef-zeile">
-      <label class="field" style="flex:1">MHD<input name="expiry_date" type="date" value="${esc(p.expiry_date || '')}"></label>
-      ${mhdWege.lokal || mhdWege.ki ? `<button type="button" class="ef-knopf" id="mhd-foto">📷 scannen</button>
+    <label class="field">MHD<span class="ef-mhd">
+      <input name="expiry_date" type="date" value="${esc(p.expiry_date || '')}">
+      ${mhdWege.lokal || mhdWege.ki ? `<button type="button" id="mhd-foto" title="MHD mit der Kamera lesen"
+          aria-label="MHD mit der Kamera lesen">📷</button>
         <input type="file" accept="image/*" capture="environment" id="mhd-datei" hidden>` : ''}
-    </div>
+    </span></label>
     <div class="muted ef-hinweis" id="mhd-quelle"></div>
     <div class="ef-chips">
       ${mhdKnoepfe.map(([t, d]) => `<button type="button" class="sm" data-tage="${d}">${t}</button>`).join('')}
@@ -623,10 +634,9 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
         <input name="quantity" type="number" step="any" min="0" value="1" inputmode="decimal">
         <input type="hidden" name="unit" value="${esc(vorlage.unit)}"></label>`
     : `<label class="field" style="flex:1">Menge<input name="quantity" type="number" step="any" min="0"
-          inputmode="decimal" placeholder="${esc(p.amount || 'optional')}"></label>
-        <label class="field" style="width:76px">Einheit<select name="unit">
-          <option value=""></option><option>g</option><option>kg</option><option>ml</option><option>l</option><option>St.</option>
-        </select></label>`}
+          inputmode="decimal" value="${p.menge ?? ''}" placeholder="optional"></label>
+        <label class="field" style="width:76px">Einheit<select name="unit">${
+          opt(EINHEITEN, p.einheit || '')}</select></label>`}
       <label class="field">Etiketten<span class="ef-stepper">
         <button type="button" class="ef-knopf" data-anzahl="-1">−</button>
         <input name="count" type="number" min="1" max="20" value="1" inputmode="numeric">
@@ -958,7 +968,7 @@ function fillTemplates(rows) {
 
 async function templateForm(tpl) {
   const categories = await get('/api/categories');
-  const units = ['', 'St.', 'g', 'kg', 'ml', 'l'];
+  const units = EINHEITEN;
   title.textContent = tpl ? tpl.name : 'Neue Vorlage';
   count.textContent = '';
 

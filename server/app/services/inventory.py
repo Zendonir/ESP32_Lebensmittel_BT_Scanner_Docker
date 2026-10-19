@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..models import Event, InventoryItem, PrintJob, Product, utcnow
+from . import mengen
 from . import labels as label_service
 from . import settings_store
 from . import categories
@@ -74,6 +75,9 @@ async def add_items(
     household: str = "",
 ) -> tuple[list[InventoryItem], list[PrintJob]]:
     """`count` Etiketten anlegen und optional Druckauftraege einreihen."""
+    # Gespeichert wird in g/ml (1 kg -> 1000 g), angezeigt wird ab 1000 als
+    # kg/l - siehe services/mengen.py.
+    quantity, unit = mengen.normalisieren(quantity, unit)
     from . import haushalte
 
     count = max(1, min(int(count), 20))

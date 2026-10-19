@@ -19,7 +19,7 @@ from ..schemas import (
     Stats,
 )
 from ..services import inventory as inv
-from ..services import haushalte, openfoodfacts, settings_store
+from ..services import haushalte, mengen, openfoodfacts, settings_store
 from ..services.dates import shift_iso, today_iso
 
 router = APIRouter(prefix="/api/inventory", tags=["inventar"])
@@ -112,6 +112,7 @@ async def patch_item(
     changes = patch.model_dump(exclude_unset=True, exclude_none=True)
     for key, value in changes.items():
         setattr(row, key, value)
+    row.quantity, row.unit = mengen.normalisieren(row.quantity, row.unit)
     await inv.log_event(
         session, "edit", label=row.label, name=row.name, payload=changes
     )
@@ -232,6 +233,8 @@ async def scan(req: ScanRequest, request: Request,
             "category": product.category,
             "subcategory": product.subcategory,
             "amount": product.amount,
+            # "1l" aus der Produktdatenbank als Menge einer Packung: 1000 ml.
+            **dict(zip(("menge", "einheit"), mengen.aus_angabe(product.amount) or (None, ""))),
             # Vorschlag fuers MHD, wie am Terminal (shift_iso).
             "expiry_date": shift_iso(product.default_shelf_days)
             if product.default_shelf_days else "",

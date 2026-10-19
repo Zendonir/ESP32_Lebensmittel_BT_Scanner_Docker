@@ -31,7 +31,7 @@ from functools import lru_cache
 import segno
 from PIL import Image, ImageDraw, ImageFont
 
-from . import categories
+from . import categories, mengen
 from .dates import to_display
 
 DOTS_PER_MM = 8
@@ -184,8 +184,9 @@ def _menge(item: dict) -> str:
     menge = item.get("quantity")
     if menge in (None, "", 0):
         return ""
-    zahl = f"{menge:g}" if isinstance(menge, (int, float)) else str(menge)
-    return f"{zahl} {item.get('unit', '')}".strip()
+    if not isinstance(menge, (int, float)):
+        return f"{menge} {item.get('unit', '')}".strip()
+    return mengen.text(menge, item.get("unit", ""))
 
 
 def _qr(label: str, modul: int) -> Image.Image:

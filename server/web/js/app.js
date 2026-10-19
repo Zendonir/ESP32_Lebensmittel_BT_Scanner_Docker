@@ -1,7 +1,7 @@
 // Admin-Oberflaeche. Bewusst ohne Framework und ohne Build-Schritt: das Image
 // bleibt klein und die Dateien sind das, was ausgeliefert wird.
 
-import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, gruppieren, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from './api.js';
+import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, gruppieren, mengeText, EINHEITEN, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from './api.js';
 import { mhdKamera } from './mhdkamera.js';
 import { zipBlob, base64ZuBytes } from './zip.js';
 
@@ -147,7 +147,7 @@ async function loadInventory() {
   $('#inv-empty').hidden = rows.length > 0;
   const fremd = (i) => (HAUSHALT && i.household !== HAUSHALT.name
     ? ` <span class="pill warn" title="gehört einem anderen Haushalt – Auslagern ist eine Fremdentnahme">🏠 ${esc(i.household)}</span>` : '');
-  const menge = (q, unit) => `${q % 1 === 0 ? q : q.toFixed(1)} ${esc(unit)}`;
+  const menge = (q, unit) => esc(mengeText(q, unit) || String(q));
   const zeile = (i, gruppe = '') => `<tr${gruppe ? ` class="inv-kind" data-gruppe="${esc(gruppe)}"${offeneGruppen.has(gruppe) ? '' : ' hidden'}` : ''}>
     <td class="mono">${esc(i.label)}</td>
     <td class="name">${gruppe ? '<span class="muted">└</span>' : `<b>${esc(i.display_name || i.name)}</b>${fremd(i)}${i.brand ? `<br><span class="muted">${esc(i.brand)}</span>` : ''}`}</td>
@@ -245,7 +245,7 @@ async function editItem(label) {
     { name: 'subcategory', label: 'Sorte', value: item.subcategory },
     { name: 'expiry_date', label: 'MHD', value: item.expiry_date, type: 'date' },
     { name: 'quantity', label: 'Menge', value: item.quantity, type: 'number' },
-    { name: 'unit', label: 'Einheit', value: item.unit },
+    { name: 'unit', label: 'Einheit (kg/l werden zu g/ml)', value: item.unit, options: EINHEITEN.includes(item.unit) ? EINHEITEN : [...EINHEITEN, item.unit] },
     { name: 'location', label: 'Ort', value: item.location, options: state.locations.map((l) => l.name) },
     { name: 'note', label: 'Notiz', value: item.note },
   ]);
@@ -497,7 +497,7 @@ async function templateDialog(tpl) {
     ...haltbarkeitFelder(tpl?.haltbarkeit && Object.keys(tpl.haltbarkeit).length
       ? tpl.haltbarkeit : (tpl?.shelf_days ? { kuehl: tpl.shelf_days } : {})).map((f) => ({
       ...f, label: `${f.label} – 0 = wie Kategorie` })),
-    { name: 'unit', label: 'Einheit', value: tpl?.unit || '', options: ['', 'St.', 'g', 'kg', 'ml', 'l'] },
+    { name: 'unit', label: 'Einheit', value: tpl?.unit || '', options: EINHEITEN },
     { name: 'brands', label: 'Marken', type: 'tags', value: tpl?.brands || [], placeholder: 'Marke hinzufügen …' },
     { name: 'use_sorten', label: 'Sorte beim Einlagern abfragen (z. B. Fleischsorte) – steht dann auf dem Etikett: „Filet - Schwein“',
       value: tpl ? tpl.use_sorten : false, type: 'checkbox' },

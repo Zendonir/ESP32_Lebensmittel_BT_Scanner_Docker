@@ -146,8 +146,16 @@ export function gruppieren(rows) {
   });
 }
 
-export const mengeText = (menge, einheit) =>
-  (einheit && menge ? `${String(Math.round(menge * 10) / 10).replace('.', ',')} ${einheit}` : '');
+// Mengen stehen in g/ml (services/mengen.py); ab 1000 zeigen wir kg/l.
+export const EINHEITEN = ['', 'St.', 'g', 'ml'];
+const zahlText = (x) => String(Math.round(x * 1000) / 1000).replace('.', ',');
+export function mengeText(menge, einheit) {
+  if (!einheit || !menge) return '';
+  if (einheit === 'kg' || einheit === 'l') { menge *= 1000; einheit = einheit === 'kg' ? 'g' : 'ml'; }
+  if (einheit === 'g' && menge >= 1000) return `${zahlText(menge / 1000)} kg`;
+  if (einheit === 'ml' && menge >= 1000) return `${zahlText(menge / 1000)} l`;
+  return `${zahlText(menge)} ${einheit}`;
+}
 
 // ------------------------------------------------------- Ereignisse lesbar
 // Im Protokoll standen die internen Kennungen ("add", "scan_unknown") und die

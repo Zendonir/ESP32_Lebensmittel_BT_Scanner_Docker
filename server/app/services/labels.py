@@ -15,6 +15,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
+from . import mengen
 from . import settings_store
 from . import categories
 from . import hochformat
@@ -344,8 +345,7 @@ def _title_blocks(title: str, chars: int, large: bool) -> list[dict]:
 
 
 def _quantity(item: dict) -> str:
-    qty, unit = item.get("quantity", 1), item.get("unit", "")
-    return f"{qty:g} {unit}".strip()
+    return mengen.text(item.get("quantity", 1), item.get("unit", ""))
 
 
 # Wie gross der Code ausfaellt. Der Unterschied ist auf einem 30-mm-Etikett
