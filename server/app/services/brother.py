@@ -209,14 +209,15 @@ def _esc_i_z(daten: bytes, stelle: int) -> dict:
     }
 
 
-def standard_profil(breite_mm: float, laenge_mm: float) -> dict:
+def standard_profil(breite_mm: float, laenge_mm: float, endlos_mm: float = 30) -> dict:
     """Profil ohne Treiberdatei, nach der Rasterreferenz (Kap. 2.1, 4).
 
     Invalidate (200 x 00h), ESC @, Rastermodus (ESC i a 01h), Druckinformation
     (ESC i z: Medientyp/Breite/Laenge gueltig, "printer recovery always on"),
     ESC i M 00h, Rand (ESC i d: gestanzt 0, Endlos mindestens 24 Punkte),
     keine Kompression (M 00h); jede Zeile `g 00h 38h` + 56 Bytes, Ende 1Ah.
-    `laenge_mm` 0 = Endlosband, dann 30 mm je Etikett.
+    `laenge_mm` 0 = Endlosband; ein Etikett ist dann `endlos_mm` lang - der
+    Drucker schiebt den Rand (ESC i d) vor und nach dem Druckbereich vor.
     """
     breite = int(round(breite_mm))
     laenge = int(round(laenge_mm))
@@ -229,7 +230,8 @@ def standard_profil(breite_mm: float, laenge_mm: float) -> dict:
             + b"\x00\x00\x00\x00" + b"\x00\x00"
             + b"\x1biM\x00" + b"\x1bid" + rand.to_bytes(2, "little") + b"M\x00")
     zeilen = (druckzeilen(breite, laenge) if gestanzt
-              else min(ENDLOS_ZEILEN_MAX, max(ENDLOS_ZEILEN_MIN, 30 * DOTS_PER_MM)))
+              else min(ENDLOS_ZEILEN_MAX,
+                       max(ENDLOS_ZEILEN_MIN, _punkte(endlos_mm or 30) - 2 * ENDLOS_RAND)))
     return {
         "quelle": "standard",
         "kopf": kopf.hex(),
@@ -394,14 +396,18 @@ def mit_medium(cfg: dict, medium: dict | None) -> dict:
     """
     if (cfg.get("profil") or {}).get("kopf") or not medium:
         return cfg
+    # Ausdruecklich gewaehltes Medium (Etiketten/Endlosband) gilt, was immer
+    # der Drucker meldet - passt die Rolle nicht, haelt medium_abweichung an.
+    if cfg.get("medium") in ("etiketten", "endlos"):
+        return cfg
     neu = dict(cfg)
     if not float(neu.get("breite_mm") or 0) and medium.get("media_width_mm"):
         neu["breite_mm"] = medium["media_width_mm"]
-    if not float(neu.get("laenge_mm") or 0) and medium.get("media_length_mm"):
-        neu["laenge_mm"] = medium["media_length_mm"]
-    # Endlosband meldet Laenge 0 - dann nicht auf 26-mm-Etiketten zurueckfallen.
-    if medium.get("media_type") == "continuous_tape" and not float(cfg.get("laenge_mm") or 0):
+    if medium.get("media_type") == "continuous_tape":
+        # Endlosband: die eingetragene Laenge ist die Laenge je Etikett.
         neu["endlos"] = True
+    elif not float(neu.get("laenge_mm") or 0) and medium.get("media_length_mm"):
+        neu["laenge_mm"] = medium["media_length_mm"]
     return neu
 
 
@@ -410,8 +416,11 @@ def profil_aus(cfg: dict) -> dict:
     profil = cfg.get("profil") or {}
     if profil.get("kopf") and profil.get("zeilen"):
         return profil
-    laenge = 0.0 if cfg.get("endlos") else float(cfg.get("laenge_mm") or 26)
-    return standard_profil(float(cfg.get("breite_mm") or 51), laenge)
+    endlos = cfg.get("medium") == "endlos" or (cfg.get("medium") != "etiketten" and cfg.get("endlos"))
+    if endlos:
+        return standard_profil(float(cfg.get("breite_mm") or 58), 0,
+                               float(cfg.get("laenge_mm") or 30))
+    return standard_profil(float(cfg.get("breite_mm") or 51), float(cfg.get("laenge_mm") or 26))
 
 
 # ------------------------------------------------------------------ Zeichnen
@@ -576,6 +585,67 @@ async def printserver_status(cfg: dict) -> dict:
         "job_key": bool(api.get("job_key")),
         "ip": (status.get("wifi") or {}).get("ip", ""),
     }
+
+
+# Geraeteeinstellungen des Druckers (im Drucker gespeichert). Der Printserver
+# kennt nur die mit dokumentiertem Brother-Befehl (ab Firmware 0.4.2):
+# Befehlsmodus, Druckprioritaet, 180-Grad-Drehung, Stoppposition, Wiederholung.
+EINSTELLUNG_NAMEN = {
+    "command_mode": "Befehlsmodus",
+    "print_priority": "Druckpriorität",
+    "rotate": "Druck um 180° drehen",
+    "stop_position": "Stoppposition",
+    "recovery": "Nach Fehler erneut drucken",
+}
+EINSTELLUNG_WERTE = {
+    "Speed": "Geschwindigkeit", "Quality": "Qualität", "No rotation": "nicht drehen",
+    "180 degrees": "180°", "Tear bar": "Abreißkante", "Head": "Druckkopf", "Off": "aus", "On": "ein",
+}
+# Was fuer dieses Zusammenspiel richtig ist - die Oberflaeche zeigt es daneben.
+EINSTELLUNG_EMPFOHLEN = {
+    "command_mode": (1, "Raster – die Aufträge vom Server und vom Windows-Treiber sind Rasterdaten"),
+    "recovery": (0, "aus – sonst druckt der Drucker nach einem Fehler selbst nach, und es gibt Doppel"),
+}
+
+
+async def druckereinstellungen(cfg: dict, aendern: dict[str, int] | None = None) -> dict:
+    """Druckereinstellungen ueber den Printserver lesen und optional setzen.
+
+    Wirft BrotherFehler mit einer lesbaren Meldung (nicht erreichbar, Drucker
+    beschaeftigt, Firmware zu alt)."""
+    if not basis_url(cfg):
+        raise BrotherFehler("Erst die Adresse des Printservers eintragen")
+    try:
+        async with _client(cfg) as client:
+            if aendern:
+                r = await client.post(
+                    "/api/printer/settings",
+                    content="&".join(f"{k}={int(v)}" for k, v in aendern.items()),
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    timeout=30)
+            else:
+                r = await client.get("/api/printer/settings", timeout=30)
+    except httpx.HTTPError as e:
+        raise BrotherFehler(_fehlertext(e)) from e
+    if r.status_code == 404:
+        raise BrotherFehler("Printserver-Firmware zu alt – Druckereinstellungen ab 0.4.2")
+    if r.status_code == 409:
+        raise BrotherFehler("Drucker aus oder druckt gerade – bitte gleich noch einmal")
+    if r.status_code != 200:
+        raise BrotherFehler(_fehlertext(httpx.HTTPStatusError("", request=r.request, response=r)))
+    out = []
+    for e in r.json().get("settings", []):
+        empfohlen = EINSTELLUNG_EMPFOHLEN.get(e.get("key"))
+        out.append({
+            "key": e.get("key"),
+            "name": EINSTELLUNG_NAMEN.get(e.get("key"), e.get("name", "")),
+            "wert": e.get("value", -1),
+            "optionen": [{"wert": o.get("value"), "text": EINSTELLUNG_WERTE.get(o.get("label"), o.get("label"))}
+                         for o in e.get("options", [])],
+            "empfohlen": empfohlen[0] if empfohlen else None,
+            "warum": empfohlen[1] if empfohlen else "",
+        })
+    return {"einstellungen": out}
 
 
 def _fehlertext(e: Exception) -> str:

@@ -357,6 +357,35 @@ async function loadBrother() {
   if (p.vorschau) $('#brother-treiber').src = p.vorschau;
 }
 $('#brother-pruefen').addEventListener('click', () => loadBrother().catch((e) => toast(e.message, 'error')));
+
+// Geraeteeinstellungen im Drucker (ueber den Printserver). Jede Aenderung geht
+// sofort hinaus - wie die anderen Felder auch.
+function brotherGeraetZeigen(r) {
+  $('#brother-geraet').innerHTML = r.einstellungen.map((e) => {
+    const abweichend = e.empfohlen !== null && e.wert >= 0 && e.wert !== e.empfohlen;
+    return `<label class="field">${esc(e.name)}
+      <select data-brother-geraet="${esc(e.key)}">
+        ${e.wert < 0 ? '<option value="" selected>– keine Antwort –</option>' : ''}
+        ${e.optionen.map((o) => `<option value="${o.wert}" ${o.wert === e.wert ? 'selected' : ''}>${esc(o.text)}</option>`).join('')}
+      </select>
+      ${e.warum ? `<span class="hint">${abweichend ? '<b>Empfohlen:</b> ' : ''}${esc(e.warum)}</span>` : ''}</label>`;
+  }).join('');
+}
+$('#brother-geraet-lesen').addEventListener('click', async (ev) => {
+  ev.currentTarget.disabled = true;
+  try { brotherGeraetZeigen(await get('/api/brother/druckereinstellungen')); }
+  catch (e) { toast(e.message, 'error'); }
+  finally { ev.currentTarget.disabled = false; }
+});
+document.addEventListener('change', async (ev) => {
+  const sel = ev.target.closest('select[data-brother-geraet]');
+  if (!sel || sel.value === '') return;
+  try {
+    brotherGeraetZeigen(await patch('/api/brother/druckereinstellungen',
+      { [sel.dataset.brotherGeraet]: Number(sel.value) }));
+    toast('Im Drucker gespeichert', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+});
 $('#brother-test').addEventListener('click', async () => {
   try { await post('/api/brother/test'); toast('Testetikett an den Brother gesendet', 'success'); }
   catch (e) { toast(e.message, 'error'); }

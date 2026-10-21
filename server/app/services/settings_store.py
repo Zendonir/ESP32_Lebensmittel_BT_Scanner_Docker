@@ -133,8 +133,12 @@ DEFAULTS: dict[str, Any] = {
         # Wohin gedruckt wird, wenn beim Drucken nichts gewaehlt ist (Terminal,
         # Nachdruck, Web-Vorauswahl): "brother" | "terminal".
         "standardziel": "brother",
+        # Was eingelegt ist: "drucker" = wie der Drucker meldet, "etiketten"
+        # (gestanzt, Lueckensensor) oder "endlos" (Endlosband, Laenge je Etikett
+        # = laenge_mm). Eine Treiberdatei geht vor.
+        "medium": "drucker",
         # Etikett quer zum Druckkopf und in Laufrichtung, in mm. 0 = aus der
-        # Treiberdatei (Profil) bzw. 51 x 26.
+        # Treiberdatei (Profil) bzw. wie vom Drucker gemeldet.
         "breite_mm": 0,
         "laenge_mm": 0,
         # Wie das Etikett gelesen wird: keine | 180 | links | rechts.

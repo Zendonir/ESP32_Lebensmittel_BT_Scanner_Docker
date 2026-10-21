@@ -87,6 +87,30 @@ async def zustand(request: Request, session: AsyncSession = Depends(get_session)
     }
 
 
+@router.get("/druckereinstellungen")
+async def druckereinstellungen_lesen(session: AsyncSession = Depends(get_session)):
+    """Geraeteeinstellungen, die im Drucker selbst gespeichert sind."""
+    cfg = await settings_store.get(session, "brother", {}) or {}
+    try:
+        return await brother.druckereinstellungen(cfg)
+    except brother.BrotherFehler as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@router.patch("/druckereinstellungen")
+async def druckereinstellungen_setzen(body: dict[str, int],
+                                      session: AsyncSession = Depends(get_session)):
+    """Einstellungen im Drucker setzen, z. B. {"command_mode": 1}."""
+    cfg = await settings_store.get(session, "brother", {}) or {}
+    unbekannt = set(body) - set(brother.EINSTELLUNG_NAMEN)
+    if unbekannt or not body:
+        raise HTTPException(422, f"Unbekannte Einstellung: {', '.join(sorted(unbekannt)) or '-'}")
+    try:
+        return await brother.druckereinstellungen(cfg, body)
+    except brother.BrotherFehler as e:
+        raise HTTPException(409, str(e)) from e
+
+
 @router.post("/treiberdatei")
 async def treiberdatei(datei: UploadFile = File(...),
                        session: AsyncSession = Depends(get_session)):
