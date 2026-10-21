@@ -450,6 +450,10 @@ def test_brother_waehlen_ohne_brother_lehnt_ab():
         assert c.get("/api/labels/ziele").json()["standard"] == "terminal"
         r = c.post("/api/labels", json={"name": "Reis", "ziel": "brother"})
         assert r.status_code == 409 and "nicht eingerichtet" in r.text
+        # Nachdruck ebenso: kein stiller Wechsel auf das Terminal.
+        label = c.post("/api/labels", json={"name": "Reis", "print": False}).json()["labels"][0]
+        r = c.post(f"/api/labels/reprint/{label}?ziel=brother")
+        assert r.status_code == 409 and "nicht eingerichtet" in r.text
         assert c.post("/api/labels", json={"name": "Reis", "ziel": "quatsch"}).status_code == 422
 
 

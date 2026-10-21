@@ -209,6 +209,12 @@ async def reprint(
     ).scalar_one_or_none()
     if item is None:
         raise HTTPException(404, "Etikett unbekannt")
+    # Wie beim Anlegen: ein ausdruecklich gewaehlter Brother, der fuer den
+    # Haushalt des Artikels nicht bereitsteht, ist ein Fehler - kein stiller
+    # Druck auf einem anderen Drucker.
+    if ziel == "brother" and not brother.zustaendig(
+            await settings_store.get(session, "brother", {}), item.household or ""):
+        raise HTTPException(409, "Der Brother ist für diesen Haushalt nicht eingerichtet")
     return await workflow.nachdrucken(session, item, device_id, ziel)
 
 
