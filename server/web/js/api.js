@@ -12,7 +12,8 @@ export const HAUSHALT = HAUSHALT_META
 export async function api(path, options = {}) {
   const opts = { headers: {}, ...options };
   if (HAUSHALT) opts.headers = { 'X-Haushalt': HAUSHALT.id, ...opts.headers };
-  if (opts.body !== undefined && typeof opts.body !== 'string') {
+  // FormData (Datei-Upload) setzt seinen Content-Type selbst.
+  if (opts.body !== undefined && typeof opts.body !== 'string' && !(opts.body instanceof FormData)) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(opts.body);
   }

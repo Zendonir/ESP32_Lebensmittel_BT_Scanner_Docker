@@ -20,11 +20,12 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from .api import brother as brother_api
 from .api import catalog, firmware, haushalte as haushalte_api, inventory, labels, system
 from .config import settings
 from .db import init_db, session_scope
 from .device import routes as device_routes
-from .services import anmeldung, haushalte, scheduler, seed, updates
+from .services import anmeldung, brother, haushalte, scheduler, seed, updates
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -159,6 +160,7 @@ async def lifespan(app: FastAPI):
         await seed.run(session)
         await haushalte.einrichten(session)
     scheduler.start()
+    brother.start()
     if settings.device_token == "change-me":
         log.warning(
             "DEVICE_TOKEN steht auf dem Standardwert - bitte in der .env aendern!"
@@ -177,6 +179,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await brother.stop()
         await scheduler.stop()
 
 
@@ -348,6 +351,7 @@ async def logout():
 app.include_router(inventory.router, dependencies=_guard)
 app.include_router(catalog.router, dependencies=_guard)
 app.include_router(labels.router, dependencies=_guard)
+app.include_router(brother_api.router, dependencies=_guard)
 app.include_router(system.router, dependencies=_guard)
 app.include_router(firmware.router, dependencies=_guard)
 app.include_router(haushalte_api.router, dependencies=_guard)

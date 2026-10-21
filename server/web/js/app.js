@@ -280,11 +280,12 @@ async function loadLabels() {
   fillSettings(settings);
   loadLayouts().catch((e) => toast(e.message, 'error'));
   hochformatHinweise().catch(() => {});
+  loadBrother().catch((e) => { $('#brother-status').textContent = e.message; });
   $('#roll-state').textContent = roll.size
     ? `${roll.remaining} von ${roll.size} Etiketten übrig (${roll.used} verbraucht)`
     : 'Keine Rollengröße hinterlegt.';
   $('#print-queue').innerHTML = queue.length
-    ? queue.map((j) => `<tr><td class="mono">${j.id}</td><td class="mono">${esc(j.label)}</td>
+    ? queue.map((j) => `<tr><td class="mono">${j.id}</td><td class="mono">${esc(j.label)}${j.ziel === 'brother' ? ' <span class="pill">Brother</span>' : ''}</td>
         <td><span class="pill ${{ done: 'ok', failed: 'danger', queued: 'warn' }[j.status] || ''}">${j.status}</span></td>
         <td>${j.attempts}${j.error ? ` <span class="muted">${esc(j.error)}</span>` : ''}</td></tr>`).join('')
     : '<tr><td colspan="4" class="muted">Warteschlange leer.</td></tr>';
@@ -297,6 +298,50 @@ $('#roll-set').addEventListener('click', async () => {
   toast('Rolle zurückgesetzt', 'success');
   await loadLabels();
 });
+// Brother am WLAN-Printserver (services/brother.py). Die Felder speichern sich
+// selbst (data-setting); hier nur Zustand, Testdruck und Treiberdatei.
+async function loadBrother() {
+  const z = await get('/api/brother');
+  const ps = z.printserver;
+  const medium = ps.medium || {};
+  $('#brother-status').innerHTML = ps.erreichbar
+    ? `<span>Printserver ${esc(ps.ip || '')} · Firmware ${esc(ps.firmware)} ·
+        Drucker ${ps.drucker_verbunden ? esc(ps.drucker || 'verbunden') : '<b>nicht angeschlossen</b>'}
+        ${medium.media_width_mm ? ` · Medium ${medium.media_width_mm}${medium.media_length_mm ? ` × ${medium.media_length_mm}` : ''} mm` : ''}
+        ${ps.job_key ? '' : '<br><b>Printserver-Firmware zu alt</b> – ab 0.4.1 werden wiederholte Aufträge nicht doppelt gedruckt.'}</span>`
+    : `<span>${esc(ps.fehler || 'nicht erreichbar')}</span>`;
+  $('#brother-status').className = `notice ${ps.erreichbar ? '' : 'warn'}`;
+  const p = z.profil;
+  $('#brother-profil').innerHTML = `<span class="muted">${p.quelle === 'treiber'
+    ? `Aus ${esc(p.datei || 'Treiberdatei')}: ${esc(p.medium || '')} ${p.breite_mm} × ${p.laenge_mm || '–'} mm,
+       ${p.zeilen} Zeilen zu ${p.bytes} Bytes, Befehl ${esc(p.zeilenbefehl)}${p.tiff ? ', gepackt' : ''}.`
+    : 'Ohne Treiberdatei: Standardbefehle, am TD-2020A noch ungeprüft.'}
+    Gedruckt wird ${z.masse_mm.breite} × ${z.masse_mm.laenge} mm.</span>`;
+  $('#brother-vorschau').src = z.vorschau || '';
+  $('#brother-treiber-fig').hidden = !p.vorschau;
+  if (p.vorschau) $('#brother-treiber').src = p.vorschau;
+}
+$('#brother-pruefen').addEventListener('click', () => loadBrother().catch((e) => toast(e.message, 'error')));
+$('#brother-test').addEventListener('click', async () => {
+  try { await post('/api/brother/test'); toast('Testetikett an den Brother gesendet', 'success'); }
+  catch (e) { toast(e.message, 'error'); }
+});
+$('#brother-datei-laden').addEventListener('click', async () => {
+  const datei = $('#brother-datei').files[0];
+  if (!datei) return toast('Erst eine .prn-Datei wählen', 'warn');
+  const form = new FormData();
+  form.append('datei', datei);
+  try {
+    await post('/api/brother/treiberdatei', form);
+    toast('Treiberdatei übernommen', 'success');
+    await loadBrother();
+  } catch (e) { toast(e.message, 'error'); }
+});
+$('#brother-datei-weg').addEventListener('click', async () => {
+  try { await del('/api/brother/treiberdatei'); await loadBrother(); }
+  catch (e) { toast(e.message, 'error'); }
+});
+
 $('#test-print').addEventListener('click', async () => {
   try { await post('/api/labels/test-print'); toast('Testdruck gesendet', 'success'); }
   catch (e) { toast(e.message, 'error'); }
@@ -1506,6 +1551,7 @@ liveConnect(
       catalog: ['catalog', 'templates', 'labels'],
       devices: ['devices', 'dashboard', 'labels'],
       settings: ['system', 'labels'],
+      labels: ['labels'],
     }[msg.event] || [];
     if (relevant.includes(activePage())) refreshActive().catch(() => {});
   },

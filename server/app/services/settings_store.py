@@ -120,6 +120,30 @@ DEFAULTS: dict[str, Any] = {
         # beim Lesen auf dem Kopf, die andere Richtung waehlen.
         "label_portrait_turn": "links",  # links | rechts
     },
+    # Brother-Etikettendrucker am WLAN-Printserver (services/brother.py).
+    # Ist er aktiv, druckt er die Etiketten der genannten Haushalte statt
+    # des Druckers am Terminal.
+    "brother": {
+        "aktiv": False,
+        # Adresse des Printservers, z. B. http://192.168.1.50 - aus dem
+        # Container heraus loest "brother-td2020.local" (mDNS) meist nicht auf.
+        "url": "",
+        # Leer = alle Haushalte, sonst Namen mit Komma getrennt.
+        "haushalt": "",
+        # Etikett quer zum Druckkopf und in Laufrichtung, in mm. 0 = aus der
+        # Treiberdatei (Profil) bzw. 51 x 26.
+        "breite_mm": 0,
+        "laenge_mm": 0,
+        # Wie das Etikett gelesen wird: keine | 180 | links | rechts.
+        "drehung": "keine",
+        # Verschiebung quer zum Druckkopf (+ = zur Seite der hoeheren Punkte).
+        "versatz_mm": 0,
+        # Zeilen gespiegelt senden - falls der Drucker sie von rechts erwartet.
+        "spiegeln": False,
+        # Aus einer Druckdatei des Originaltreibers gelesen (brother.analysieren).
+        # Leer = Standardprofil.
+        "profil": {},
+    },
 }
 
 

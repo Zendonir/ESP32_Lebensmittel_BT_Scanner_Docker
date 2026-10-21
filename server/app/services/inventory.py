@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..models import Event, InventoryItem, PrintJob, Product, utcnow
-from . import mengen
+from . import brother, mengen
 from . import labels as label_service
 from . import settings_store
 from . import categories
@@ -87,6 +87,9 @@ async def add_items(
 
     numbers = await label_service.next_labels(session, count)
     printer_cfg = await settings_store.get(session, "printer", {})
+    # Druckt dieser Haushalt am Brother (WLAN-Printserver), gehen die Auftraege
+    # dorthin und nie ans Terminal - auch wenn der Terminaldrucker aus ist.
+    an_brother = brother.zustaendig(await settings_store.get(session, "brother", {}), household)
     added_date = today_iso()
 
     items: list[InventoryItem] = []
@@ -123,24 +126,26 @@ async def add_items(
             payload={"expiry_date": expiry_date, "quantity": quantity, "unit": unit},
         )
 
-        if want_print and printer_cfg.get("enabled", True):
-            payload = label_service.render_label(
-                {
-                    "label": number,
-                    "name": name,
-                    "brand": brand,
-                    "subcategory": subcategory,
-                    "expiry_date": expiry_date,
-                    "added_date": added_date,
-                    "quantity": quantity,
-                    "unit": unit,
-                    "location": location,
-                    "household": household,
-                },
-                printer_cfg,
-            )
-            job = PrintJob(label=number, payload=payload, status="queued",
-                           household=household or "")
+        if want_print and (an_brother or printer_cfg.get("enabled", True)):
+            daten = {
+                "label": number,
+                "name": name,
+                "brand": brand,
+                "subcategory": subcategory,
+                "expiry_date": expiry_date,
+                "added_date": added_date,
+                "quantity": quantity,
+                "unit": unit,
+                "location": location,
+                "household": household,
+            }
+            if an_brother:
+                job = PrintJob(label=number, payload=brother.auftrag(daten), status="queued",
+                               household=household or "", ziel=brother.ZIEL)
+            else:
+                job = PrintJob(label=number,
+                               payload=label_service.render_label(daten, printer_cfg),
+                               status="queued", household=household or "")
             session.add(job)
             jobs.append(job)
 

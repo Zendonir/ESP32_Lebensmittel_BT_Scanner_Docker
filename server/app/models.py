@@ -260,6 +260,10 @@ class PrintJob(Base):
     # Haushalt des Artikels. Ein Auftrag ohne festes Terminal (device_pk)
     # druckt nur an einem Terminal dieses Haushalts - nicht beim Nachbarn.
     household: Mapped[str] = mapped_column(String(100), default="")
+    # Wohin: "" = Drucker am Terminal (payload = Blockliste), "brother" =
+    # Brother am WLAN-Printserver (payload = Artikel, services/brother.py).
+    # Das Terminal fasst nur Auftraege ohne Ziel an.
+    ziel: Mapped[str] = mapped_column(String(16), default="", index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
     # queued | sent | done | failed
