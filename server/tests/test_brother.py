@@ -194,6 +194,7 @@ class Printserver:
         self.antwort_verlieren = 0      # so viele POSTs annehmen, Antwort "geht verloren"
         self.medium = {"media_width_mm": 51}   # gemerkter Stand (cached)
         self.medium_live = None                # Antwort auf eine frische Abfrage
+        self.drucker_an = True
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.method == "POST" and request.url.path == "/api/print/raw":
@@ -203,6 +204,7 @@ class Printserver:
                     return httpx.Response(200, json={"ok": True, "job_id": job["id"],
                                                      "duplicate": True, "job": job})
             job = {"id": self.naechste, "state": "queued", "message": "queued", "key": key,
+                   "attempts": 0,
                    "name": request.headers.get("X-Job-Name", ""), "size": len(request.content)}
             self.jobs[job["id"]] = job
             self.naechste += 1
@@ -222,8 +224,9 @@ class Printserver:
             return httpx.Response(200, json={"ok": True, "printer": {"status": self.medium}})
         if request.url.path == "/api/status":
             return httpx.Response(200, json={
-                "firmware": {"version": "0.4.1-dev"}, "printer": {"connected": True,
-                                                                 "product": "TD-2020"},
+                "firmware": {"version": "0.4.1-dev"},
+                "printer": {"connected": self.drucker_an, "ready": self.drucker_an,
+                            "product": "TD-2020"},
                 "brother": {"status": self.medium}, "queue": {"queued": 0},
                 "print_api": {"job_key": True}, "wifi": {"ip": "192.168.1.50"}})
         return httpx.Response(404)
@@ -247,6 +250,20 @@ def client(server):
             yield c
         finally:
             c.patch("/api/settings/brother", json={"aktiv": False, "url": ""})
+            _offene_brother_auftraege_abschliessen()
+
+
+def _offene_brother_auftraege_abschliessen():
+    """Jeder Test hat seinen eigenen nachgestellten Printserver - offene
+    Auftraege eines Tests kaemen beim naechsten sonst ungedruckt zurueck in
+    die Schlange und belegten dort die Plaetze (MAX_UNTERWEGS)."""
+    async def schliessen():
+        async with session_scope() as session:
+            for job in (await session.execute(select(PrintJob).where(
+                    PrintJob.ziel == "brother", PrintJob.status.in_(("queued", "sent"))))).scalars():
+                job.status = "done"
+            await session.commit()
+    _run(schliessen())
 
 
 def _durchgang():
@@ -301,9 +318,12 @@ def test_druckerfehler_und_neustart(client, server):
     a = client.post("/api/labels", json={"name": "Bohnen"}).json()["labels"][0]
     b = client.post("/api/labels", json={"name": "Mais"}).json()["labels"][0]
     _durchgang()
-    server.jobs[_job(a).payload["brother"]["id"]].update(state="failed",
+    server.jobs[_job(a).payload["brother"]["id"]].update(state="failed", attempts=1,
                                                          message="printer error: Cover open")
-    del server.jobs[_job(b).payload["brother"]["id"]]          # Printserver neu gestartet
+    # b war schon beim Drucker, dann startet der Printserver neu: Ergebnis offen.
+    server.jobs[_job(b).payload["brother"]["id"]].update(state="printing", attempts=1)
+    _durchgang()
+    del server.jobs[_job(b).payload["brother"]["id"]]
     _durchgang()
     ja, jb = _job(a), _job(b)
     assert ja.status == "failed" and "Cover open" in ja.error
@@ -340,13 +360,14 @@ def test_nachdruck_und_testdruck_gehen_an_den_brother(client, server):
     r = client.post("/api/brother/test")
     assert r.status_code == 200
     _durchgang()
-    _durchgang()
     async def zaehlen():
         async with session_scope() as session:
-            return (await session.execute(select(PrintJob).where(
+            return [j.status for j in (await session.execute(select(PrintJob).where(
                 PrintJob.ziel == "brother", PrintJob.label.in_((label, "TEST")),
-                PrintJob.status == "sent"))).scalars().all()
-    assert len(_run(zaehlen())) >= 3
+                PrintJob.status.in_(("queued", "sent"))))).scalars()]
+    stand = _run(zaehlen())
+    # Etikett, Nachdruck und Testetikett - hoechstens zwei zugleich beim Printserver.
+    assert len(stand) == 3 and stand.count("sent") == brother.MAX_UNTERWEGS
 
 
 def test_treiberdatei_hochladen_und_zustand(client, server):
@@ -513,3 +534,42 @@ def test_geraeteliste_zeigt_nur_terminals_des_haushalts():
         finally:
             c.delete(f"/api/devices/t-l-{tag}")
             c.delete(f"/api/devices/t-r-{tag}")
+
+
+
+# ------------------------------------------------- Drucker aus: alles wartet
+def test_drucker_aus_alles_wartet_und_druckt_danach(client, server):
+    server.drucker_an = False
+    labels = client.post("/api/labels", json={"name": "Linsen", "count": 4}).json()["labels"]
+    assert _durchgang() == "unerreichbar"            # seltener nachsehen
+    assert not server.jobs                            # nichts abgeschickt
+    assert {(_job(lb).status, _job(lb).error) for lb in labels} == {("queued", brother.DRUCKER_AUS)}
+
+    # Eingeschaltet: alle gehen raus, hoechstens zwei zugleich beim Printserver.
+    server.drucker_an = True
+    for _ in range(4):
+        _durchgang()
+        for job in server.jobs.values():
+            job["state"], job["attempts"] = "printed", 1
+    assert all(_job(lb).status == "done" for lb in labels)
+    assert len(server.jobs) == 4
+
+
+def test_printserver_gibt_auf_ohne_zu_drucken_etikett_wartet_weiter(client, server):
+    label = client.post("/api/labels", json={"name": "Graupen"}).json()["labels"][0]
+    _durchgang()
+    erster = server.jobs[_job(label).payload["brother"]["id"]]
+    # Nach 10 min ohne Drucker gibt der Printserver auf - gedruckt wurde nichts.
+    erster.update(state="failed", message="printer not connected", attempts=0)
+    _durchgang()                        # zurueck in die Schlange und gleich wieder hinaus
+    job = _job(label)
+    zweiter = server.jobs[job.payload["brother"]["id"]]
+    assert job.status == "sent" and job.payload["versand"] == 1
+    assert zweiter is not erster and zweiter["key"] != erster["key"]   # kein "duplicate"
+
+    # Printserver neu gestartet, waehrend der Auftrag dort nur wartete: noch einmal.
+    server.jobs.clear()
+    _durchgang()
+    job = _job(label)
+    assert job.status == "sent" and job.payload["versand"] == 2
+    assert len(server.jobs) == 1
