@@ -157,6 +157,24 @@ def test_masse_vom_drucker_ohne_treiberdatei():
     assert brother.mit_medium(mit_profil, medium) is mit_profil
 
 
+def test_medium_abweichung():
+    etiketten = {"typ": "die_cut_labels", "breite_mm": 51, "laenge_mm": 26}
+    gestanzt = {"media_type": "die_cut_labels", "media_width_mm": 51, "media_length_mm": 26}
+    assert brother.medium_abweichung(etiketten, gestanzt) == ""
+    assert brother.medium_abweichung(etiketten, None) == ""
+    assert "50 × 30" in brother.medium_abweichung(
+        etiketten, {**gestanzt, "media_width_mm": 50, "media_length_mm": 30})
+    assert "Endlosband" in brother.medium_abweichung(
+        etiketten, {"media_type": "continuous_tape", "media_width_mm": 58})
+    assert brother.medium_abweichung(etiketten, {"media_type": "none"}) == \
+        "Keine Etiketten eingelegt"
+    # Standardprofil kuendigt gestanzte Etiketten an - nur dann setzt der
+    # Drucker jedes Etikett an der Luecke an.
+    profil = brother.standard_profil(51, 26)
+    assert brother.erwartet(profil, {}) == etiketten
+    assert bytes.fromhex(profil["kopf"])[210] == 0x0B         # n2: Etiketten
+
+
 def test_zustaendig():
     assert not brother.zustaendig({}, "A")
     assert not brother.zustaendig({"aktiv": True, "url": ""}, "A")
@@ -174,6 +192,8 @@ class Printserver:
         self.jobs: dict[int, dict] = {}
         self.naechste = 1
         self.antwort_verlieren = 0      # so viele POSTs annehmen, Antwort "geht verloren"
+        self.medium = {"media_width_mm": 51}   # gemerkter Stand (cached)
+        self.medium_live = None                # Antwort auf eine frische Abfrage
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.method == "POST" and request.url.path == "/api/print/raw":
@@ -195,11 +215,16 @@ class Printserver:
             if job is None:
                 return httpx.Response(404, json={"ok": False, "message": "job not found"})
             return httpx.Response(200, json={"ok": True, "job": job})
+        if request.url.path == "/api/printer/status":
+            if self.medium_live is None:
+                return httpx.Response(409, json={"ok": False})
+            self.medium = self.medium_live
+            return httpx.Response(200, json={"ok": True, "printer": {"status": self.medium}})
         if request.url.path == "/api/status":
             return httpx.Response(200, json={
                 "firmware": {"version": "0.4.1-dev"}, "printer": {"connected": True,
                                                                  "product": "TD-2020"},
-                "brother": {"status": {"media_width_mm": 51}}, "queue": {"queued": 0},
+                "brother": {"status": self.medium}, "queue": {"queued": 0},
                 "print_api": {"job_key": True}, "wifi": {"ip": "192.168.1.50"}})
         return httpx.Response(404)
 
@@ -348,3 +373,24 @@ def test_einstellungen_haben_vorgaben():
                        "versatz_mm", "spiegeln", "profil"):
         assert schluessel in settings_store.DEFAULTS["brother"]
     assert settings_store.DEFAULTS["brother"]["drehung"] in brother.DREHUNGEN
+
+
+def test_falsche_rolle_haelt_zurueck_bis_sie_passt(client, server):
+    client.patch("/api/settings/brother", json={"breite_mm": 51, "laenge_mm": 26})
+    try:
+        server.medium = {"media_type": "die_cut_labels", "media_width_mm": 50,
+                         "media_length_mm": 30}
+        label = client.post("/api/labels", json={"name": "Graupen"}).json()["labels"][0]
+        assert _durchgang() == "unerreichbar"            # seltener nachsehen
+        job = _job(label)
+        assert job.status == "queued" and "50 × 30" in job.error
+        assert not server.jobs
+        assert "50 × 30" in client.get("/api/brother").json()["medium_hinweis"]
+
+        # Rolle gewechselt: der gemerkte Stand ist alt, die frische Abfrage zaehlt.
+        server.medium_live = {"media_type": "die_cut_labels", "media_width_mm": 51,
+                              "media_length_mm": 26}
+        assert _durchgang() is True
+        assert _job(label).status == "sent" and len(server.jobs) == 1
+    finally:
+        client.patch("/api/settings/brother", json={"breite_mm": 0, "laenge_mm": 0})

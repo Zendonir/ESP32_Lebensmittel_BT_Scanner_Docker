@@ -316,7 +316,11 @@ async function loadBrother() {
     ? `Aus ${esc(p.datei || 'Treiberdatei')}: ${esc(p.medium || '')} ${p.breite_mm} × ${p.laenge_mm || '–'} mm,
        ${p.zeilen} Zeilen zu ${p.bytes} Bytes, Befehl ${esc(p.zeilenbefehl)}${p.tiff ? ', gepackt' : ''}.`
     : 'Ohne Treiberdatei: Befehle nach der Brother-Rasterreferenz TD-2020.'}
-    Gedruckt wird ${z.masse_mm.breite} × ${z.masse_mm.laenge} mm.</span>`;
+    Gedruckt wird ${z.masse_mm.breite} × ${z.masse_mm.laenge} mm.
+    ${z.sensor ? 'Gestanzte Etiketten: der Drucker setzt jedes Etikett selbst an der Lücke an.'
+      : 'Endlosband: ohne Lückensensor, Länge wie eingestellt.'}</span>
+    ${z.medium_hinweis ? `<div class="notice warn" style="margin-top:8px"><span><b>Rolle passt nicht:</b>
+      ${esc(z.medium_hinweis)} – Etiketten werden so lange zurückgehalten.</span></div>` : ''}`;
   $('#brother-vorschau').src = z.vorschau || '';
   $('#brother-treiber-fig').hidden = !p.vorschau;
   if (p.vorschau) $('#brother-treiber').src = p.vorschau;

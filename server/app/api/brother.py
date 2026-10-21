@@ -43,6 +43,7 @@ async def zustand(session: AsyncSession = Depends(get_session)):
     else:
         fehler = ""
     breite, zeilen = brother.masse(profil, cfg)
+    soll = brother.erwartet(profil, cfg)
     return {
         "einstellungen": brother.oeffentlich(gespeichert),
         "printserver": printserver,
@@ -51,6 +52,9 @@ async def zustand(session: AsyncSession = Depends(get_session)):
                      "laenge": round(zeilen / brother.DOTS_PER_MM, 1)},
         "vorschau": vorschau,
         "vorschau_fehler": fehler,
+        # Positioniert der Drucker per Lueckensensor (gestanzte Etiketten)?
+        "sensor": soll["typ"] == "die_cut_labels",
+        "medium_hinweis": brother.medium_abweichung(soll, printserver.get("medium")),
         "auftraege": [{"id": j.id, "label": j.label, "status": j.status, "error": j.error,
                        "created_at": j.created_at.isoformat() if j.created_at else ""}
                       for j in jobs],

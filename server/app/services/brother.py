@@ -614,10 +614,68 @@ async def _abgleichen(client: httpx.AsyncClient, job: PrintJob) -> bool:
         job.error = "Drucker hat den Druck nicht bestätigt – Etikett prüfen"
     elif zustand in FERTIG_SCHLECHT:
         job.status = "failed"
+        if "Wrong media" in meldung:
+            meldung = "eingelegte Etiketten passen nicht zu den gesendeten Maßen"
         job.error = f"Drucker: {meldung or zustand}"[:255]
     elif zustand == "waiting":
         job.error = f"wartet auf Drucker: {meldung}"[:255]
     return True
+
+
+# ------------------------------------------------------------ Lueckensensor
+#
+# Gestanzte Etiketten positioniert der TD-2020 selbst: steht in ESC i z der
+# Medientyp 0Bh mit gueltiger Breite und Laenge, registriert er jedes Etikett
+# an der Luecke, und 1Ah faehrt bis zur naechsten (Referenz 2.3.2/ESC i z;
+# einen Rand gibt es bei Etiketten nicht, ESC i d muss 0 sein). Es gibt also
+# keine Vorschubrechnung, die wandern koennte - anders als am Terminaldrucker.
+#
+# Das gilt aber nur, wenn die eingelegte Rolle zu den gesendeten Angaben
+# passt. Deshalb wird vor dem Senden verglichen, was der Drucker als
+# eingelegt meldet; passt es nicht, bleibt der Auftrag liegen und sagt warum,
+# statt ein verrutschtes oder verworfenes Etikett zu riskieren.
+def erwartet(profil: dict, cfg: dict) -> dict:
+    """Was der Auftrag dem Drucker als Medium ankuendigt."""
+    breite = int(round(float(cfg.get("breite_mm") or 0) or float(profil.get("breite_mm") or 0)))
+    laenge = int(profil.get("laenge_mm") or 0)
+    return {"typ": "die_cut_labels" if laenge else "continuous_tape",
+            "breite_mm": breite, "laenge_mm": laenge}
+
+
+def _medium_text(typ: str, breite: int, laenge: int) -> str:
+    if typ == "die_cut_labels":
+        return f"Etiketten {breite} × {laenge} mm"
+    return f"Endlosband {breite} mm"
+
+
+def medium_abweichung(soll: dict, medium: dict | None) -> str:
+    """Leer, wenn die eingelegte Rolle passt (oder der Drucker nichts meldet)."""
+    if not medium or not medium.get("media_type"):
+        return ""
+    typ = medium.get("media_type")
+    if typ == "none" or "no_media" in (medium.get("errors") or []):
+        return "Keine Etiketten eingelegt"
+    if typ not in ("die_cut_labels", "continuous_tape"):
+        return ""
+    ist_b, ist_l = int(medium.get("media_width_mm") or 0), int(medium.get("media_length_mm") or 0)
+    passt = typ == soll["typ"] and abs(ist_b - soll["breite_mm"]) <= 1 and (
+        typ == "continuous_tape" or abs(ist_l - soll["laenge_mm"]) <= 1)
+    if passt:
+        return ""
+    return (f"Eingelegt: {_medium_text(typ, ist_b, ist_l)} – eingestellt: "
+            f"{_medium_text(soll['typ'], soll['breite_mm'], soll['laenge_mm'])}. "
+            "Rolle oder Einstellung (bzw. Treiberdatei) anpassen")
+
+
+async def _medium_live(client: httpx.AsyncClient) -> dict | None:
+    """Frische Statusabfrage (ESC i S) - nur wenn der Printserver frei ist."""
+    try:
+        r = await client.get("/api/printer/status")
+        if r.status_code != 200:
+            return None
+        return ((r.json().get("printer") or {}).get("status")) or None
+    except (httpx.HTTPError, ValueError):
+        return None
 
 
 async def durchgang() -> bool:
@@ -639,14 +697,27 @@ async def durchgang() -> bool:
         if not jobs or not basis_url(cfg):
             return False
         printer_cfg = await settings_store.get(session, "printer", {}) or {}
-        if any(j.status == "queued" for j in jobs) and not (cfg.get("profil") or {}).get("kopf"):
-            cfg = mit_medium(cfg, (await printserver_status(cfg)).get("medium"))
         vorher = {j.id: (j.status, j.error) for j in jobs}
-        erreichbar = True
+        erreichbar, abweichung = True, ""
         async with _client(cfg) as client:
+            if any(j.status == "queued" for j in jobs):
+                status = await printserver_status(cfg)
+                medium = status.get("medium")
+                cfg = mit_medium(cfg, medium)
+                soll = erwartet(profil_aus(cfg), cfg)
+                abweichung = medium_abweichung(soll, medium)
+                schlange = status.get("warteschlange") or {}
+                if abweichung and not schlange.get("active_id") and not schlange.get("queued"):
+                    # Der gemerkte Stand kann von vor dem Rollenwechsel sein.
+                    frisch = await _medium_live(client)
+                    if frisch is not None:
+                        abweichung = medium_abweichung(soll, frisch)
             for job in jobs:
                 if job.status == "sent":
                     erreichbar = await _abgleichen(client, job)
+                elif abweichung:
+                    job.error = abweichung[:255]
+                    continue
                 else:
                     erreichbar = await _senden(client, job, cfg, printer_cfg)
                 if not erreichbar:
@@ -657,7 +728,8 @@ async def durchgang() -> bool:
     if geaendert:
         from ..device.hub import hub
         await hub.notify_ui("labels")
-    if not erreichbar:
+    if not erreichbar or abweichung:
+        # Beides heilt nicht in zwei Sekunden: seltener nachsehen.
         raise ConnectionError
     return offen
 
