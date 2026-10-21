@@ -11,7 +11,7 @@ from ..device import workflow
 from ..device.hub import hub
 from ..models import InventoryItem, PrintJob
 from ..schemas import LabelCreate, LabelCreateResult, PrintJobOut
-from ..services import calibration, druckertest, haushalte, hochformat
+from ..services import brother, calibration, druckertest, haushalte, hochformat
 from ..services import inventory as inv
 from ..services import labels as label_service
 from ..services import settings_store
@@ -117,7 +117,9 @@ async def create_labels(body: LabelCreate, request: Request,
     # keines gewaehlt, wird gefragt - vor dem Anlegen, damit nichts doppelt
     # entsteht, wenn die Oberflaeche danach mit der Wahl wiederkommt.
     online = workflow.terminals_fuer(haushalt)
-    if body.print and not body.device_id and len(online) > 1:
+    an_brother = brother.zustaendig(await settings_store.get(session, "brother", {}),
+                                    haushalt or await haushalte.standard(session))
+    if body.print and not body.device_id and len(online) > 1 and not an_brother:
         raise HTTPException(409, {"frage": "terminal", "terminals": [
             {"device_id": d, "name": await _terminal_name(session, d)} for d in online]})
     target, pk = await workflow.druckziel(session, haushalt or "", body.device_id)
@@ -137,7 +139,8 @@ async def create_labels(body: LabelCreate, request: Request,
         household=haushalt or "",
     )
     for job in jobs:
-        job.device_pk = pk
+        if not job.ziel:
+            job.device_pk = pk
     produkt = await inv.produkt_merken(session, barcode=body.barcode, name=body.name,
                                        brand=body.brand, category=body.category,
                                        subcategory=body.subcategory)
@@ -146,7 +149,11 @@ async def create_labels(body: LabelCreate, request: Request,
     ki.im_hintergrund(produkt.id if produkt else None)
 
     printed = False
-    if jobs:
+    if any(job.ziel == brother.ZIEL for job in jobs):
+        # Der Brother-Dienst schickt sie los; "gedruckt" meldet er spaeter.
+        brother.anstossen()
+        printed = True
+    elif jobs:
         # Ohne Haushalt (Verwaltung ueber alle) wie bisher: irgendein Terminal.
         if target is None and not haushalt and hub.online_ids():
             target = hub.online_ids()[0]

@@ -51,6 +51,13 @@ Ablaufend-Liste am Gerät, per Wischgeste am Handy oder im Web-Interface.
 **Überwachen** – täglicher MHD-Bericht per ntfy oder Telegram, Bestandszahlen
 per MQTT für Home Assistant, Übersichtsseite mit Statistik.
 
+**Brother-Drucker im WLAN** – statt des Druckers am Terminal (oder je Haushalt
+zusätzlich) ein Brother TD-2020A am
+[ESP32-Printserver](https://github.com/Zendonir/ESP32-USB-Brother-Label-Wifi-Server).
+Der Server zeichnet das Etikett selbst, übernimmt die Brother-Befehle aus einer
+Druckdatei des Originaltreibers und meldet zurück, was der Drucker sagt (gedruckt,
+Deckel offen, kein Papier). Einrichten unter *Etiketten → Brother-Drucker (WLAN)*.
+
 **Verwalten** – Inventar, Vorlagen, Kategorien, Lagerorte, Produkt-Cache,
 Etikettenrolle und Druckwarteschlange im Browser. Mobile PWA mit
 Kamera-Scan über die BarcodeDetector-API.

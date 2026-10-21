@@ -29,7 +29,7 @@ from ..models import (
 )
 from ..services import inventory as inv
 from ..services import categories as cat
-from ..services import firmware, haltbarkeit, ki, labels, mengen, openfoodfacts, settings_store
+from ..services import brother, firmware, haltbarkeit, ki, labels, mengen, openfoodfacts, settings_store
 from ..services import scanner as scanner_info
 from ..services.dates import days_left, shift_iso, to_display, to_iso_date
 from . import protocol as proto
@@ -1343,15 +1343,19 @@ async def _save_draft(session: AsyncSession, sess: DeviceSession) -> None:
         if row is not None:
             row.done = True
         sess.offline_id = None
-    # Am Terminal erfasst = an diesem Terminal gedruckt.
+    # Am Terminal erfasst = an diesem Terminal gedruckt (ausser der Haushalt
+    # druckt am Brother - dann gilt kein Terminal).
     pk = await geraet_pk(session, sess.device_id)
     for job in jobs:
-        job.device_pk = pk
+        if not job.ziel:
+            job.device_pk = pk
     produkt = await inv.produkt_merken(session, barcode=draft.barcode, name=draft.name,
                                        brand=draft.brand, category=draft.category,
                                        subcategory=draft.subcategory)
     await session.commit()
     ki.im_hintergrund(produkt.id if produkt else None)
+    if any(job.ziel == brother.ZIEL for job in jobs):
+        brother.anstossen()
 
     sess.last_result = [
         f"{len(items)} Etikett(en)",
@@ -1515,20 +1519,31 @@ async def nachdrucken(session: AsyncSession, item: InventoryItem,
     Artikel neu gerendert - mit den aktuellen Druckereinstellungen.
     """
     printer_cfg = await settings_store.get(session, "printer", {})
-    payload = labels.render_label(
-        {
-            "label": item.label,
-            "name": item.name,
-            "brand": item.brand,
-            "subcategory": item.subcategory,
-            "expiry_date": item.expiry_date,
-            "added_date": item.added_date,
-            "quantity": item.quantity,
-            "unit": item.unit,
-            "location": item.location,
-        },
-        printer_cfg,
-    )
+    daten = {
+        "label": item.label,
+        "name": item.name,
+        "brand": item.brand,
+        "subcategory": item.subcategory,
+        "expiry_date": item.expiry_date,
+        "added_date": item.added_date,
+        "quantity": item.quantity,
+        "unit": item.unit,
+        "location": item.location,
+    }
+    # Druckt der Haushalt am Brother, dann auch den Nachdruck - egal, an
+    # welchem Terminal "Nachdruck" angetippt wurde.
+    if brother.zustaendig(await settings_store.get(session, "brother", {}), item.household or ""):
+        job = PrintJob(label=item.label, payload=brother.auftrag(daten), status="queued",
+                       household=item.household or "", ziel=brother.ZIEL)
+        session.add(job)
+        await labels.consume_roll(session, 1)
+        await inv.log_event(session, "print", label=item.label, name=item.name)
+        await session.commit()
+        brother.anstossen()
+        return {"ok": True, "job": job.id, "sent": True, "label": item.label,
+                "name": item.name, "ziel": brother.ZIEL}
+
+    payload = labels.render_label(daten, printer_cfg)
     target, pk = await druckziel(session, item.household or "", device_id)
     job = PrintJob(label=item.label, payload=payload, status="queued",
                    household=item.household or "", device_pk=pk)
@@ -1600,7 +1615,8 @@ async def flush_print_queue(
         for job in (
             await session.execute(
                 select(PrintJob).where(
-                    PrintJob.status == "sent", PrintJob.updated_at < verfallen
+                    PrintJob.status == "sent", PrintJob.updated_at < verfallen,
+                    PrintJob.ziel == "",
                 )
             )
         ).scalars().all():
@@ -1612,7 +1628,7 @@ async def flush_print_queue(
             await session.execute(
                 select(func.count())
                 .select_from(PrintJob)
-                .where(PrintJob.status == "sent")
+                .where(PrintJob.status == "sent", PrintJob.ziel == "")
             )
         ).scalar_one()
         platz = PRINT_BATCH - int(unterwegs)
@@ -1636,7 +1652,7 @@ async def flush_print_queue(
     jobs = (
         await session.execute(
             select(PrintJob)
-            .where(PrintJob.status.in_(offen), gehoert_hierher)
+            .where(PrintJob.status.in_(offen), PrintJob.ziel == "", gehoert_hierher)
             .order_by(PrintJob.id)
             .limit(platz)
         )

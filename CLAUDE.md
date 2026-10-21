@@ -18,12 +18,13 @@ server/app/
   config.py      Einstellungen aus der Umgebung (kein Config-File!)
   models.py      ORM: inventory, events, products, templates, categories,
                  locations, devices, print_jobs, settings
-  api/           inventory · catalog · labels · system · firmware · haushalte
+  api/           inventory · catalog · labels · brother · system · firmware · haushalte
   device/        protocol · hub · workflow · routes
   services/      inventory · labels · calibration · categories · openfoodfacts ·
                  notify · scheduler · dates · mengen · settings_store · seed · importer ·
                  firmware · updates · deploy · zeichen · hochformat · haushalte ·
-                 druckertest · mhd_ocr (MHD vom Foto, lokal)
+                 druckertest · mhd_ocr (MHD vom Foto, lokal) ·
+                 brother (TD-2020A am WLAN-Printserver)
   fonts/         DejaVu Sans fuer das Hochformat-Bild (im Repo, damit Test und
                  Container gleich umbrechen)
 server/web/      index.html · mobile.html · js/ · css/ (kein Build-Schritt)
@@ -220,6 +221,11 @@ cd firmware && pio run --target upload # flashen
 | Safari fragt bei jedem Scan nach der Kamera | Jeder neue `getUserMedia` fragt bei "Fragen" erneut. Deshalb holt alles die Kamera ueber `web/js/kamera.js`: ein Strom je Seite, nach Gebrauch nur pausiert (`track.enabled = false`), beendet erst nach 60 s (Safari) bzw. 30 min (Web-App vom Home-Bildschirm - dort gilt Safaris Website-Erlaubnis nicht und laesst sich nicht fest erteilen; beim Verbergen bleibt der Strom dort stehen); ZXing bekommt `stream.clone()`, weil sein `reset()` die Spuren beendet. Ganz ohne Abfrage nur ueber die Safari-Einstellung der Website (Kamera: Erlauben) |
 | Mengen in kg/l, Summen falsch, "1l" aus der Produktdatenbank nicht uebernommen | Gespeichert wird nur in g/ml/St. (`services/mengen.py`): `normalisieren()` in `add_items`, PATCH und Vorlagen-Schema, Altbestand stellt `db._mengen_umstellen` beim Start um. Angezeigt/gedruckt ueber `mengen.text()` bzw. `mengeText()` in `api.js` - ab 1000 als kg/l. `aus_angabe()` liest die OpenFoodFacts-Menge ("6 x 330 ml" = 330 ml je Packung); Scan-Antwort traegt `menge`/`einheit`, das Terminal setzt sie in den Entwurf |
 | Ein haengender Browser friert das Terminal ein | Jeder Sendevorgang hat eine Zeitgrenze (`hub.SEND_TIMEOUT_S`) |
+| Etikett soll auf den Brother (WLAN) statt an den Terminaldrucker | `brother.aktiv` + `brother.url` (+ `brother.haushalt`). `inventory.add_items()` und `workflow.nachdrucken()` legen dann `PrintJob.ziel = "brother"` mit dem **Artikel** als Payload an; gezeichnet wird erst beim Senden (`services/brother.py`, quer: Code rechts, hochkant: wie Hochformat). Das Terminal fasst nur Auftraege mit leerem `ziel` an (`flush_print_queue`) |
+| Brother druckt Muell / gar nicht | Grundlage ist die "Raster Command Reference TD-2020" 1.01 (nicht ins Repo – Nutzungsbedingungen). `standard_profil()` folgt ihr: Zeile `g 00h 38h` + 56 Bytes, `Z` nur mit TIFF, TIFF-Zeile > 56 Bytes als ein 57-Byte-Literal, gestanzt `ESC i d` = 0, Endlos ≥ 24 Punkte. Druckbereich quer/laengs aus `DRUCKBREITE`/`DRUCKLAENGE` (51×26 = 382 Pins mittig × 157 Zeilen – je 3 mm Rand an beiden Enden, sonst laeuft es aufs naechste Etikett). Eine `.prn` des Originaltreibers (`brother.analysieren`, `ESC i U` = 129 Bytes Parameter) hat Vorrang: Kopf unveraendert, nur die Zeilenzahl in `ESC i z` neu. Seitlich falsch: `versatz_mm`, spiegelverkehrt: `spiegeln` |
+| Brother-Etiketten verrutschen / Lückensensor | Gestanzte Etiketten registriert der TD-2020 **selbst** an der Lücke – Voraussetzung: `ESC i z` mit Medientyp 0Bh und gültiger Breite/Länge (Flags 8Eh), `ESC i d` = 0, Zeilen ≤ Druckbereich. Keine eigene Vorschubrechnung einführen. Vor dem Senden vergleicht `durchgang()` das gemeldete Medium mit `erwartet()`; passt die Rolle nicht (`medium_abweichung`), bleibt der Auftrag `queued` mit Grund, Takt 20 s; bei leerer Printserver-Schlange wird frisch abgefragt (`/api/printer/status`), weil der gemerkte Stand von vor dem Rollenwechsel sein kann |
+| Brother-Etikett doppelt / Ergebnis verloren | Versand mit `X-Job-Key` (`lm-<id>-<zeitstempel>`): eine verlorene Antwort wird mit demselben Schluessel wiederholt, der Printserver (ab 0.4.1) liefert den vorhandenen Auftrag. Kennt er Nummer/Schluessel nicht mehr (Neustart), wird der Auftrag `failed` "Ergebnis unbekannt" – nie selbsttaetig nachdrucken, der TD-2020A verwirft Auftraege nach einem Fehler ohnehin |
+| Brother-Dienst | `brother.start()` in der Lifespan, Takt 2 s solange offen, sonst schlaeft er bis `brother.anstossen()` (nach dem **commit** aufrufen) oder 60 s. Printserver nicht erreichbar: Fehler steht am Auftrag, Versuche zaehlen nicht. Tests stellen den Printserver per `brother._transport` (httpx-MockTransport) nach |
 
 ## Entwicklungsregeln
 

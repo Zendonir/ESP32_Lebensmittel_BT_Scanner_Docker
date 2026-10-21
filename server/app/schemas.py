@@ -247,6 +247,7 @@ class DevicePatch(BaseModel):
 class PrintJobOut(ORMModel):
     id: int
     label: str
+    ziel: str = ""
     status: str
     attempts: int
     error: str
