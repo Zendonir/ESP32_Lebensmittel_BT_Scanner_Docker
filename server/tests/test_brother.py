@@ -394,3 +394,60 @@ def test_falsche_rolle_haelt_zurueck_bis_sie_passt(client, server):
         assert _job(label).status == "sent" and len(server.jobs) == 1
     finally:
         client.patch("/api/settings/brother", json={"breite_mm": 0, "laenge_mm": 0})
+
+
+# ----------------------------------------------------- Ziel und Standardziel
+def test_standardziel_und_wunsch():
+    cfg = {"aktiv": True, "url": "http://x"}
+    assert brother.standardziel(cfg, "A") == "brother"
+    assert brother.standardziel({**cfg, "standardziel": "terminal"}, "A") == "terminal"
+    assert brother.standardziel({}, "A") == "terminal"          # kein Brother eingerichtet
+    assert brother.an_brother(cfg, "A") is True
+    assert brother.an_brother(cfg, "A", "terminal") is False
+    assert brother.an_brother({**cfg, "standardziel": "terminal"}, "A", "brother") is True
+    assert brother.an_brother({}, "A", "brother") is False      # API lehnt vorher ab
+
+
+def test_drucken_an_waehlen_und_standardziel(client, server):
+    z = client.get("/api/labels/ziele").json()
+    assert z["standard"] == "brother" and z["brother"] is True
+
+    angelegt = []
+
+    def ziel_von(body):
+        r = client.post("/api/labels", json={"name": f"Bohne {uuid.uuid4().hex[:5]}", **body})
+        assert r.status_code == 201, r.text
+        angelegt.append(r.json()["labels"][0])
+        return _job(angelegt[-1]).ziel
+
+    assert ziel_von({}) == "brother"                    # Standardziel
+    assert ziel_von({"ziel": "terminal"}) == ""         # ausdruecklich Terminal
+    client.patch("/api/settings/brother", json={"standardziel": "terminal"})
+    try:
+        assert client.get("/api/labels/ziele").json()["standard"] == "terminal"
+        assert ziel_von({}) == ""                       # neues Standardziel
+        assert ziel_von({"ziel": "brother"}) == "brother"
+        # Nachdruck folgt dem Standardziel, auf Wunsch dem Brother.
+        label = client.post("/api/labels", json={"name": "Nudeln"}).json()["labels"][0]
+        angelegt.append(label)
+        assert client.post(f"/api/labels/reprint/{label}").json().get("ziel") is None
+        assert client.post(f"/api/labels/reprint/{label}?ziel=brother").json()["ziel"] == "brother"
+    finally:
+        client.patch("/api/settings/brother", json={"standardziel": "brother"})
+
+        # Offene Terminal-Auftraege nicht den folgenden Tests (Druckziel) hinterlassen.
+        async def aufraeumen():
+            async with session_scope() as session:
+                for job in (await session.execute(select(PrintJob).where(
+                        PrintJob.label.in_(angelegt), PrintJob.ziel == ""))).scalars():
+                    await session.delete(job)
+                await session.commit()
+        _run(aufraeumen())
+
+
+def test_brother_waehlen_ohne_brother_lehnt_ab():
+    with TestClient(app) as c:
+        assert c.get("/api/labels/ziele").json()["standard"] == "terminal"
+        r = c.post("/api/labels", json={"name": "Reis", "ziel": "brother"})
+        assert r.status_code == 409 and "nicht eingerichtet" in r.text
+        assert c.post("/api/labels", json={"name": "Reis", "ziel": "quatsch"}).status_code == 422

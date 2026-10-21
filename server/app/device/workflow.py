@@ -1511,7 +1511,7 @@ async def letztes_etikett(session: AsyncSession, haushalt: str) -> InventoryItem
 
 
 async def nachdrucken(session: AsyncSession, item: InventoryItem,
-                      device_id: str | None = None) -> dict:
+                      device_id: str | None = None, ziel: str | None = None) -> dict:
     """Etikett eines Artikels neu drucken, ohne zweiten Bestandseintrag.
 
     Im ersten Projekt gab es nur "letztes Etikett erneut drucken" aus einem
@@ -1530,9 +1530,10 @@ async def nachdrucken(session: AsyncSession, item: InventoryItem,
         "unit": item.unit,
         "location": item.location,
     }
-    # Druckt der Haushalt am Brother, dann auch den Nachdruck - egal, an
-    # welchem Terminal "Nachdruck" angetippt wurde.
-    if brother.zustaendig(await settings_store.get(session, "brother", {}), item.household or ""):
+    # Ist der Brother das Ziel (gewaehlt oder Standardziel), dann auch fuer den
+    # Nachdruck - egal, an welchem Terminal "Nachdruck" angetippt wurde.
+    if brother.an_brother(await settings_store.get(session, "brother", {}),
+                          item.household or "", ziel):
         job = PrintJob(label=item.label, payload=brother.auftrag(daten), status="queued",
                        household=item.household or "", ziel=brother.ZIEL)
         session.add(job)

@@ -1,7 +1,7 @@
 // Admin-Oberflaeche. Bewusst ohne Framework und ohne Build-Schritt: das Image
 // bleibt klein und die Dateien sind das, was ausgeliefert wird.
 
-import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, gruppieren, mengeText, EINHEITEN, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from './api.js';
+import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, gruppieren, mengeText, EINHEITEN, liveConnect, tagEditor, HAUSHALT, fremdHinweis, zielOptionen, zielAuswerten, zielVorauswahl } from './api.js';
 import { mhdKamera } from './mhdkamera.js';
 import { zipBlob, base64ZuBytes } from './zip.js';
 
@@ -257,6 +257,19 @@ async function editItem(label) {
 }
 
 // -------------------------------------------------------------------- Etiketten
+// "Drucken an" (zielOptionen/zielAuswerten in api.js, auch fuers Handy).
+// Vorausgewaehlt ist das Standardziel; eine eigene Wahl bleibt beim
+// Neuladen der Seite stehen.
+async function loadZiele() {
+  const ziele = await get('/api/labels/ziele');
+  const sel = $('#label-ziel');
+  const vorher = sel.dataset.gewaehlt;
+  const optionen = zielOptionen(ziele);
+  sel.innerHTML = optionen.map(([w, t]) => `<option value="${esc(w)}">${esc(t)}</option>`).join('');
+  sel.value = zielVorauswahl(optionen, ziele.standard, vorher);
+}
+$('#label-ziel').addEventListener('change', (ev) => { ev.target.dataset.gewaehlt = ev.target.value; });
+
 $('#label-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const form = new FormData(ev.target);
@@ -264,10 +277,14 @@ $('#label-form').addEventListener('submit', async (ev) => {
   body.quantity = parseFloat(body.quantity) || 1;
   body.count = parseInt(body.count, 10) || 1;
   body.print = form.get('print') === 'on';
+  delete body.ziel_wahl;
+  zielAuswerten(form.get('ziel_wahl'), body);
   try {
     const res = await post('/api/labels', body);
     toast(`${res.labels.length} Etikett(en): ${res.labels.join(', ')}`, 'success');
+    const ziel = $('#label-ziel').value;
     ev.target.reset();
+    $('#label-ziel').value = ziel;
     await Promise.all([loadLabels(), loadDashboard()]);
   } catch (e) { toast(e.message, 'error'); }
 });
@@ -281,6 +298,7 @@ async function loadLabels() {
   loadLayouts().catch((e) => toast(e.message, 'error'));
   hochformatHinweise().catch(() => {});
   loadBrother().catch((e) => { $('#brother-status').textContent = e.message; });
+  loadZiele().catch(() => {});
   $('#roll-state').textContent = roll.size
     ? `${roll.remaining} von ${roll.size} Etiketten übrig (${roll.used} verbraucht)`
     : 'Keine Rollengröße hinterlegt.';

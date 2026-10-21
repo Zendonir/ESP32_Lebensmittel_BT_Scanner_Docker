@@ -126,8 +126,11 @@ class BrotherFehler(Exception):
 
 
 # --------------------------------------------------------------- Zustaendig
+ZIELE = ("brother", "terminal")
+
+
 def zustaendig(cfg: dict | None, haushalt: str) -> bool:
-    """Druckt dieser Haushalt am Brother statt am Terminal?
+    """Darf dieser Haushalt am Brother drucken (aktiv, Adresse, Haushalt)?
 
     `haushalt` in den Einstellungen leer = alle Haushalte; mehrere Namen mit
     Komma getrennt.
@@ -137,6 +140,29 @@ def zustaendig(cfg: dict | None, haushalt: str) -> bool:
         return False
     liste = [h.strip() for h in str(cfg.get("haushalt", "") or "").split(",") if h.strip()]
     return not liste or (haushalt or "") in liste
+
+
+def standardziel(cfg: dict | None, haushalt: str) -> str:
+    """Wohin gedruckt wird, wenn niemand waehlt: "brother" oder "terminal".
+
+    Eingestellt unter `brother.standardziel`; ist der Brother fuer den
+    Haushalt nicht eingerichtet, bleibt nur das Terminal.
+    """
+    if not zustaendig(cfg, haushalt):
+        return "terminal"
+    return "terminal" if (cfg or {}).get("standardziel") == "terminal" else "brother"
+
+
+def an_brother(cfg: dict | None, haushalt: str, wunsch: str | None = None) -> bool:
+    """Geht dieser Druck an den Brother? `wunsch` = "brother"/"terminal" aus
+    der Auswahl beim Drucken, leer = Standardziel. Ein Brother-Wunsch ohne
+    eingerichteten Brother faellt aufs Terminal zurueck (die API lehnt ihn
+    vorher mit 409 ab)."""
+    if wunsch == "terminal":
+        return False
+    if wunsch == "brother":
+        return zustaendig(cfg, haushalt)
+    return standardziel(cfg, haushalt) == "brother"
 
 
 def basis_url(cfg: dict) -> str:

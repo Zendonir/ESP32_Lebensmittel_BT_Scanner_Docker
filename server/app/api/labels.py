@@ -117,8 +117,13 @@ async def create_labels(body: LabelCreate, request: Request,
     # keines gewaehlt, wird gefragt - vor dem Anlegen, damit nichts doppelt
     # entsteht, wenn die Oberflaeche danach mit der Wahl wiederkommt.
     online = workflow.terminals_fuer(haushalt)
-    an_brother = brother.zustaendig(await settings_store.get(session, "brother", {}),
-                                    haushalt or await haushalte.standard(session))
+    brother_cfg = await settings_store.get(session, "brother", {})
+    besitzer = haushalt or await haushalte.standard(session)
+    if body.print and body.ziel == "brother" and not brother.zustaendig(brother_cfg, besitzer):
+        raise HTTPException(409, "Der Brother ist für diesen Haushalt nicht eingerichtet")
+    # Ein gewaehltes Terminal heisst: dort drucken, nicht am Brother.
+    wunsch = "terminal" if body.device_id and not body.ziel else body.ziel or None
+    an_brother = brother.an_brother(brother_cfg, besitzer, wunsch)
     if body.print and not body.device_id and len(online) > 1 and not an_brother:
         raise HTTPException(409, {"frage": "terminal", "terminals": [
             {"device_id": d, "name": await _terminal_name(session, d)} for d in online]})
@@ -137,6 +142,7 @@ async def create_labels(body: LabelCreate, request: Request,
         count=body.count,
         want_print=body.print,
         household=haushalt or "",
+        ziel=wunsch,
     )
     for job in jobs:
         if not job.ziel:
@@ -168,10 +174,29 @@ async def create_labels(body: LabelCreate, request: Request,
     )
 
 
+@router.get("/ziele")
+async def druckziele(request: Request, session: AsyncSession = Depends(get_session)):
+    """Wohin dieser Haushalt drucken kann - fuer die Auswahl "Drucken an".
+
+    `standard` ist die Vorauswahl (Einstellung `brother.standardziel`, ohne
+    eingerichteten Brother immer "terminal").
+    """
+    haushalt = await haushalte.aus_anfrage(request, session)
+    besitzer = haushalt or await haushalte.standard(session)
+    cfg = await settings_store.get(session, "brother", {})
+    ids = workflow.terminals_fuer(haushalt) if haushalt else hub.online_ids()
+    return {
+        "standard": brother.standardziel(cfg, besitzer),
+        "brother": brother.zustaendig(cfg, besitzer),
+        "terminals": [{"device_id": d, "name": await _terminal_name(session, d)} for d in ids],
+    }
+
+
 @router.post("/reprint/{label}")
 async def reprint(
     label: str,
     device_id: str | None = None,
+    ziel: str | None = Query(None, pattern="^(brother|terminal)$"),
     session: AsyncSession = Depends(get_session),
 ):
     """Etikett neu drucken, ohne einen zweiten Bestandseintrag zu erzeugen.
@@ -184,7 +209,7 @@ async def reprint(
     ).scalar_one_or_none()
     if item is None:
         raise HTTPException(404, "Etikett unbekannt")
-    return await workflow.nachdrucken(session, item, device_id)
+    return await workflow.nachdrucken(session, item, device_id, ziel)
 
 
 @router.post("/reprint-last")

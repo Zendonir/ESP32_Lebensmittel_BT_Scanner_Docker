@@ -365,3 +365,31 @@ export async function fremdHinweis(box) {
     <ul style="margin:6px 0 0;padding-left:18px">${zeilen}</ul>
     ${bei.length > 5 ? `<div class="muted">und ${bei.length - 5} weitere</div>` : ''}</div>`;
 }
+
+// "Drucken an": Brother, Terminal (der Server waehlt das Terminal des
+// Haushalts) oder ein bestimmtes verbundenes Terminal - aus GET /api/labels/ziele.
+export function zielOptionen(ziele) {
+  const optionen = [];
+  if (ziele.brother) optionen.push(['brother', 'Brother (WLAN)']);
+  // Mehrere Terminals: gleich das eine waehlen lassen, statt erst nachzufragen.
+  if (ziele.terminals.length > 1) {
+    ziele.terminals.forEach((t) => optionen.push([`terminal:${t.device_id}`, `Terminal: ${t.name}`]));
+  } else {
+    optionen.push(['terminal', ziele.terminals.length ? `Terminal: ${ziele.terminals[0].name}` : 'Terminal']);
+  }
+  return optionen;
+}
+
+// Vorauswahl: die eigene Wahl, sonst das Standardziel (bei mehreren
+// Terminals das erste).
+export function zielVorauswahl(optionen, standard, vorher = '') {
+  if (optionen.some(([w]) => w === vorher)) return vorher;
+  const treffer = optionen.find(([w]) => w === standard || w.startsWith(`${standard}:`));
+  return (treffer || optionen[0])[0];
+}
+
+export function zielAuswerten(wert, body) {
+  if (wert === 'brother') body.ziel = 'brother';
+  else if (wert && wert.startsWith('terminal:')) { body.ziel = 'terminal'; body.device_id = wert.slice(9); }
+  else body.ziel = 'terminal';
+}
