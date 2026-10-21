@@ -130,6 +130,9 @@ DEFAULTS: dict[str, Any] = {
         "url": "",
         # Leer = alle Haushalte, sonst Namen mit Komma getrennt.
         "haushalt": "",
+        # Wohin gedruckt wird, wenn beim Drucken nichts gewaehlt ist (Terminal,
+        # Nachdruck, Web-Vorauswahl): "brother" | "terminal".
+        "standardziel": "brother",
         # Etikett quer zum Druckkopf und in Laufrichtung, in mm. 0 = aus der
         # Treiberdatei (Profil) bzw. 51 x 26.
         "breite_mm": 0,

@@ -199,6 +199,8 @@ class LabelCreate(BaseModel):
     count: int = Field(default=1, ge=1, le=20)
     print: bool = True
     device_id: str | None = None
+    # Druckziel: "brother", "terminal" oder leer = Standardziel.
+    ziel: str = Field(default="", pattern="^(|brother|terminal)$")
 
     @field_validator("expiry_date")
     @classmethod

@@ -73,6 +73,7 @@ async def add_items(
     device_id: str = "",
     want_print: bool = True,
     household: str = "",
+    ziel: str | None = None,
 ) -> tuple[list[InventoryItem], list[PrintJob]]:
     """`count` Etiketten anlegen und optional Druckauftraege einreihen."""
     # Gespeichert wird in g/ml (1 kg -> 1000 g), angezeigt wird ab 1000 als
@@ -87,9 +88,11 @@ async def add_items(
 
     numbers = await label_service.next_labels(session, count)
     printer_cfg = await settings_store.get(session, "printer", {})
-    # Druckt dieser Haushalt am Brother (WLAN-Printserver), gehen die Auftraege
-    # dorthin und nie ans Terminal - auch wenn der Terminaldrucker aus ist.
-    an_brother = brother.zustaendig(await settings_store.get(session, "brother", {}), household)
+    # Geht der Druck an den Brother (WLAN-Printserver) - gewaehlt (`ziel`) oder
+    # als Standardziel -, dann dorthin und nie ans Terminal, auch wenn der
+    # Terminaldrucker aus ist.
+    an_brother = brother.an_brother(await settings_store.get(session, "brother", {}),
+                                    household, ziel)
     added_date = today_iso()
 
     items: list[InventoryItem] = []

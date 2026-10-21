@@ -103,6 +103,14 @@ TAKT_OFFEN_S = 2
 TAKT_RUHE_S = 60
 TAKT_UNERREICHBAR_S = 20
 
+# So viele Auftraege liegen hoechstens gleichzeitig beim Printserver. Der Rest
+# wartet hier in der Datenbank: die Schlange des Printservers lebt im RAM
+# (24 Plaetze, weg nach einem Neustart) und gibt einen Auftrag nach 10 min
+# ohne Drucker auf. Hier wartet er beliebig lange und uebersteht alles.
+MAX_UNTERWEGS = 2
+
+DRUCKER_AUS = "Drucker aus – druckt, sobald er eingeschaltet ist"
+
 # Zustaende des Printservers (print_queue.c) -> was das hier bedeutet.
 FERTIG_GUT = ("printed",)
 FERTIG_SCHLECHT = ("failed", "cancelled", "incomplete", "unknown")
@@ -126,17 +134,53 @@ class BrotherFehler(Exception):
 
 
 # --------------------------------------------------------------- Zustaendig
-def zustaendig(cfg: dict | None, haushalt: str) -> bool:
-    """Druckt dieser Haushalt am Brother statt am Terminal?
+ZIELE = ("brother", "terminal")
 
-    `haushalt` in den Einstellungen leer = alle Haushalte; mehrere Namen mit
-    Komma getrennt.
-    """
+
+def haushalte_von(cfg: dict | None) -> list[str]:
+    """Haushalte, denen der Brother gehoert - leer = allen (wie ein Terminal
+    ohne Zuordnung gibt es ihn sonst nicht; aelter gespeichert: mit Komma)."""
+    return [h.strip() for h in str((cfg or {}).get("haushalt", "") or "").split(",") if h.strip()]
+
+
+def gehoert_zu(cfg: dict | None, haushalt: str | None) -> bool:
+    """Sieht dieser Haushalt den Brother (Geraeteliste, Einstellungen)?
+    `haushalt` None = Verwaltung ueber alle Haushalte: sieht ihn immer."""
+    if haushalt is None:
+        return True
+    liste = haushalte_von(cfg)
+    return not liste or haushalt in liste
+
+
+def zustaendig(cfg: dict | None, haushalt: str) -> bool:
+    """Darf dieser Haushalt am Brother drucken (aktiv, Adresse, Haushalt)?"""
     cfg = cfg or {}
     if not cfg.get("aktiv") or not str(cfg.get("url", "")).strip():
         return False
-    liste = [h.strip() for h in str(cfg.get("haushalt", "") or "").split(",") if h.strip()]
-    return not liste or (haushalt or "") in liste
+    return gehoert_zu(cfg, haushalt or "")
+
+
+def standardziel(cfg: dict | None, haushalt: str) -> str:
+    """Wohin gedruckt wird, wenn niemand waehlt: "brother" oder "terminal".
+
+    Eingestellt unter `brother.standardziel`; ist der Brother fuer den
+    Haushalt nicht eingerichtet, bleibt nur das Terminal.
+    """
+    if not zustaendig(cfg, haushalt):
+        return "terminal"
+    return "terminal" if (cfg or {}).get("standardziel") == "terminal" else "brother"
+
+
+def an_brother(cfg: dict | None, haushalt: str, wunsch: str | None = None) -> bool:
+    """Geht dieser Druck an den Brother? `wunsch` = "brother"/"terminal" aus
+    der Auswahl beim Drucken, leer = Standardziel. Ein Brother-Wunsch ohne
+    eingerichteten Brother faellt aufs Terminal zurueck (die API lehnt ihn
+    vorher mit 409 ab)."""
+    if wunsch == "terminal":
+        return False
+    if wunsch == "brother":
+        return zustaendig(cfg, haushalt)
+    return standardziel(cfg, haushalt) == "brother"
 
 
 def basis_url(cfg: dict) -> str:
@@ -523,6 +567,8 @@ async def printserver_status(cfg: dict) -> dict:
         "erreichbar": True,
         "firmware": (status.get("firmware") or {}).get("version", ""),
         "drucker_verbunden": bool(drucker.get("connected")),
+        # Verbunden und ansprechbar (USB-Schnittstelle belegt).
+        "drucker_bereit": bool(drucker.get("ready", drucker.get("connected"))),
         "drucker": drucker.get("product", ""),
         "medium": brother,
         "warteschlange": status.get("queue") or {},
@@ -549,9 +595,21 @@ def _fehlertext(e: Exception) -> str:
 def _schluessel(job: PrintJob) -> str:
     """Idempotenzschluessel: die Auftragsnummer allein reicht nicht - nach
     einer neuen Datenbank faengt sie wieder bei 1 an, und der Printserver
-    hielte einen alten Auftrag fuer denselben."""
+    hielte einen alten Auftrag fuer denselben. Kam ein Auftrag ungedruckt
+    zurueck in die Schlange (`_zurueck`), zaehlt `versand` weiter - sonst
+    lieferte der Printserver beim naechsten Versuch den aufgegebenen wieder."""
     stempel = int(job.created_at.timestamp()) if job.created_at else 0
-    return f"lm-{job.id}-{stempel}"
+    versand = int((job.payload or {}).get("versand", 0) or 0)
+    return f"lm-{job.id}-{stempel}" + (f"-{versand}" if versand else "")
+
+
+def _zurueck(job: PrintJob, grund: str) -> None:
+    """Auftrag, der den Drucker nachweislich nie erreicht hat, wieder einreihen."""
+    payload = {k: v for k, v in (job.payload or {}).items() if k != "brother"}
+    payload["versand"] = int(payload.get("versand", 0) or 0) + 1
+    job.payload = payload
+    job.status = "queued"
+    job.error = grund[:255]
 
 
 async def _senden(client: httpx.AsyncClient, job: PrintJob, cfg: dict,
@@ -583,7 +641,8 @@ async def _senden(client: httpx.AsyncClient, job: PrintJob, cfg: dict,
         job.error = _fehlertext(httpx.HTTPStatusError("", request=r.request, response=r))[:255]
         return True
     antwort = r.json()
-    job.payload = {**payload, "brother": {"id": int(antwort.get("job_id", 0)), "key": schluessel}}
+    job.payload = {**payload, "brother": {"id": int(antwort.get("job_id", 0)), "key": schluessel,
+                                          "zustand": "queued"}}
     job.status = "sent"
     job.attempts += 1
     job.error = ""
@@ -601,12 +660,24 @@ async def _abgleichen(client: httpx.AsyncClient, job: PrintJob) -> bool:
     daten = r.json().get("job") if r.status_code == 200 else None
     if not daten or (info.get("key") and daten.get("key") != info.get("key")):
         # Der Printserver kennt den Auftrag nicht mehr: neu gestartet (die
-        # Liste lebt im RAM) oder ueberlaufen. Ob gedruckt wurde, weiss
-        # niemand - lieber fragen als doppelt drucken.
-        job.status = "failed"
-        job.error = "Printserver neu gestartet – ob gedruckt wurde, ist unbekannt"
+        # Liste lebt im RAM) oder ueberlaufen. Stand er zuletzt nur in seiner
+        # Schlange, hat er den Drucker nie erreicht - dann einfach noch einmal.
+        # Sonst weiss niemand, ob gedruckt wurde: lieber fragen als doppelt.
+        if info.get("zustand") in ("queued", "waiting"):
+            _zurueck(job, "Printserver neu gestartet – Etikett wartet erneut")
+        else:
+            job.status = "failed"
+            job.error = "Printserver neu gestartet – ob gedruckt wurde, ist unbekannt"
         return True
     zustand, meldung = daten.get("state", ""), daten.get("message", "")
+    if zustand != info.get("zustand"):
+        job.payload = {**(job.payload or {}), "brother": {**info, "zustand": zustand}}
+    # Aufgegeben, ohne je an den Drucker gegangen zu sein (attempts 0): der
+    # Printserver wartet hoechstens 10 min auf einen ausgeschalteten Drucker.
+    # Dann wartet das Etikett eben hier weiter.
+    if zustand in ("failed", "incomplete") and not int(daten.get("attempts", 0) or 0):
+        _zurueck(job, DRUCKER_AUS if "not connected" in meldung else f"wartet auf Drucker: {meldung}")
+        return True
     if zustand in FERTIG_GUT:
         job.status, job.error = "done", ""
     elif zustand == "unknown":
@@ -698,38 +769,54 @@ async def durchgang() -> bool:
             return False
         printer_cfg = await settings_store.get(session, "printer", {}) or {}
         vorher = {j.id: (j.status, j.error) for j in jobs}
-        erreichbar, abweichung = True, ""
+        erreichbar, sperre = True, ""
         async with _client(cfg) as client:
-            if any(j.status == "queued" for j in jobs):
-                status = await printserver_status(cfg)
-                medium = status.get("medium")
-                cfg = mit_medium(cfg, medium)
-                soll = erwartet(profil_aus(cfg), cfg)
-                abweichung = medium_abweichung(soll, medium)
-                schlange = status.get("warteschlange") or {}
-                if abweichung and not schlange.get("active_id") and not schlange.get("queued"):
-                    # Der gemerkte Stand kann von vor dem Rollenwechsel sein.
-                    frisch = await _medium_live(client)
-                    if frisch is not None:
-                        abweichung = medium_abweichung(soll, frisch)
-            for job in jobs:
-                if job.status == "sent":
-                    erreichbar = await _abgleichen(client, job)
-                elif abweichung:
-                    job.error = abweichung[:255]
-                    continue
-                else:
-                    erreichbar = await _senden(client, job, cfg, printer_cfg)
+            # Erst abgleichen, was schon beim Printserver liegt - das macht
+            # Platz und holt ungedruckt Aufgegebenes zurueck.
+            for job in [j for j in jobs if j.status == "sent"]:
+                erreichbar = await _abgleichen(client, job)
                 if not erreichbar:
                     break
+            wartend = [j for j in jobs if j.status == "queued"]
+            if erreichbar and wartend:
+                status = await printserver_status(cfg)
+                if not status.get("erreichbar"):
+                    sperre, erreichbar = status.get("fehler", "Printserver nicht erreichbar"), False
+                elif not status.get("drucker_bereit"):
+                    # Drucker aus oder nicht angesteckt: nichts abschicken,
+                    # alles wartet hier und geht raus, sobald er wieder da ist.
+                    sperre = DRUCKER_AUS
+                else:
+                    medium = status.get("medium")
+                    cfg = mit_medium(cfg, medium)
+                    soll = erwartet(profil_aus(cfg), cfg)
+                    sperre = medium_abweichung(soll, medium)
+                    schlange = status.get("warteschlange") or {}
+                    if sperre and not schlange.get("active_id") and not schlange.get("queued"):
+                        # Der gemerkte Stand kann von vor dem Rollenwechsel sein.
+                        frisch = await _medium_live(client)
+                        if frisch is not None:
+                            sperre = medium_abweichung(soll, frisch)
+            platz = MAX_UNTERWEGS - sum(1 for j in jobs if j.status == "sent")
+            for job in wartend:
+                if sperre:
+                    job.error = sperre[:255]
+                    continue
+                if platz <= 0:
+                    break
+                erreichbar = await _senden(client, job, cfg, printer_cfg)
+                if not erreichbar:
+                    break
+                platz -= job.status == "sent"
         geaendert = any(vorher[j.id] != (j.status, j.error) for j in jobs)
         await session.commit()
         offen = any(j.status in ("queued", "sent") for j in jobs)
     if geaendert:
         from ..device.hub import hub
         await hub.notify_ui("labels")
-    if not erreichbar or abweichung:
-        # Beides heilt nicht in zwei Sekunden: seltener nachsehen.
+    if not erreichbar or sperre:
+        # Heilt nicht in zwei Sekunden (Drucker aus, falsche Rolle,
+        # Printserver weg): seltener nachsehen.
         raise ConnectionError
     return offen
 

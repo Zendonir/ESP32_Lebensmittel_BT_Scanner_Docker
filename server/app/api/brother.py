@@ -6,14 +6,14 @@ Die Einstellungen selbst laufen wie alle anderen ueber
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..device.hub import hub
 from ..models import PrintJob
-from ..services import brother, settings_store
+from ..services import brother, haushalte, settings_store
 
 router = APIRouter(prefix="/api/brother", tags=["etiketten"])
 
@@ -25,16 +25,41 @@ def _profil_kurz(profil: dict) -> dict:
     return {k: v for k, v in profil.items() if k not in ("kopf",)}
 
 
+@router.get("/geraet")
+async def geraet(request: Request, session: AsyncSession = Depends(get_session)):
+    """Der Brother als Geraet (Seite Terminals): Haushalt und Erreichbarkeit.
+
+    In der Ansicht eines Haushalts, dem er nicht gehoert: nur `sichtbar: false`.
+    """
+    cfg = await settings_store.get(session, "brother", {}) or {}
+    haushalt = await haushalte.aus_anfrage(request, session)
+    if not brother.basis_url(cfg) or not brother.gehoert_zu(cfg, haushalt):
+        return {"sichtbar": False, "eingerichtet": bool(brother.basis_url(cfg))}
+    return {
+        "sichtbar": True,
+        "eingerichtet": True,
+        "aktiv": bool(cfg.get("aktiv")),
+        "haushalt": ", ".join(brother.haushalte_von(cfg)),
+        "url": brother.basis_url(cfg),
+        "printserver": await brother.printserver_status(cfg),
+    }
+
+
 @router.get("")
-async def zustand(session: AsyncSession = Depends(get_session)):
+async def zustand(request: Request, session: AsyncSession = Depends(get_session)):
     """Einstellungen, was der Printserver meldet, das Profil und die letzten Auftraege."""
     gespeichert = await settings_store.get(session, "brother", {}) or {}
+    haushalt = await haushalte.aus_anfrage(request, session)
+    if not brother.gehoert_zu(gespeichert, haushalt):
+        # Gehoert einem anderen Haushalt - hier nicht einstellbar.
+        return {"sichtbar": False}
     printserver = await brother.printserver_status(gespeichert)
     cfg = brother.mit_medium(gespeichert, printserver.get("medium"))
     printer_cfg = await settings_store.get(session, "printer", {}) or {}
-    jobs = (await session.execute(
-        select(PrintJob).where(PrintJob.ziel == brother.ZIEL)
-        .order_by(PrintJob.id.desc()).limit(10))).scalars().all()
+    stmt = select(PrintJob).where(PrintJob.ziel == brother.ZIEL)
+    if haushalt:
+        stmt = stmt.where(PrintJob.household == haushalt)
+    jobs = (await session.execute(stmt.order_by(PrintJob.id.desc()).limit(10))).scalars().all()
     profil = brother.profil_aus(cfg)
     try:
         vorschau = brother.vorschau_png(cfg, printer_cfg)
@@ -45,6 +70,7 @@ async def zustand(session: AsyncSession = Depends(get_session)):
     breite, zeilen = brother.masse(profil, cfg)
     soll = brother.erwartet(profil, cfg)
     return {
+        "sichtbar": True,
         "einstellungen": brother.oeffentlich(gespeichert),
         "printserver": printserver,
         "profil": _profil_kurz(profil),

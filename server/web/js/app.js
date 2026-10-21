@@ -1,7 +1,7 @@
 // Admin-Oberflaeche. Bewusst ohne Framework und ohne Build-Schritt: das Image
 // bleibt klein und die Dateien sind das, was ausgeliefert wird.
 
-import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, gruppieren, mengeText, EINHEITEN, liveConnect, tagEditor, HAUSHALT, fremdHinweis } from './api.js';
+import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, gruppieren, mengeText, EINHEITEN, liveConnect, tagEditor, HAUSHALT, fremdHinweis, zielOptionen, zielAuswerten, zielVorauswahl } from './api.js';
 import { mhdKamera } from './mhdkamera.js';
 import { zipBlob, base64ZuBytes } from './zip.js';
 
@@ -257,6 +257,19 @@ async function editItem(label) {
 }
 
 // -------------------------------------------------------------------- Etiketten
+// "Drucken an" (zielOptionen/zielAuswerten in api.js, auch fuers Handy).
+// Vorausgewaehlt ist das Standardziel; eine eigene Wahl bleibt beim
+// Neuladen der Seite stehen.
+async function loadZiele() {
+  const ziele = await get('/api/labels/ziele');
+  const sel = $('#label-ziel');
+  const vorher = sel.dataset.gewaehlt;
+  const optionen = zielOptionen(ziele);
+  sel.innerHTML = optionen.map(([w, t]) => `<option value="${esc(w)}">${esc(t)}</option>`).join('');
+  sel.value = zielVorauswahl(optionen, ziele.standard, vorher);
+}
+$('#label-ziel').addEventListener('change', (ev) => { ev.target.dataset.gewaehlt = ev.target.value; });
+
 $('#label-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const form = new FormData(ev.target);
@@ -264,10 +277,14 @@ $('#label-form').addEventListener('submit', async (ev) => {
   body.quantity = parseFloat(body.quantity) || 1;
   body.count = parseInt(body.count, 10) || 1;
   body.print = form.get('print') === 'on';
+  delete body.ziel_wahl;
+  zielAuswerten(form.get('ziel_wahl'), body);
   try {
     const res = await post('/api/labels', body);
     toast(`${res.labels.length} Etikett(en): ${res.labels.join(', ')}`, 'success');
+    const ziel = $('#label-ziel').value;
     ev.target.reset();
+    $('#label-ziel').value = ziel;
     await Promise.all([loadLabels(), loadDashboard()]);
   } catch (e) { toast(e.message, 'error'); }
 });
@@ -281,6 +298,7 @@ async function loadLabels() {
   loadLayouts().catch((e) => toast(e.message, 'error'));
   hochformatHinweise().catch(() => {});
   loadBrother().catch((e) => { $('#brother-status').textContent = e.message; });
+  loadZiele().catch(() => {});
   $('#roll-state').textContent = roll.size
     ? `${roll.remaining} von ${roll.size} Etiketten übrig (${roll.used} verbraucht)`
     : 'Keine Rollengröße hinterlegt.';
@@ -300,8 +318,21 @@ $('#roll-set').addEventListener('click', async () => {
 });
 // Brother am WLAN-Printserver (services/brother.py). Die Felder speichern sich
 // selbst (data-setting); hier nur Zustand, Testdruck und Treiberdatei.
+// Haushalt des Brother: ein Haushalt oder alle - dieselbe Auswahl wie bei
+// den Terminals (Karte unter Terminals und Feld unter Etiketten).
+function brotherHaushaltOptionen(haushalte, wert) {
+  return [['', 'alle Haushalte'], ...haushalte.map((h) => [h.name, h.name])]
+    .map(([w, t]) => `<option value="${esc(w)}" ${w === wert ? 'selected' : ''}>${esc(t)}</option>`).join('');
+}
+
 async function loadBrother() {
-  const z = await get('/api/brother');
+  const [z, haushalte] = await Promise.all([get('/api/brother'), get('/api/households')]);
+  // Gehoert er einem anderen Haushalt, ist er in dieser Ansicht nicht da.
+  $('#brother-setup').hidden = !z.sichtbar;
+  if (!z.sichtbar) return;
+  if ($('#brother-haushalt') !== document.activeElement) {
+    $('#brother-haushalt').innerHTML = brotherHaushaltOptionen(haushalte, z.einstellungen.haushalt || '');
+  }
   const ps = z.printserver;
   const medium = ps.medium || {};
   $('#brother-status').innerHTML = ps.erreichbar
@@ -871,21 +902,62 @@ function deviceCard(d) {
       </div></div>`;
 }
 
+// Der Brother am WLAN-Printserver als Geraet neben den Terminals - mit
+// demselben Haushalt-Feld. Eingestellt wird er unter Etiketten.
+function brotherCard(b) {
+  const ps = b.printserver || {};
+  const m = ps.medium || {};
+  return `<div class="card">
+    <div class="row"><h2 style="margin:0;flex:1"><span class="dot ${ps.erreichbar ? 'on' : ''}"></span>Brother-Etikettendrucker</h2>
+      <span class="pill">WLAN-Printserver</span>${ps.firmware ? `<span class="pill">Firmware ${esc(ps.firmware)}</span>` : ''}</div>
+    <div class="muted">${esc(b.url)}${b.aktiv ? '' : ' · <b>nicht aktiv</b>'}</div>
+    ${ps.erreichbar ? `<div class="telemetry">
+        <div><b>${ps.drucker_verbunden ? esc(ps.drucker || 'verbunden') : 'nicht angeschlossen'}</b><span>Drucker</span></div>
+        <div><b>${m.media_width_mm ? `${m.media_width_mm}${m.media_length_mm ? ` × ${m.media_length_mm}` : ''} mm` : '–'}</b><span>Medium</span></div>
+        <div><b>${(ps.warteschlange || {}).queued ?? 0}</b><span>wartend</span></div>
+      </div>` : `<div class="notice warn" style="margin-top:12px"><span>${esc(ps.fehler || 'nicht erreichbar')}</span></div>`}
+    <label class="field" style="margin-top:12px">Haushalt
+      <select data-brother-haus>${brotherHaushaltOptionen(state.haushalte || [], b.haushalt || '')}</select></label>
+    <div class="row" style="margin-top:10px">
+      <button class="sm" data-brother-einstellen>Einstellungen</button>
+    </div></div>`;
+}
+
 async function loadDevices() {
-  [state.devices, state.haushalte] = await Promise.all([get('/api/devices'), get('/api/households')]);
+  let brotherGeraet;
+  [state.devices, state.haushalte, brotherGeraet] = await Promise.all([
+    get('/api/devices'), get('/api/households'),
+    get('/api/brother/geraet').catch(() => ({ sichtbar: false }))]);
+  const brotherHtml = brotherGeraet.sichtbar ? brotherCard(brotherGeraet) : '';
   // Die Anleitung bleibt erreichbar, wenn schon Terminals da sind - fuer das
   // zweite oder ein ersetztes Geraet.
-  $('#devices-list').innerHTML = state.devices.length
+  $('#devices-list').innerHTML = brotherHtml + (state.devices.length
     ? state.devices.map(deviceCard).join('')
       + `<details class="card" style="grid-column:1/-1"><summary><h2 style="display:inline">Weiteres Terminal einrichten</h2></summary>
           ${terminalEinrichten(true)}</details>`
-    : terminalEinrichten();
+    : terminalEinrichten());
 
   const sim = $('#sim-card');
   if (sim) sim.hidden = !state.devices.some((d) => d.online);
   $('#sim-device').innerHTML = state.devices.filter((d) => d.online).map((d) =>
     `<option value="${esc(d.device_id)}">${esc(d.name || d.device_id)}</option>`).join('');
 }
+
+document.addEventListener('change', async (ev) => {
+  const sel = ev.target.closest('select[data-brother-haus]');
+  if (!sel) return;
+  try {
+    await patch('/api/settings/brother', { haushalt: sel.value });
+    toast(sel.value ? `Brother gehört jetzt zu ${sel.value}` : 'Brother gehört jetzt allen Haushalten', 'success');
+    await loadDevices();
+  } catch (e) { toast(e.message, 'error'); }
+});
+document.addEventListener('click', (ev) => {
+  if (ev.target.closest('button[data-brother-einstellen]')) {
+    showPage('labels');
+    setTimeout(() => $('#brother-setup')?.scrollIntoView({ behavior: 'smooth' }), 150);
+  }
+});
 
 document.addEventListener('click', async (ev) => {
   const b = ev.target.closest('button[data-dev-beep],button[data-dev-reboot],button[data-dev-update],button[data-dev-forget]');
@@ -1554,7 +1626,7 @@ liveConnect(
       inventory: ['dashboard', 'inventory', 'labels'],
       catalog: ['catalog', 'templates', 'labels'],
       devices: ['devices', 'dashboard', 'labels'],
-      settings: ['system', 'labels'],
+      settings: ['system', 'labels', 'devices'],
       labels: ['labels'],
     }[msg.event] || [];
     if (relevant.includes(activePage())) refreshActive().catch(() => {});

@@ -194,6 +194,7 @@ class Printserver:
         self.antwort_verlieren = 0      # so viele POSTs annehmen, Antwort "geht verloren"
         self.medium = {"media_width_mm": 51}   # gemerkter Stand (cached)
         self.medium_live = None                # Antwort auf eine frische Abfrage
+        self.drucker_an = True
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.method == "POST" and request.url.path == "/api/print/raw":
@@ -203,6 +204,7 @@ class Printserver:
                     return httpx.Response(200, json={"ok": True, "job_id": job["id"],
                                                      "duplicate": True, "job": job})
             job = {"id": self.naechste, "state": "queued", "message": "queued", "key": key,
+                   "attempts": 0,
                    "name": request.headers.get("X-Job-Name", ""), "size": len(request.content)}
             self.jobs[job["id"]] = job
             self.naechste += 1
@@ -222,8 +224,9 @@ class Printserver:
             return httpx.Response(200, json={"ok": True, "printer": {"status": self.medium}})
         if request.url.path == "/api/status":
             return httpx.Response(200, json={
-                "firmware": {"version": "0.4.1-dev"}, "printer": {"connected": True,
-                                                                 "product": "TD-2020"},
+                "firmware": {"version": "0.4.1-dev"},
+                "printer": {"connected": self.drucker_an, "ready": self.drucker_an,
+                            "product": "TD-2020"},
                 "brother": {"status": self.medium}, "queue": {"queued": 0},
                 "print_api": {"job_key": True}, "wifi": {"ip": "192.168.1.50"}})
         return httpx.Response(404)
@@ -247,6 +250,20 @@ def client(server):
             yield c
         finally:
             c.patch("/api/settings/brother", json={"aktiv": False, "url": ""})
+            _offene_brother_auftraege_abschliessen()
+
+
+def _offene_brother_auftraege_abschliessen():
+    """Jeder Test hat seinen eigenen nachgestellten Printserver - offene
+    Auftraege eines Tests kaemen beim naechsten sonst ungedruckt zurueck in
+    die Schlange und belegten dort die Plaetze (MAX_UNTERWEGS)."""
+    async def schliessen():
+        async with session_scope() as session:
+            for job in (await session.execute(select(PrintJob).where(
+                    PrintJob.ziel == "brother", PrintJob.status.in_(("queued", "sent"))))).scalars():
+                job.status = "done"
+            await session.commit()
+    _run(schliessen())
 
 
 def _durchgang():
@@ -301,9 +318,12 @@ def test_druckerfehler_und_neustart(client, server):
     a = client.post("/api/labels", json={"name": "Bohnen"}).json()["labels"][0]
     b = client.post("/api/labels", json={"name": "Mais"}).json()["labels"][0]
     _durchgang()
-    server.jobs[_job(a).payload["brother"]["id"]].update(state="failed",
+    server.jobs[_job(a).payload["brother"]["id"]].update(state="failed", attempts=1,
                                                          message="printer error: Cover open")
-    del server.jobs[_job(b).payload["brother"]["id"]]          # Printserver neu gestartet
+    # b war schon beim Drucker, dann startet der Printserver neu: Ergebnis offen.
+    server.jobs[_job(b).payload["brother"]["id"]].update(state="printing", attempts=1)
+    _durchgang()
+    del server.jobs[_job(b).payload["brother"]["id"]]
     _durchgang()
     ja, jb = _job(a), _job(b)
     assert ja.status == "failed" and "Cover open" in ja.error
@@ -340,13 +360,14 @@ def test_nachdruck_und_testdruck_gehen_an_den_brother(client, server):
     r = client.post("/api/brother/test")
     assert r.status_code == 200
     _durchgang()
-    _durchgang()
     async def zaehlen():
         async with session_scope() as session:
-            return (await session.execute(select(PrintJob).where(
+            return [j.status for j in (await session.execute(select(PrintJob).where(
                 PrintJob.ziel == "brother", PrintJob.label.in_((label, "TEST")),
-                PrintJob.status == "sent"))).scalars().all()
-    assert len(_run(zaehlen())) >= 3
+                PrintJob.status.in_(("queued", "sent"))))).scalars()]
+    stand = _run(zaehlen())
+    # Etikett, Nachdruck und Testetikett - hoechstens zwei zugleich beim Printserver.
+    assert len(stand) == 3 and stand.count("sent") == brother.MAX_UNTERWEGS
 
 
 def test_treiberdatei_hochladen_und_zustand(client, server):
@@ -394,3 +415,161 @@ def test_falsche_rolle_haelt_zurueck_bis_sie_passt(client, server):
         assert _job(label).status == "sent" and len(server.jobs) == 1
     finally:
         client.patch("/api/settings/brother", json={"breite_mm": 0, "laenge_mm": 0})
+
+
+# ----------------------------------------------------- Ziel und Standardziel
+def test_standardziel_und_wunsch():
+    cfg = {"aktiv": True, "url": "http://x"}
+    assert brother.standardziel(cfg, "A") == "brother"
+    assert brother.standardziel({**cfg, "standardziel": "terminal"}, "A") == "terminal"
+    assert brother.standardziel({}, "A") == "terminal"          # kein Brother eingerichtet
+    assert brother.an_brother(cfg, "A") is True
+    assert brother.an_brother(cfg, "A", "terminal") is False
+    assert brother.an_brother({**cfg, "standardziel": "terminal"}, "A", "brother") is True
+    assert brother.an_brother({}, "A", "brother") is False      # API lehnt vorher ab
+
+
+def test_drucken_an_waehlen_und_standardziel(client, server):
+    z = client.get("/api/labels/ziele").json()
+    assert z["standard"] == "brother" and z["brother"] is True
+
+    angelegt = []
+
+    def ziel_von(body):
+        r = client.post("/api/labels", json={"name": f"Bohne {uuid.uuid4().hex[:5]}", **body})
+        assert r.status_code == 201, r.text
+        angelegt.append(r.json()["labels"][0])
+        return _job(angelegt[-1]).ziel
+
+    assert ziel_von({}) == "brother"                    # Standardziel
+    assert ziel_von({"ziel": "terminal"}) == ""         # ausdruecklich Terminal
+    client.patch("/api/settings/brother", json={"standardziel": "terminal"})
+    try:
+        assert client.get("/api/labels/ziele").json()["standard"] == "terminal"
+        assert ziel_von({}) == ""                       # neues Standardziel
+        assert ziel_von({"ziel": "brother"}) == "brother"
+        # Nachdruck folgt dem Standardziel, auf Wunsch dem Brother.
+        label = client.post("/api/labels", json={"name": "Nudeln"}).json()["labels"][0]
+        angelegt.append(label)
+        assert client.post(f"/api/labels/reprint/{label}").json().get("ziel") is None
+        assert client.post(f"/api/labels/reprint/{label}?ziel=brother").json()["ziel"] == "brother"
+    finally:
+        client.patch("/api/settings/brother", json={"standardziel": "brother"})
+
+        # Offene Terminal-Auftraege nicht den folgenden Tests (Druckziel) hinterlassen.
+        async def aufraeumen():
+            async with session_scope() as session:
+                for job in (await session.execute(select(PrintJob).where(
+                        PrintJob.label.in_(angelegt), PrintJob.ziel == ""))).scalars():
+                    await session.delete(job)
+                await session.commit()
+        _run(aufraeumen())
+
+
+def test_brother_waehlen_ohne_brother_lehnt_ab():
+    with TestClient(app) as c:
+        assert c.get("/api/labels/ziele").json()["standard"] == "terminal"
+        r = c.post("/api/labels", json={"name": "Reis", "ziel": "brother"})
+        assert r.status_code == 409 and "nicht eingerichtet" in r.text
+        # Nachdruck ebenso: kein stiller Wechsel auf das Terminal.
+        label = c.post("/api/labels", json={"name": "Reis", "print": False}).json()["labels"][0]
+        r = c.post(f"/api/labels/reprint/{label}?ziel=brother")
+        assert r.status_code == 409 and "nicht eingerichtet" in r.text
+        assert c.post("/api/labels", json={"name": "Reis", "ziel": "quatsch"}).status_code == 422
+
+
+# ------------------------------------------------- Haushalt wie bei Terminals
+def test_gehoert_zu():
+    assert brother.gehoert_zu({}, "A") and brother.gehoert_zu({"haushalt": "A"}, None)
+    assert brother.gehoert_zu({"haushalt": "A"}, "A")
+    assert not brother.gehoert_zu({"haushalt": "A"}, "B")
+    assert not brother.zustaendig({"aktiv": True, "url": "http://x", "haushalt": "A"}, "B")
+
+
+def test_brother_einem_haushalt_zuweisen(client, server):
+    tag = uuid.uuid4().hex[:6]
+    a = client.post("/api/households", json={"name": f"Oben-{tag}"}).json()["id"]
+    b = client.post("/api/households", json={"name": f"Unten-{tag}"}).json()["id"]
+    try:
+        client.patch("/api/settings/brother", json={"haushalt": f"Oben-{tag}"})
+        bei_a, bei_b = {"X-Haushalt": str(a)}, {"X-Haushalt": str(b)}
+
+        # Geraeteliste: nur der Haushalt, dem er gehoert (Verwaltung sieht ihn immer).
+        assert client.get("/api/brother/geraet", headers=bei_a).json()["sichtbar"]
+        assert client.get("/api/brother/geraet", headers=bei_b).json()["sichtbar"] is False
+        assert client.get("/api/brother/geraet").json()["haushalt"] == f"Oben-{tag}"
+        assert client.get("/api/brother", headers=bei_b).json() == {"sichtbar": False}
+
+        # Drucken: nur der eigene Haushalt hat ihn zur Wahl und als Standardziel.
+        assert client.get("/api/labels/ziele", headers=bei_a).json()["brother"] is True
+        assert client.get("/api/labels/ziele", headers=bei_b).json()["standard"] == "terminal"
+        r = client.post("/api/labels", json={"name": "Hafer", "ziel": "brother"}, headers=bei_b)
+        assert r.status_code == 409
+
+        # Umbenennen zieht die Zuordnung nach.
+        assert client.patch(f"/api/households/{a}", json={"name": f"Dach-{tag}"}).status_code == 200
+        assert client.get("/api/brother/geraet").json()["haushalt"] == f"Dach-{tag}"
+    finally:
+        client.patch("/api/settings/brother", json={"haushalt": ""})
+
+
+def test_geraeteliste_zeigt_nur_terminals_des_haushalts():
+    tag = uuid.uuid4().hex[:6]
+    with TestClient(app) as c:
+        a = c.post("/api/households", json={"name": f"Links-{tag}"}).json()["id"]
+        c.post("/api/households", json={"name": f"Rechts-{tag}"})
+
+        async def anlegen():
+            from app.models import Device
+            async with session_scope() as session:
+                session.add(Device(device_id=f"t-l-{tag}", household=f"Links-{tag}"))
+                session.add(Device(device_id=f"t-r-{tag}", household=f"Rechts-{tag}"))
+                await session.commit()
+        _run(anlegen())
+        try:
+            eigene = {d["device_id"] for d in c.get("/api/devices", headers={"X-Haushalt": str(a)}).json()}
+            assert eigene == {f"t-l-{tag}"}
+            alle = {d["device_id"] for d in c.get("/api/devices").json()}
+            assert {f"t-l-{tag}", f"t-r-{tag}"} <= alle
+        finally:
+            c.delete(f"/api/devices/t-l-{tag}")
+            c.delete(f"/api/devices/t-r-{tag}")
+
+
+
+# ------------------------------------------------- Drucker aus: alles wartet
+def test_drucker_aus_alles_wartet_und_druckt_danach(client, server):
+    server.drucker_an = False
+    labels = client.post("/api/labels", json={"name": "Linsen", "count": 4}).json()["labels"]
+    assert _durchgang() == "unerreichbar"            # seltener nachsehen
+    assert not server.jobs                            # nichts abgeschickt
+    assert {(_job(lb).status, _job(lb).error) for lb in labels} == {("queued", brother.DRUCKER_AUS)}
+
+    # Eingeschaltet: alle gehen raus, hoechstens zwei zugleich beim Printserver.
+    server.drucker_an = True
+    for _ in range(4):
+        _durchgang()
+        for job in server.jobs.values():
+            job["state"], job["attempts"] = "printed", 1
+    assert all(_job(lb).status == "done" for lb in labels)
+    assert len(server.jobs) == 4
+
+
+def test_printserver_gibt_auf_ohne_zu_drucken_etikett_wartet_weiter(client, server):
+    label = client.post("/api/labels", json={"name": "Graupen"}).json()["labels"][0]
+    _durchgang()
+    erster = server.jobs[_job(label).payload["brother"]["id"]]
+    # Nach 10 min ohne Drucker gibt der Printserver auf - gedruckt wurde nichts.
+    erster.update(state="failed", message="printer not connected", attempts=0)
+    _durchgang()                        # zurueck in die Schlange und gleich wieder hinaus
+    job = _job(label)
+    zweiter = server.jobs[job.payload["brother"]["id"]]
+    assert job.status == "sent" and job.payload["versand"] == 1
+    assert zweiter is not erster and zweiter["key"] != erster["key"]   # kein "duplicate"
+
+    # Printserver neu gestartet, waehrend der Auftrag dort nur wartete: noch einmal.
+    server.jobs.clear()
+    _durchgang()
+    job = _job(label)
+    assert job.status == "sent" and job.payload["versand"] == 2
+    assert len(server.jobs) == 1

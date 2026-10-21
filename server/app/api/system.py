@@ -57,10 +57,16 @@ async def ws_ticket():
 
 
 @router.get("/devices", response_model=list[DeviceOut])
-async def list_devices(session: AsyncSession = Depends(get_session)):
+async def list_devices(request: Request, session: AsyncSession = Depends(get_session)):
+    """Terminals - in der Ansicht eines Haushalts nur seine eigenen."""
+    from ..services import haushalte
     from ..services import scanner as scanner_info
 
-    rows = (await session.execute(select(Device).order_by(Device.name))).scalars().all()
+    stmt = select(Device).order_by(Device.name)
+    haushalt = await haushalte.aus_anfrage(request, session)
+    if haushalt:
+        stmt = stmt.where(Device.household == haushalt)
+    rows = (await session.execute(stmt)).scalars().all()
     online = set(hub.online_ids())
     out = []
     for row in rows:

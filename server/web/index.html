@@ -131,8 +131,10 @@
             <label class="field">Lagerort<select name="location" data-fill="locations"></select></label>
             <label class="field">Anzahl Etiketten<input name="count" type="number" min="1" max="20" value="1"></label>
           </div>
-          <div class="row" style="margin-top:14px">
+          <div class="row" style="margin-top:14px;gap:12px;flex-wrap:wrap;align-items:flex-end">
             <label class="row tight"><input type="checkbox" name="print" checked> drucken</label>
+            <label class="field" style="margin:0">Drucken an
+              <select name="ziel_wahl" id="label-ziel"></select></label>
             <button class="primary" type="submit">Anlegen</button>
           </div>
         </form>
@@ -249,14 +251,20 @@
       </div>
       <p class="muted" style="margin:6px 0 0">Ein Brother TD-2020A am
         ESP32-Printserver. Aktiv druckt er die Etiketten statt des Druckers am
-        Terminal – beim Einlagern, beim Nachdruck und vom Handy.</p>
+        Terminal – je nach Standardziel oder Auswahl „Drucken an“ beim Anlegen.</p>
       <div class="settings-grid" style="margin-top:10px">
         <label class="field">Adresse des Printservers
           <input data-setting="brother.url" type="text" placeholder="http://192.168.1.50">
           <span class="hint">IP-Adresse – „.local“ löst der Container meist nicht auf</span></label>
-        <label class="field">Nur für Haushalte
-          <input data-setting="brother.haushalt" type="text" placeholder="alle">
-          <span class="hint">leer = alle, sonst Namen mit Komma</span></label>
+        <label class="field">Haushalt
+          <select data-setting="brother.haushalt" id="brother-haushalt"></select>
+          <span class="hint">wie bei den Terminals – auch unter Terminals einstellbar</span></label>
+        <label class="field">Standardziel
+          <select data-setting="brother.standardziel">
+            <option value="brother">Brother (WLAN)</option>
+            <option value="terminal">Drucker am Terminal</option>
+          </select>
+          <span class="hint">gilt am Terminal, beim Nachdruck und als Vorauswahl im Web</span></label>
         <label class="field">Etikettenbreite (mm)
           <input data-setting="brother.breite_mm" data-art="float" type="number" min="0" max="62" step="0.5">
           <span class="hint">quer zum Druckkopf · 0 = aus der Treiberdatei</span></label>
