@@ -256,9 +256,9 @@
         <label class="field">Adresse des Printservers
           <input data-setting="brother.url" type="text" placeholder="http://192.168.1.50">
           <span class="hint">IP-Adresse – „.local“ löst der Container meist nicht auf</span></label>
-        <label class="field">Nur für Haushalte
-          <input data-setting="brother.haushalt" type="text" placeholder="alle">
-          <span class="hint">leer = alle, sonst Namen mit Komma</span></label>
+        <label class="field">Haushalt
+          <select data-setting="brother.haushalt" id="brother-haushalt"></select>
+          <span class="hint">wie bei den Terminals – auch unter Terminals einstellbar</span></label>
         <label class="field">Standardziel
           <select data-setting="brother.standardziel">
             <option value="brother">Brother (WLAN)</option>

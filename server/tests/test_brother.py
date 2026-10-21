@@ -451,3 +451,61 @@ def test_brother_waehlen_ohne_brother_lehnt_ab():
         r = c.post("/api/labels", json={"name": "Reis", "ziel": "brother"})
         assert r.status_code == 409 and "nicht eingerichtet" in r.text
         assert c.post("/api/labels", json={"name": "Reis", "ziel": "quatsch"}).status_code == 422
+
+
+# ------------------------------------------------- Haushalt wie bei Terminals
+def test_gehoert_zu():
+    assert brother.gehoert_zu({}, "A") and brother.gehoert_zu({"haushalt": "A"}, None)
+    assert brother.gehoert_zu({"haushalt": "A"}, "A")
+    assert not brother.gehoert_zu({"haushalt": "A"}, "B")
+    assert not brother.zustaendig({"aktiv": True, "url": "http://x", "haushalt": "A"}, "B")
+
+
+def test_brother_einem_haushalt_zuweisen(client, server):
+    tag = uuid.uuid4().hex[:6]
+    a = client.post("/api/households", json={"name": f"Oben-{tag}"}).json()["id"]
+    b = client.post("/api/households", json={"name": f"Unten-{tag}"}).json()["id"]
+    try:
+        client.patch("/api/settings/brother", json={"haushalt": f"Oben-{tag}"})
+        bei_a, bei_b = {"X-Haushalt": str(a)}, {"X-Haushalt": str(b)}
+
+        # Geraeteliste: nur der Haushalt, dem er gehoert (Verwaltung sieht ihn immer).
+        assert client.get("/api/brother/geraet", headers=bei_a).json()["sichtbar"]
+        assert client.get("/api/brother/geraet", headers=bei_b).json()["sichtbar"] is False
+        assert client.get("/api/brother/geraet").json()["haushalt"] == f"Oben-{tag}"
+        assert client.get("/api/brother", headers=bei_b).json() == {"sichtbar": False}
+
+        # Drucken: nur der eigene Haushalt hat ihn zur Wahl und als Standardziel.
+        assert client.get("/api/labels/ziele", headers=bei_a).json()["brother"] is True
+        assert client.get("/api/labels/ziele", headers=bei_b).json()["standard"] == "terminal"
+        r = client.post("/api/labels", json={"name": "Hafer", "ziel": "brother"}, headers=bei_b)
+        assert r.status_code == 409
+
+        # Umbenennen zieht die Zuordnung nach.
+        assert client.patch(f"/api/households/{a}", json={"name": f"Dach-{tag}"}).status_code == 200
+        assert client.get("/api/brother/geraet").json()["haushalt"] == f"Dach-{tag}"
+    finally:
+        client.patch("/api/settings/brother", json={"haushalt": ""})
+
+
+def test_geraeteliste_zeigt_nur_terminals_des_haushalts():
+    tag = uuid.uuid4().hex[:6]
+    with TestClient(app) as c:
+        a = c.post("/api/households", json={"name": f"Links-{tag}"}).json()["id"]
+        c.post("/api/households", json={"name": f"Rechts-{tag}"})
+
+        async def anlegen():
+            from app.models import Device
+            async with session_scope() as session:
+                session.add(Device(device_id=f"t-l-{tag}", household=f"Links-{tag}"))
+                session.add(Device(device_id=f"t-r-{tag}", household=f"Rechts-{tag}"))
+                await session.commit()
+        _run(anlegen())
+        try:
+            eigene = {d["device_id"] for d in c.get("/api/devices", headers={"X-Haushalt": str(a)}).json()}
+            assert eigene == {f"t-l-{tag}"}
+            alle = {d["device_id"] for d in c.get("/api/devices").json()}
+            assert {f"t-l-{tag}", f"t-r-{tag}"} <= alle
+        finally:
+            c.delete(f"/api/devices/t-l-{tag}")
+            c.delete(f"/api/devices/t-r-{tag}")

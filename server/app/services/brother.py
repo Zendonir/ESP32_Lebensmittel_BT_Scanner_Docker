@@ -129,17 +129,27 @@ class BrotherFehler(Exception):
 ZIELE = ("brother", "terminal")
 
 
-def zustaendig(cfg: dict | None, haushalt: str) -> bool:
-    """Darf dieser Haushalt am Brother drucken (aktiv, Adresse, Haushalt)?
+def haushalte_von(cfg: dict | None) -> list[str]:
+    """Haushalte, denen der Brother gehoert - leer = allen (wie ein Terminal
+    ohne Zuordnung gibt es ihn sonst nicht; aelter gespeichert: mit Komma)."""
+    return [h.strip() for h in str((cfg or {}).get("haushalt", "") or "").split(",") if h.strip()]
 
-    `haushalt` in den Einstellungen leer = alle Haushalte; mehrere Namen mit
-    Komma getrennt.
-    """
+
+def gehoert_zu(cfg: dict | None, haushalt: str | None) -> bool:
+    """Sieht dieser Haushalt den Brother (Geraeteliste, Einstellungen)?
+    `haushalt` None = Verwaltung ueber alle Haushalte: sieht ihn immer."""
+    if haushalt is None:
+        return True
+    liste = haushalte_von(cfg)
+    return not liste or haushalt in liste
+
+
+def zustaendig(cfg: dict | None, haushalt: str) -> bool:
+    """Darf dieser Haushalt am Brother drucken (aktiv, Adresse, Haushalt)?"""
     cfg = cfg or {}
     if not cfg.get("aktiv") or not str(cfg.get("url", "")).strip():
         return False
-    liste = [h.strip() for h in str(cfg.get("haushalt", "") or "").split(",") if h.strip()]
-    return not liste or (haushalt or "") in liste
+    return gehoert_zu(cfg, haushalt or "")
 
 
 def standardziel(cfg: dict | None, haushalt: str) -> str:
