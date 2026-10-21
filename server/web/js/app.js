@@ -315,7 +315,7 @@ async function loadBrother() {
   $('#brother-profil').innerHTML = `<span class="muted">${p.quelle === 'treiber'
     ? `Aus ${esc(p.datei || 'Treiberdatei')}: ${esc(p.medium || '')} ${p.breite_mm} × ${p.laenge_mm || '–'} mm,
        ${p.zeilen} Zeilen zu ${p.bytes} Bytes, Befehl ${esc(p.zeilenbefehl)}${p.tiff ? ', gepackt' : ''}.`
-    : 'Ohne Treiberdatei: Standardbefehle, am TD-2020A noch ungeprüft.'}
+    : 'Ohne Treiberdatei: Befehle nach der Brother-Rasterreferenz TD-2020.'}
     Gedruckt wird ${z.masse_mm.breite} × ${z.masse_mm.laenge} mm.</span>`;
   $('#brother-vorschau').src = z.vorschau || '';
   $('#brother-treiber-fig').hidden = !p.vorschau;

@@ -31,7 +31,9 @@ def _run(coro):
 def _treiberdatei(form: str = "g2", tiff: bool = True, zeilen: int = 40) -> bytes:
     """So etwas, wie der Treiber schreibt: Kopf mit ESC i K und ESC i d,
     Leerzeilen als Z, Daten TIFF-gepackt."""
-    kopf = (b"\x00" * 200 + b"\x1b@" + b"\x1bia\x01"
+    # ESC i U mit 127 Bytes Medieninformation - mit einem falschen "ESC i z" darin.
+    medien = (b"\x1biz" + bytes(range(124)))[:127]
+    kopf = (b"\x00" * 200 + b"\x1b@" + b"\x1bia\x01" + b"\x1biUw\x01" + medien
             + b"\x1biz" + bytes([0x8E, 0x0B, 51, 26]) + zeilen.to_bytes(4, "little") + b"\x00\x00"
             + b"\x1biM\x00" + b"\x1biK\x08" + b"\x1bid\x00\x00"
             + (b"M\x02" if tiff else b""))
@@ -82,9 +84,10 @@ def test_standardprofil_ohne_treiberdatei():
     profil = brother.profil_aus(cfg)
     assert profil["quelle"] == "standard"
     daten = brother.auftrag_bauen({"test": True}, cfg)
-    assert daten.startswith(b"\x00" * 200 + b"\x1b@\x1bia\x01\x1biz")
+    assert daten.startswith(b"\x00" * 200 + b"\x1b@\x1bia\x01\x1biz\x8e\x0b\x33\x1a")
+    assert b"\x1biM\x00\x1bid\x00\x00M\x00" in daten[:260]
     assert daten.endswith(b"\x1a")
-    zeilen = 26 * 8 - 24
+    zeilen = 157                    # Referenz 2.3.2: 51 x 26 mm -> 157 Druckzeilen
     # ESC i z traegt die Zeilenzahl, jede Zeile ist "g 00h 38h" + 56 Bytes.
     z = daten.find(b"\x1biz")
     assert int.from_bytes(daten[z + 7:z + 11], "little") == zeilen
@@ -93,6 +96,33 @@ def test_standardprofil_ohne_treiberdatei():
     assert rumpf[:3] == b"g\x00\x38"
     gelesen = brother.analysieren(daten)
     assert gelesen["zeilen"] == zeilen and gelesen["zeilenbefehl"] == "g00n"
+
+
+def test_masse_nach_referenz():
+    assert brother.masse(brother.standard_profil(51, 26), {}) == (382, 157)
+    assert brother.masse(brother.standard_profil(30, 30), {}) == (216, 192)
+    assert brother.masse(brother.standard_profil(60, 60), {}) == (448, 432)
+    endlos = brother.standard_profil(58, 0)
+    assert bytes.fromhex(endlos["kopf"])[206:213] == b"\x1biz\x86\x0a\x3a\x00"
+    assert b"\x1bid\x18\x00" in bytes.fromhex(endlos["kopf"])     # 3 mm Rand
+
+
+def test_tiff_zeile_nie_laenger_als_57_bytes():
+    standard = brother.standard_profil(51, 26)
+    profil = {**standard, "tiff": True, "leerzeile_z": True,
+              "kopf": standard["kopf"].replace("4d00", "4d02")}    # M 02h: TIFF
+    import random
+    zufall = random.Random(7)
+    bild = brother.Image.new("1", (448, 157), 1)       # volle Kopfbreite
+    for x in range(448):                # Rauschen: PackBits waere laenger als 56
+        for y in range(0, 157, 2):
+            if zufall.random() < 0.5:
+                bild.putpixel((x, y), 0)
+    daten = brother.rasterdaten(bild, profil, {})
+    gelesen = brother.analysieren(daten)
+    assert gelesen["bytes"] == 56 and gelesen["zeilen"] == 157
+    i = len(bytes.fromhex(profil["kopf"]))
+    assert daten[i:i + 3] == b"g\x00\x39"           # 57 Bytes: Kopfbyte 37h + 56
 
 
 def test_drehung_und_spiegeln_aendern_das_bild():
@@ -120,6 +150,9 @@ def test_masse_vom_drucker_ohne_treiberdatei():
     medium = {"media_width_mm": 62, "media_length_mm": 29}
     assert brother.mit_medium({}, medium) == {"breite_mm": 62, "laenge_mm": 29}
     assert brother.mit_medium({"breite_mm": 50}, medium)["breite_mm"] == 50
+    endlos = brother.mit_medium({}, {"media_width_mm": 58, "media_length_mm": 0,
+                                     "media_type": "continuous_tape"})
+    assert endlos["endlos"] and brother.profil_aus(endlos)["laenge_mm"] == 0
     mit_profil = {"profil": {"kopf": "00", "zeilen": 10}}
     assert brother.mit_medium(mit_profil, medium) is mit_profil
 
@@ -300,7 +333,7 @@ def test_treiberdatei_hochladen_und_zustand(client, server):
     z = client.get("/api/brother").json()
     assert z["printserver"]["erreichbar"] and z["printserver"]["job_key"]
     assert z["profil"]["datei"] == "etikett.prn"
-    assert z["masse_mm"] == {"breite": 51.0, "laenge": 5.0}
+    assert z["masse_mm"] == {"breite": 47.8, "laenge": 5.0}    # Druckbereich 382 Pins
     assert z["vorschau"].startswith("data:image/png")
 
     r = client.post("/api/brother/treiberdatei",

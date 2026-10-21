@@ -22,13 +22,13 @@ Ablauf eines Etiketts:
    TD-2020A den Auftrag (am Geraet gemessen); deshalb gibt es keinen
    selbsttaetigen Nachdruck, sondern "failed" mit der Meldung des Druckers.
 
-Die Rasterbefehle: Die Brother-Referenz fuer den TD-2020 darf nicht
-weitergegeben werden, und was davon fuer den TD-2020A genau gilt, ist nur am
-Geraet zu klaeren. Deshalb wird nicht geraten: `analysieren()` liest eine
-Druckdatei des Originaltreibers (die mit dem ersten Testdruck ohnehin
-entsteht) und uebernimmt daraus Kopf, Zeilenbefehl, Zeilenlaenge, Kompression
-und Zeilenzahl. Ohne Treiberdatei gilt `STANDARD` - aufgebaut wie in den
-Brother-Rasterreferenzen der Schwestermodelle, aber am TD-2020A ungeprueft.
+Die Rasterbefehle stehen in der "Raster Command Reference TD-2020/2120N/
+2130N" (Version 1.01, darf nicht weitergegeben werden - deshalb hier nur die
+Fakten, die der Code braucht). `standard_profil()` baut den Auftrag danach.
+Was der Originaltreiber fuer den TD-2020A tatsaechlich schickt, kann
+`analysieren()` aus einer Druckdatei uebernehmen (Kopf samt Zusatzbefehlen
+wie ESC i U, Kompression, Zeilenzahl) - das hat Vorrang, weil es genau das
+ist, womit der Drucker schon einmal richtig gedruckt hat.
 """
 
 from __future__ import annotations
@@ -51,8 +51,37 @@ log = logging.getLogger(__name__)
 
 DOTS_PER_MM = 8           # 203 dpi
 
-# Druckkopf des TD-2020: 56 mm = 448 Punkte = 56 Bytes je Rasterzeile.
+# Druckkopf des TD-2020: 448 Pins = 56 Bytes je Rasterzeile (Referenz 2.3.5).
 KOPF_BYTES = 56
+
+# Druckbereich quer (Pins) je Etikettenbreite in mm, Referenz 2.3.5. Er liegt
+# mittig auf dem Kopf: 51 mm = 33 Pins frei, 382 bedruckt, 33 frei.
+DRUCKBREITE = {51: 382, 30: 216, 40: 296, 50: 376, 60: 448, 57: 432, 58: 440}
+# Druckzeilen gestanzter Etiketten (Breite, Laenge) -> Zeilen, Referenz 2.3.2:
+# je 3 mm (24 Punkte) am Anfang und Ende haelt der Drucker frei.
+DRUCKLAENGE = {(51, 26): 157, (30, 30): 192, (40, 40): 272, (40, 50): 352,
+               (40, 60): 432, (50, 30): 192, (60, 60): 432}
+# Endlosband: Rand (ESC i d) mindestens 3 mm, Laenge 12 mm bis 1 m.
+ENDLOS_RAND = 24
+ENDLOS_ZEILEN_MIN, ENDLOS_ZEILEN_MAX = 96, 7992
+
+
+def _punkte(mm: float) -> int:
+    return int(round(mm * 203 / 25.4))
+
+
+def druckbreite(breite_mm: float) -> int:
+    """Bedruckbare Pins quer; unbekannte Breite: 1,5 mm Rand je Seite."""
+    bekannt = DRUCKBREITE.get(int(round(breite_mm)))
+    if bekannt:
+        return bekannt
+    return max(8, min(KOPF_BYTES * 8, _punkte(breite_mm) - 24))
+
+
+def druckzeilen(breite_mm: float, laenge_mm: float) -> int:
+    """Druckzeilen eines gestanzten Etiketts; unbekannt: 3 mm Rand je Ende."""
+    bekannt = DRUCKLAENGE.get((int(round(breite_mm)), int(round(laenge_mm))))
+    return bekannt or max(24, _punkte(laenge_mm) - 48)
 
 # Raster-Zeilenbefehle, wie sie in Brother-Druckdateien vorkommen:
 #   "g00n"  g 00h n  Daten   (n Bytes, ein Laengenbyte - QL/RJ/TD)
@@ -137,24 +166,26 @@ def _esc_i_z(daten: bytes, stelle: int) -> dict:
 
 
 def standard_profil(breite_mm: float, laenge_mm: float) -> dict:
-    """Profil ohne Treiberdatei - Aufbau wie in den Brother-Rasterreferenzen.
+    """Profil ohne Treiberdatei, nach der Rasterreferenz (Kap. 2.1, 4).
 
-    Invalidate, ESC @, Rastermodus (ESC i a 1), Druckinformation (ESC i z),
-    Rand 0 (ESC i d), keine Kompression; die Zeilen als `g 00h n`, Ende mit
-    1Ah (drucken und vorschieben).
+    Invalidate (200 x 00h), ESC @, Rastermodus (ESC i a 01h), Druckinformation
+    (ESC i z: Medientyp/Breite/Laenge gueltig, "printer recovery always on"),
+    ESC i M 00h, Rand (ESC i d: gestanzt 0, Endlos mindestens 24 Punkte),
+    keine Kompression (M 00h); jede Zeile `g 00h 38h` + 56 Bytes, Ende 1Ah.
+    `laenge_mm` 0 = Endlosband, dann 30 mm je Etikett.
     """
     breite = int(round(breite_mm))
     laenge = int(round(laenge_mm))
     gestanzt = laenge > 0
     gueltig = 0x02 | 0x04 | 0x80 | (0x08 if gestanzt else 0)
+    rand = 0 if gestanzt else ENDLOS_RAND
     kopf = (b"\x00" * 200 + b"\x1b@" + b"\x1bia\x01"
             + b"\x1biz" + bytes([gueltig, 0x0B if gestanzt else 0x0A,
                                  min(breite, 255), min(laenge, 255)])
             + b"\x00\x00\x00\x00" + b"\x00\x00"
-            + b"\x1bid\x00\x00" + b"M\x00")
-    # Bedruckbar bei gestanzten Etiketten: Laenge abzueglich je 1,5 mm am
-    # Anfang und Ende, die der Drucker selbst freihaelt.
-    zeilen = max(DOTS_PER_MM * 5, laenge * DOTS_PER_MM - 24) if gestanzt else 30 * DOTS_PER_MM
+            + b"\x1biM\x00" + b"\x1bid" + rand.to_bytes(2, "little") + b"M\x00")
+    zeilen = (druckzeilen(breite, laenge) if gestanzt
+              else min(ENDLOS_ZEILEN_MAX, max(ENDLOS_ZEILEN_MIN, 30 * DOTS_PER_MM)))
     return {
         "quelle": "standard",
         "kopf": kopf.hex(),
@@ -171,7 +202,8 @@ def standard_profil(breite_mm: float, laenge_mm: float) -> dict:
 
 
 # Laengen der Parameter von ESC i <x>, soweit sie in Druckdateien vorkommen.
-_ESC_I_LAENGE = {"a": 1, "z": 10, "M": 1, "A": 1, "K": 1, "d": 2, "S": 0, "!": 1, "U": 15}
+# ESC i U w 01h + 127 Bytes Medieninformation (Referenz, Kap. 4).
+_ESC_I_LAENGE = {"a": 1, "z": 10, "M": 1, "A": 1, "K": 1, "d": 2, "S": 0, "!": 1, "U": 129}
 
 
 def _zeilen_lesen(daten: bytes, start: int, form: str, tiff: bool) -> dict | None:
@@ -229,7 +261,11 @@ def analysieren(daten: bytes) -> dict:
     """
     if len(daten) < 20:
         raise BrotherFehler("Datei ist zu kurz für einen Druckauftrag")
+    # ESC i z, aber nicht innerhalb der 127 Bytes eines ESC i U w 01h davor.
+    zusatz = [i for i in range(len(daten)) if daten.startswith(b"\x1biUw\x01", i)]
     z = daten.find(b"\x1biz")
+    while z >= 0 and any(u < z < u + 3 + _ESC_I_LAENGE["U"] for u in zusatz):
+        z = daten.find(b"\x1biz", z + 1)
     if z < 0 or z + 13 > len(daten):
         raise BrotherFehler(
             "Keine Druckinformation (ESC i z) gefunden – ist das eine Rasterdatei des "
@@ -319,6 +355,9 @@ def mit_medium(cfg: dict, medium: dict | None) -> dict:
         neu["breite_mm"] = medium["media_width_mm"]
     if not float(neu.get("laenge_mm") or 0) and medium.get("media_length_mm"):
         neu["laenge_mm"] = medium["media_length_mm"]
+    # Endlosband meldet Laenge 0 - dann nicht auf 26-mm-Etiketten zurueckfallen.
+    if medium.get("media_type") == "continuous_tape" and not float(cfg.get("laenge_mm") or 0):
+        neu["endlos"] = True
     return neu
 
 
@@ -327,7 +366,8 @@ def profil_aus(cfg: dict) -> dict:
     profil = cfg.get("profil") or {}
     if profil.get("kopf") and profil.get("zeilen"):
         return profil
-    return standard_profil(float(cfg.get("breite_mm") or 51), float(cfg.get("laenge_mm") or 26))
+    laenge = 0.0 if cfg.get("endlos") else float(cfg.get("laenge_mm") or 26)
+    return standard_profil(float(cfg.get("breite_mm") or 51), laenge)
 
 
 # ------------------------------------------------------------------ Zeichnen
@@ -335,8 +375,7 @@ def masse(profil: dict, cfg: dict) -> tuple[int, int]:
     """(Breite quer zum Druckkopf, Zeilen in Laufrichtung) in Punkten."""
     kopf = int(profil.get("bytes") or KOPF_BYTES) * 8
     breite_mm = float(cfg.get("breite_mm") or 0) or float(profil.get("breite_mm") or 0) or 51
-    breite = min(kopf, int(round(breite_mm * DOTS_PER_MM)))
-    return breite, int(profil["zeilen"])
+    return min(kopf, druckbreite(breite_mm)), int(profil["zeilen"])
 
 
 def _zeichnen(item: dict, printer_cfg: dict, w: int, h: int) -> Image.Image:
@@ -414,10 +453,17 @@ def rasterdaten(bild: Image.Image, profil: dict, cfg: dict) -> bytes:
     form = profil.get("zeilenbefehl", "g00n")
     for y in range(zeilen):
         zeile = roh[y * zeilen_bytes:(y + 1) * zeilen_bytes]
-        if profil.get("leerzeile_z") and not any(zeile):
+        tiff = bool(profil.get("tiff"))
+        # Z gilt nur mit TIFF-Kompression (Referenz, "Zero raster graphics").
+        if tiff and profil.get("leerzeile_z") and not any(zeile):
             aus += b"Z"
             continue
-        daten = hochformat.packbits(zeile) if profil.get("tiff") else zeile
+        daten = zeile
+        if tiff:
+            daten = hochformat.packbits(zeile)
+            # Laenger als die Zeile: als ein woertlicher Block (n-1, 56 Bytes).
+            if len(daten) > zeilen_bytes:
+                daten = bytes([zeilen_bytes - 1]) + zeile
         if form == "g00n":
             aus += b"g\x00" + bytes([len(daten)])
         else:
