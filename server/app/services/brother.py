@@ -48,7 +48,7 @@ from PIL import Image, ImageDraw
 from sqlalchemy import select
 
 from ..models import PrintJob
-from . import hochformat
+from . import brother_layouts, hochformat
 
 log = logging.getLogger(__name__)
 
@@ -123,6 +123,7 @@ UNTERWEGS = ("queued", "waiting", "printing")
 BEISPIEL = {
     "label": "TEST",
     "name": "Testetikett Brother",
+    "brand": "Marke",
     "subcategory": "",
     "expiry_date": "2026-12-31",
     "added_date": "2026-10-21",
@@ -494,10 +495,15 @@ def masse(profil: dict, cfg: dict) -> tuple[int, int]:
     return min(kopf, druckbreite(breite_mm)), int(profil["zeilen"])
 
 
-def _zeichnen(item: dict, printer_cfg: dict, w: int, h: int) -> Image.Image:
-    """Etikett in Leserichtung. Hochkant wie das Hochformat am Terminal (Code
+def _zeichnen(item: dict, printer_cfg: dict, w: int, h: int,
+              layout: str = "standard") -> Image.Image:
+    """Etikett in Leserichtung. Ein gewaehltes Layout (`brother.layout`) zeichnet
+    `brother_layouts`; "standard" ist das bisherige: hochkant wie das Hochformat am Terminal (Code
     unten); quer steht der Code rechts mit der Nummer darunter - unten
     angehaengt bliebe auf 26 mm Hoehe fuer Name und MHD kein Platz."""
+    bild = brother_layouts.zeichnen(layout, item, w, h)
+    if bild is not None:
+        return bild
     label = item.get("label", "")
     if w <= h * 1.2 or not label:
         return hochformat.zeichnen(item, printer_cfg, w, h)
@@ -527,7 +533,8 @@ def etikett_bild(item: dict, profil: dict, cfg: dict, printer_cfg: dict | None =
                  rahmen: bool = False) -> Image.Image:
     """Das Etikett in Druckrichtung: Breite = Etikett quer, Hoehe = Zeilen.
 
-    Gezeichnet wird wie das Hochformat am Terminal (`hochformat.zeichnen`).
+    Gezeichnet wird im Layout `cfg["layout"]` (`brother_layouts`), bei
+    "standard" wie das Hochformat am Terminal (`hochformat.zeichnen`).
     `drehung` legt fest, wie man das Etikett nachher liest: "keine" mit der
     ersten Druckzeile oben, "180" umgekehrt, "links"/"rechts" hochkant.
     """
@@ -535,7 +542,7 @@ def etikett_bild(item: dict, profil: dict, cfg: dict, printer_cfg: dict | None =
     drehung = cfg.get("drehung", "keine")
     hochkant = drehung in ("links", "rechts")
     w, h = (zeilen, breite) if hochkant else (breite, zeilen)
-    bild = _zeichnen(item, printer_cfg or {}, w, h)
+    bild = _zeichnen(item, printer_cfg or {}, w, h, cfg.get("layout") or "standard")
     if rahmen:
         ImageDraw.Draw(bild).rectangle([0, 0, w - 1, h - 1], outline=0, width=2)
     if drehung == "180":

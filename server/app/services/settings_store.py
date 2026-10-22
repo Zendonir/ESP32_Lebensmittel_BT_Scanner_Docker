@@ -147,6 +147,9 @@ DEFAULTS: dict[str, Any] = {
         "laenge_mm": 0,
         # Wie das Etikett gelesen wird: keine | 180 | links | rechts.
         "drehung": "keine",
+        # Aufbau des Etiketts: Schluessel aus brother_layouts.LAYOUTS.
+        # Hochkant gelesene Etiketten nehmen ausser bei "standard" immer "hochkant".
+        "layout": "standard",
         # Verschiebung quer zum Druckkopf (+ = zur Seite der hoeheren Punkte).
         "versatz_mm": 0,
         # Zeilen gespiegelt senden - falls der Drucker sie von rechts erwartet.
