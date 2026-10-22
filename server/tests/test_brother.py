@@ -125,16 +125,26 @@ def test_tiff_zeile_nie_laenger_als_57_bytes():
     assert daten[i:i + 3] == b"g\x00\x39"           # 57 Bytes: Kopfbyte 37h + 56
 
 
-def test_drehung_und_spiegeln_aendern_das_bild():
+def test_drehung_aendert_das_bild():
     profil = brother.standard_profil(51, 26)
     item = {"label": "LEB000002", "name": "Kartoffelsuppe", "expiry_date": "2026-11-30"}
     gerade = brother.rasterdaten(brother.etikett_bild(item, profil, {}), profil, {})
     gedreht = brother.rasterdaten(brother.etikett_bild(item, profil, {"drehung": "links"}),
                                   profil, {})
-    gespiegelt = brother.rasterdaten(brother.etikett_bild(item, profil, {}), profil,
-                                     {"spiegeln": True})
-    assert len({gerade, gedreht, gespiegelt}) == 3
-    assert len(gerade) == len(gedreht) == len(gespiegelt)
+    assert gerade != gedreht and len(gerade) == len(gedreht)
+
+
+def test_zeilen_gehen_immer_gespiegelt_hinaus():
+    """Der TD-2020A druckt eine Rasterzeile seitenverkehrt - wir spiegeln fest."""
+    profil = brother.standard_profil(51, 26)                # 382 Pins mittig in 448
+    bild = brother.Image.new("1", (382, profil["zeilen"]), 1)
+    for y in range(profil["zeilen"]):
+        bild.putpixel((0, y), 0)                            # links auf dem Etikett
+    daten = brother.rasterdaten(bild, profil, {"spiegeln": False})
+    zeile = daten[len(bytes.fromhex(profil["kopf"])) + 3:][:56]
+    # Links im Bild (Punkt 33 von 448) landet rechts im Kopf (Punkt 414).
+    assert zeile[414 // 8] == 0x80 >> (414 % 8)
+    assert not any(zeile[:51]) and not any(zeile[52:])
 
 
 @pytest.mark.parametrize("daten,meldung", [
@@ -404,7 +414,7 @@ def test_treiberdatei_hochladen_und_zustand(client, server):
 
 def test_einstellungen_haben_vorgaben():
     for schluessel in ("aktiv", "url", "haushalt", "breite_mm", "laenge_mm", "drehung",
-                       "versatz_mm", "spiegeln", "profil"):
+                       "versatz_mm", "profil"):
         assert schluessel in settings_store.DEFAULTS["brother"]
     assert settings_store.DEFAULTS["brother"]["drehung"] in brother.DREHUNGEN
 
@@ -686,3 +696,11 @@ def test_vorlage_geht_vor_frueher_eingetragener_breite():
     assert (soll["breite_mm"], soll["laenge_mm"]) == (51, 26)
     medium = {"media_type": "die_cut_labels", "media_width_mm": 51, "media_length_mm": 26}
     assert brother.medium_abweichung(soll, medium) == ""
+
+
+def test_testetikett_wartet_hoechstens_einmal(client, server):
+    """Mehrmals "Testetikett drucken" bei ausgeschaltetem Drucker - nur eins kommt."""
+    erstes = client.post("/api/brother/test").json()
+    zweites = client.post("/api/brother/test").json()
+    assert zweites["job"] == erstes["job"] and zweites["wartet"] is True
+    assert "wartet" not in erstes

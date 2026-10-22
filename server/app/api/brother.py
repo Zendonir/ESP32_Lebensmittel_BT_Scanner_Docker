@@ -148,6 +148,13 @@ async def testdruck(session: AsyncSession = Depends(get_session)):
     cfg = await settings_store.get(session, "brother", {}) or {}
     if not brother.basis_url(cfg):
         raise HTTPException(409, "Erst die Adresse des Printservers eintragen")
+    # Ein Testetikett genuegt: wer bei ausgeschaltetem Drucker mehrmals drueckt,
+    # bekam sonst alle auf einmal, sobald der Drucker da war.
+    offen = (await session.execute(select(PrintJob).where(
+        PrintJob.ziel == brother.ZIEL, PrintJob.label == "TEST",
+        PrintJob.status.in_(("queued", "sent"))).limit(1))).scalar_one_or_none()
+    if offen is not None:
+        return {"ok": True, "job": offen.id, "wartet": True}
     job = PrintJob(label="TEST", payload={"test": True}, status="queued", ziel=brother.ZIEL)
     session.add(job)
     await session.commit()

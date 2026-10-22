@@ -416,7 +416,11 @@ document.addEventListener('change', async (ev) => {
   } catch (e) { toast(e.message, 'error'); }
 });
 $('#brother-test').addEventListener('click', async () => {
-  try { await post('/api/brother/test'); toast('Testetikett an den Brother gesendet', 'success'); }
+  try {
+    const r = await post('/api/brother/test');
+    toast(r.wartet ? 'Ein Testetikett wartet schon – es kommt, sobald der Drucker bereit ist'
+      : 'Testetikett an den Brother gesendet', 'success');
+  }
   catch (e) { toast(e.message, 'error'); }
 });
 $('#brother-datei-laden').addEventListener('click', async () => {
