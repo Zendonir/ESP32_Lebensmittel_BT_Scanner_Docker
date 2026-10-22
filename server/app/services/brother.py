@@ -36,8 +36,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import functools
 import io
+import json
 import logging
+import pathlib
 from typing import Any
 
 import httpx
@@ -45,7 +48,7 @@ from PIL import Image, ImageDraw
 from sqlalchemy import select
 
 from ..models import PrintJob
-from . import hochformat
+from . import brother_layouts, hochformat
 
 log = logging.getLogger(__name__)
 
@@ -120,6 +123,7 @@ UNTERWEGS = ("queued", "waiting", "printing")
 BEISPIEL = {
     "label": "TEST",
     "name": "Testetikett Brother",
+    "brand": "Marke",
     "subcategory": "",
     "expiry_date": "2026-12-31",
     "added_date": "2026-10-21",
@@ -209,14 +213,15 @@ def _esc_i_z(daten: bytes, stelle: int) -> dict:
     }
 
 
-def standard_profil(breite_mm: float, laenge_mm: float) -> dict:
+def standard_profil(breite_mm: float, laenge_mm: float, endlos_mm: float = 30) -> dict:
     """Profil ohne Treiberdatei, nach der Rasterreferenz (Kap. 2.1, 4).
 
     Invalidate (200 x 00h), ESC @, Rastermodus (ESC i a 01h), Druckinformation
     (ESC i z: Medientyp/Breite/Laenge gueltig, "printer recovery always on"),
     ESC i M 00h, Rand (ESC i d: gestanzt 0, Endlos mindestens 24 Punkte),
     keine Kompression (M 00h); jede Zeile `g 00h 38h` + 56 Bytes, Ende 1Ah.
-    `laenge_mm` 0 = Endlosband, dann 30 mm je Etikett.
+    `laenge_mm` 0 = Endlosband; ein Etikett ist dann `endlos_mm` lang - der
+    Drucker schiebt den Rand (ESC i d) vor und nach dem Druckbereich vor.
     """
     breite = int(round(breite_mm))
     laenge = int(round(laenge_mm))
@@ -229,7 +234,8 @@ def standard_profil(breite_mm: float, laenge_mm: float) -> dict:
             + b"\x00\x00\x00\x00" + b"\x00\x00"
             + b"\x1biM\x00" + b"\x1bid" + rand.to_bytes(2, "little") + b"M\x00")
     zeilen = (druckzeilen(breite, laenge) if gestanzt
-              else min(ENDLOS_ZEILEN_MAX, max(ENDLOS_ZEILEN_MIN, 30 * DOTS_PER_MM)))
+              else min(ENDLOS_ZEILEN_MAX,
+                       max(ENDLOS_ZEILEN_MIN, _punkte(endlos_mm or 30) - 2 * ENDLOS_RAND)))
     return {
         "quelle": "standard",
         "kopf": kopf.hex(),
@@ -352,6 +358,7 @@ def analysieren(daten: bytes) -> dict:
     laengen = {len(zl) for zl in gelesen["zeilen"] if zl is not None}
     bytes_je_zeile = max(laengen) if laengen else KOPF_BYTES
     info = _esc_i_z(daten, z)
+    medien = medieninfo(daten[:start])
     ende = daten[gelesen["ende"]:gelesen["ende"] + 1]
     return {
         "quelle": "treiber",
@@ -368,8 +375,39 @@ def analysieren(daten: bytes) -> dict:
         "medium": {0x0A: "Endlos", 0x0B: "Etiketten"}.get(info["medium"], f"0x{info['medium']:02X}"),
         "zeilen_im_kopf": info["zeilen"],
         "weitere_seiten": gelesen["weitere_seiten"],
+        **medien,
         "vorschau": _vorschau_png(gelesen["zeilen"], bytes_je_zeile),
     }
+
+
+def medieninfo(kopf: bytes) -> dict:
+    """Was der Treiber in ESC i U w 01h (127 Bytes) ueber das Papierformat sagt.
+
+    Nicht dokumentiert; abgelesen aus Treiberdateien fuer 51x26, 50x30,
+    40x50, 40x60 und 57x32 - die Werte stimmen dort mit der Tabelle 2.3.5 der
+    Rasterreferenz ueberein:
+      [6..7]   Pins links frei (51 mm: 33, 40 mm: 76, 57 mm: 8)
+      [8..9]   bedruckbare Pins quer (51 mm: 382)
+      [10..11] Druckzeilen (51x26: 157)
+      dahinter der Name des Papierformats im Treiber ("40mm x 50mm").
+    """
+    i = kopf.find(b"\x1biUw\x01")
+    if i < 0 or len(kopf) < i + 5 + 12:
+        return {}
+    b = kopf[i + 5:i + 5 + 127]
+    name, lauf = "", bytearray()
+    for c in b[12:] + b"\x00":
+        if 0x20 <= c < 0x7F:
+            lauf.append(c)
+            continue
+        if len(lauf) >= 3:
+            name = lauf.decode("ascii").strip()
+            break
+        lauf.clear()
+    pins = b[8] | b[9] << 8
+    if not 0 < pins <= KOPF_BYTES * 8:
+        return {}
+    return {"medium_name": name, "rand_links_pins": b[6] | b[7] << 8, "druckbreite_pins": pins}
 
 
 def _vorschau_png(zeilen: list[bytes | None], breite_bytes: int) -> str:
@@ -392,40 +430,94 @@ def mit_medium(cfg: dict, medium: dict | None) -> dict:
     Der TD-2020A nennt im Status (ESC i S, ueber den Printserver) Breite und
     bei gestanzten Etiketten auch die Laenge der eingelegten Rolle.
     """
-    if (cfg.get("profil") or {}).get("kopf") or not medium:
+    if vorlage(cfg) or not medium:
+        return cfg
+    # Ausdruecklich gewaehltes Medium (Etiketten/Endlosband) gilt, was immer
+    # der Drucker meldet - passt die Rolle nicht, haelt medium_abweichung an.
+    if cfg.get("medium") in ("etiketten", "endlos"):
         return cfg
     neu = dict(cfg)
     if not float(neu.get("breite_mm") or 0) and medium.get("media_width_mm"):
         neu["breite_mm"] = medium["media_width_mm"]
-    if not float(neu.get("laenge_mm") or 0) and medium.get("media_length_mm"):
-        neu["laenge_mm"] = medium["media_length_mm"]
-    # Endlosband meldet Laenge 0 - dann nicht auf 26-mm-Etiketten zurueckfallen.
-    if medium.get("media_type") == "continuous_tape" and not float(cfg.get("laenge_mm") or 0):
+    if medium.get("media_type") == "continuous_tape":
+        # Endlosband: die eingetragene Laenge ist die Laenge je Etikett.
         neu["endlos"] = True
+    elif not float(neu.get("laenge_mm") or 0) and medium.get("media_length_mm"):
+        neu["laenge_mm"] = medium["media_length_mm"]
     return neu
 
 
-def profil_aus(cfg: dict) -> dict:
-    """Gespeichertes Profil oder das Standardprofil zu den eingestellten Massen."""
+# Etikettensorten aus Druckdateien des Brother-Treibers (je Groesse der Kopf
+# bis zur ersten Rasterzeile, samt Medieninformation ESC i U). Wer eine
+# waehlt, bekommt genau die Befehle, mit denen der Treiber diese Sorte druckt.
+_VORLAGEN_DATEI = pathlib.Path(__file__).with_name("brother_vorlagen.json")
+
+
+KEINE_VORLAGE = "keine"
+
+
+@functools.lru_cache(maxsize=1)
+def vorlagen() -> dict[str, dict]:
+    daten = json.loads(_VORLAGEN_DATEI.read_text(encoding="utf-8"))
+    return {v["key"]: v for v in daten["vorlagen"]}
+
+
+def vorlage(cfg: dict) -> dict | None:
+    """Profil der gewaehlten Etikettensorte (`brother.etikett`) - eine
+    mitgelieferte Vorlage oder die eingelesene Treiberdatei - sonst None."""
+    wahl = etikett_wahl(cfg)
+    if wahl in vorlagen():
+        return vorlagen()[wahl]
+    if wahl == "treiberdatei":
+        return cfg["profil"]
+    return None
+
+
+def etikett_wahl(cfg: dict) -> str:
+    """Die wirksame Etikettensorte. "keine" heisst ausdruecklich ohne Vorlage;
+    leer stammt aus der Zeit vor der Auswahl - dann gilt eine frueher
+    eingelesene Treiberdatei weiter."""
+    wahl = cfg.get("etikett") or ""
+    if wahl in vorlagen():
+        return wahl
     profil = cfg.get("profil") or {}
-    if profil.get("kopf") and profil.get("zeilen"):
-        return profil
-    laenge = 0.0 if cfg.get("endlos") else float(cfg.get("laenge_mm") or 26)
-    return standard_profil(float(cfg.get("breite_mm") or 51), laenge)
+    if wahl in ("", "treiberdatei") and profil.get("kopf") and profil.get("zeilen"):
+        return "treiberdatei"
+    return KEINE_VORLAGE
+
+
+def profil_aus(cfg: dict) -> dict:
+    """Gewaehlte Etikettensorte oder das Standardprofil zu den eingestellten Massen."""
+    gewaehlt = vorlage(cfg)
+    if gewaehlt:
+        return gewaehlt
+    endlos = cfg.get("medium") == "endlos" or (cfg.get("medium") != "etiketten" and cfg.get("endlos"))
+    if endlos:
+        return standard_profil(float(cfg.get("breite_mm") or 58), 0,
+                               float(cfg.get("laenge_mm") or 30))
+    return standard_profil(float(cfg.get("breite_mm") or 51), float(cfg.get("laenge_mm") or 26))
 
 
 # ------------------------------------------------------------------ Zeichnen
 def masse(profil: dict, cfg: dict) -> tuple[int, int]:
     """(Breite quer zum Druckkopf, Zeilen in Laufrichtung) in Punkten."""
     kopf = int(profil.get("bytes") or KOPF_BYTES) * 8
-    breite_mm = float(cfg.get("breite_mm") or 0) or float(profil.get("breite_mm") or 0) or 51
+    if profil.get("druckbreite_pins"):
+        # Aus der Medieninformation des Treibers - genau so breit wie er druckt.
+        return min(kopf, int(profil["druckbreite_pins"])), int(profil["zeilen"])
+    breite_mm = float(profil.get("breite_mm") or 0) or float(cfg.get("breite_mm") or 0) or 51
     return min(kopf, druckbreite(breite_mm)), int(profil["zeilen"])
 
 
-def _zeichnen(item: dict, printer_cfg: dict, w: int, h: int) -> Image.Image:
-    """Etikett in Leserichtung. Hochkant wie das Hochformat am Terminal (Code
+def _zeichnen(item: dict, printer_cfg: dict, w: int, h: int,
+              layout: str = "standard") -> Image.Image:
+    """Etikett in Leserichtung. Ein gewaehltes Layout (`brother.layout`) zeichnet
+    `brother_layouts`; "standard" ist das bisherige: hochkant wie das Hochformat am Terminal (Code
     unten); quer steht der Code rechts mit der Nummer darunter - unten
     angehaengt bliebe auf 26 mm Hoehe fuer Name und MHD kein Platz."""
+    bild = brother_layouts.zeichnen(layout, item, w, h)
+    if bild is not None:
+        return bild
     label = item.get("label", "")
     if w <= h * 1.2 or not label:
         return hochformat.zeichnen(item, printer_cfg, w, h)
@@ -455,7 +547,8 @@ def etikett_bild(item: dict, profil: dict, cfg: dict, printer_cfg: dict | None =
                  rahmen: bool = False) -> Image.Image:
     """Das Etikett in Druckrichtung: Breite = Etikett quer, Hoehe = Zeilen.
 
-    Gezeichnet wird wie das Hochformat am Terminal (`hochformat.zeichnen`).
+    Gezeichnet wird im Layout `cfg["layout"]` (`brother_layouts`), bei
+    "standard" wie das Hochformat am Terminal (`hochformat.zeichnen`).
     `drehung` legt fest, wie man das Etikett nachher liest: "keine" mit der
     ersten Druckzeile oben, "180" umgekehrt, "links"/"rechts" hochkant.
     """
@@ -463,7 +556,7 @@ def etikett_bild(item: dict, profil: dict, cfg: dict, printer_cfg: dict | None =
     drehung = cfg.get("drehung", "keine")
     hochkant = drehung in ("links", "rechts")
     w, h = (zeilen, breite) if hochkant else (breite, zeilen)
-    bild = _zeichnen(item, printer_cfg or {}, w, h)
+    bild = _zeichnen(item, printer_cfg or {}, w, h, cfg.get("layout") or "standard")
     if rahmen:
         ImageDraw.Draw(bild).rectangle([0, 0, w - 1, h - 1], outline=0, width=2)
     if drehung == "180":
@@ -481,7 +574,10 @@ def rasterdaten(bild: Image.Image, profil: dict, cfg: dict) -> bytes:
 
     leinwand = Image.new("1", (kopf_punkte, zeilen), 1)
     versatz = int(round(float(cfg.get("versatz_mm") or 0) * DOTS_PER_MM))
-    x = (kopf_punkte - bild.width) // 2 + versatz
+    # Wo der Treiber das Etikett hinlegt (Pins links frei), sonst mittig.
+    links = profil.get("rand_links_pins")
+    x = (int(links) if links is not None and profil.get("druckbreite_pins")
+         else (kopf_punkte - bild.width) // 2) + versatz
     leinwand.paste(bild.crop((0, 0, bild.width, min(bild.height, zeilen))), (x, 0))
     if cfg.get("spiegeln"):
         leinwand = leinwand.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
@@ -576,6 +672,67 @@ async def printserver_status(cfg: dict) -> dict:
         "job_key": bool(api.get("job_key")),
         "ip": (status.get("wifi") or {}).get("ip", ""),
     }
+
+
+# Geraeteeinstellungen des Druckers (im Drucker gespeichert). Der Printserver
+# kennt nur die mit dokumentiertem Brother-Befehl (ab Firmware 0.4.2):
+# Befehlsmodus, Druckprioritaet, 180-Grad-Drehung, Stoppposition, Wiederholung.
+EINSTELLUNG_NAMEN = {
+    "command_mode": "Befehlsmodus",
+    "print_priority": "Druckpriorität",
+    "rotate": "Druck um 180° drehen",
+    "stop_position": "Stoppposition",
+    "recovery": "Nach Fehler erneut drucken",
+}
+EINSTELLUNG_WERTE = {
+    "Speed": "Geschwindigkeit", "Quality": "Qualität", "No rotation": "nicht drehen",
+    "180 degrees": "180°", "Tear bar": "Abreißkante", "Head": "Druckkopf", "Off": "aus", "On": "ein",
+}
+# Was fuer dieses Zusammenspiel richtig ist - die Oberflaeche zeigt es daneben.
+EINSTELLUNG_EMPFOHLEN = {
+    "command_mode": (1, "Raster – die Aufträge vom Server und vom Windows-Treiber sind Rasterdaten"),
+    "recovery": (0, "aus – sonst druckt der Drucker nach einem Fehler selbst nach, und es gibt Doppel"),
+}
+
+
+async def druckereinstellungen(cfg: dict, aendern: dict[str, int] | None = None) -> dict:
+    """Druckereinstellungen ueber den Printserver lesen und optional setzen.
+
+    Wirft BrotherFehler mit einer lesbaren Meldung (nicht erreichbar, Drucker
+    beschaeftigt, Firmware zu alt)."""
+    if not basis_url(cfg):
+        raise BrotherFehler("Erst die Adresse des Printservers eintragen")
+    try:
+        async with _client(cfg) as client:
+            if aendern:
+                r = await client.post(
+                    "/api/printer/settings",
+                    content="&".join(f"{k}={int(v)}" for k, v in aendern.items()),
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    timeout=30)
+            else:
+                r = await client.get("/api/printer/settings", timeout=30)
+    except httpx.HTTPError as e:
+        raise BrotherFehler(_fehlertext(e)) from e
+    if r.status_code == 404:
+        raise BrotherFehler("Printserver-Firmware zu alt – Druckereinstellungen ab 0.4.2")
+    if r.status_code == 409:
+        raise BrotherFehler("Drucker aus oder druckt gerade – bitte gleich noch einmal")
+    if r.status_code != 200:
+        raise BrotherFehler(_fehlertext(httpx.HTTPStatusError("", request=r.request, response=r)))
+    out = []
+    for e in r.json().get("settings", []):
+        empfohlen = EINSTELLUNG_EMPFOHLEN.get(e.get("key"))
+        out.append({
+            "key": e.get("key"),
+            "name": EINSTELLUNG_NAMEN.get(e.get("key"), e.get("name", "")),
+            "wert": e.get("value", -1),
+            "optionen": [{"wert": o.get("value"), "text": EINSTELLUNG_WERTE.get(o.get("label"), o.get("label"))}
+                         for o in e.get("options", [])],
+            "empfohlen": empfohlen[0] if empfohlen else None,
+            "warum": empfohlen[1] if empfohlen else "",
+        })
+    return {"einstellungen": out}
 
 
 def _fehlertext(e: Exception) -> str:
@@ -707,7 +864,9 @@ async def _abgleichen(client: httpx.AsyncClient, job: PrintJob) -> bool:
 # statt ein verrutschtes oder verworfenes Etikett zu riskieren.
 def erwartet(profil: dict, cfg: dict) -> dict:
     """Was der Auftrag dem Drucker als Medium ankuendigt."""
-    breite = int(round(float(cfg.get("breite_mm") or 0) or float(profil.get("breite_mm") or 0)))
+    # Das Profil traegt die Breite, die der Auftrag ankuendigt (ESC i z) - bei
+    # einer Vorlage gilt eine frueher eingetragene Breite nicht.
+    breite = int(round(float(profil.get("breite_mm") or 0) or float(cfg.get("breite_mm") or 0)))
     laenge = int(profil.get("laenge_mm") or 0)
     return {"typ": "die_cut_labels" if laenge else "continuous_tape",
             "breite_mm": breite, "laenge_mm": laenge}
@@ -871,3 +1030,14 @@ def oeffentlich(cfg: dict) -> dict[str, Any]:
     profil = dict(cfg.get("profil") or {})
     profil.pop("kopf", None)
     return {**cfg, "profil": profil}
+
+
+def etikettensorten(cfg: dict) -> list[dict]:
+    """Auswahl "Etikettensorte": ohne Vorlage, die mitgelieferten, die eingelesene."""
+    liste = [{"key": KEINE_VORLAGE, "name": "keine Vorlage – Medium und Maße unten"}]
+    liste += [{"key": k, "name": v["name"]} for k, v in vorlagen().items()]
+    profil = cfg.get("profil") or {}
+    if profil.get("kopf"):
+        liste.append({"key": "treiberdatei",
+                      "name": f"eingelesene Treiberdatei ({profil.get('datei') or 'ohne Namen'})"})
+    return liste

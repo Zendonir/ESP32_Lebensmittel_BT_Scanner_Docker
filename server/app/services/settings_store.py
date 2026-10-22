@@ -133,12 +133,24 @@ DEFAULTS: dict[str, Any] = {
         # Wohin gedruckt wird, wenn beim Drucken nichts gewaehlt ist (Terminal,
         # Nachdruck, Web-Vorauswahl): "brother" | "terminal".
         "standardziel": "brother",
+        # Etikettensorte: Schluessel aus brother_vorlagen.json (Kopf aus einer
+        # Druckdatei des Brother-Treibers), "treiberdatei" (selbst eingelesen)
+        # oder "keine" = ohne Vorlage, dann gelten medium/breite_mm/laenge_mm.
+        # "" (Altbestand): eine eingelesene Treiberdatei gilt, sonst "keine".
+        "etikett": "",
+        # Was eingelegt ist: "drucker" = wie der Drucker meldet, "etiketten"
+        # (gestanzt, Lueckensensor) oder "endlos" (Endlosband, Laenge je Etikett
+        # = laenge_mm). Eine Treiberdatei geht vor.
+        "medium": "drucker",
         # Etikett quer zum Druckkopf und in Laufrichtung, in mm. 0 = aus der
-        # Treiberdatei (Profil) bzw. 51 x 26.
+        # Treiberdatei (Profil) bzw. wie vom Drucker gemeldet.
         "breite_mm": 0,
         "laenge_mm": 0,
         # Wie das Etikett gelesen wird: keine | 180 | links | rechts.
         "drehung": "keine",
+        # Aufbau des Etiketts: Schluessel aus brother_layouts.LAYOUTS.
+        # Hochkant gelesene Etiketten nehmen ausser bei "standard" immer "hochkant".
+        "layout": "standard",
         # Verschiebung quer zum Druckkopf (+ = zur Seite der hoeheren Punkte).
         "versatz_mm": 0,
         # Zeilen gespiegelt senden - falls der Drucker sie von rechts erwartet.

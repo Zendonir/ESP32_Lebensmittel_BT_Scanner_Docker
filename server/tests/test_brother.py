@@ -195,6 +195,8 @@ class Printserver:
         self.medium = {"media_width_mm": 51}   # gemerkter Stand (cached)
         self.medium_live = None                # Antwort auf eine frische Abfrage
         self.drucker_an = True
+        self.einstellungen = {"command_mode": 3, "print_priority": 0, "rotate": 0,
+                              "stop_position": 0, "recovery": 0}
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.method == "POST" and request.url.path == "/api/print/raw":
@@ -217,6 +219,17 @@ class Printserver:
             if job is None:
                 return httpx.Response(404, json={"ok": False, "message": "job not found"})
             return httpx.Response(200, json={"ok": True, "job": job})
+        if request.url.path == "/api/printer/settings":
+            if request.method == "POST":
+                for teil in request.content.decode().split("&"):
+                    k, v = teil.split("=")
+                    self.einstellungen[k] = int(v)
+            optionen = {"command_mode": [(0, "ESC/P"), (1, "Raster"), (3, "P-touch Template")]}
+            return httpx.Response(200, json={"ok": True, "settings": [
+                {"key": k, "name": k, "value": v,
+                 "options": [{"value": w, "label": t} for w, t in
+                             optionen.get(k, [(0, "Off"), (1, "On")])]}
+                for k, v in self.einstellungen.items()]})
         if request.url.path == "/api/printer/status":
             if self.medium_live is None:
                 return httpx.Response(409, json={"ok": False})
@@ -573,3 +586,103 @@ def test_printserver_gibt_auf_ohne_zu_drucken_etikett_wartet_weiter(client, serv
     job = _job(label)
     assert job.status == "sent" and job.payload["versand"] == 2
     assert len(server.jobs) == 1
+
+
+
+# --------------------------------------------- Medium und Druckereinstellungen
+def test_medium_endlos_mit_laenge_je_etikett():
+    endlos = {"media_type": "continuous_tape", "media_width_mm": 58, "media_length_mm": 0}
+    # Drucker meldet Endlosband, eingetragen 40 mm: Endlosband mit 40 mm je Etikett
+    # (vorher wurde daraus ein 40-mm-Etikett, und die Rolle "passte nicht").
+    cfg = brother.mit_medium({"laenge_mm": 40}, endlos)
+    profil = brother.profil_aus(cfg)
+    assert profil["laenge_mm"] == 0 and profil["zeilen"] == 320 - 48
+    assert brother.medium_abweichung(brother.erwartet(profil, cfg), endlos) == ""
+    assert bytes.fromhex(profil["kopf"])[210] == 0x0A                   # n2: Endlosband
+
+    # Ausdruecklich "Endlosband" ohne Druckermeldung.
+    profil = brother.profil_aus({"medium": "endlos", "breite_mm": 58})
+    assert profil["laenge_mm"] == 0 and profil["zeilen"] == 240 - 48
+
+    # Ausdruecklich "Etiketten", der Drucker steht aber auf Endlosband: anhalten.
+    cfg = brother.mit_medium({"medium": "etiketten", "breite_mm": 50, "laenge_mm": 30}, endlos)
+    soll = brother.erwartet(brother.profil_aus(cfg), cfg)
+    assert soll["typ"] == "die_cut_labels"
+    assert "Endlosband" in brother.medium_abweichung(soll, endlos)
+
+
+def test_druckereinstellungen_ueber_den_printserver(client, server):
+    r = client.get("/api/brother/druckereinstellungen")
+    assert r.status_code == 200, r.text
+    modus = next(e for e in r.json()["einstellungen"] if e["key"] == "command_mode")
+    assert modus["name"] == "Befehlsmodus" and modus["wert"] == 3 and modus["empfohlen"] == 1
+
+    r = client.patch("/api/brother/druckereinstellungen", json={"command_mode": 1})
+    assert r.status_code == 200 and server.einstellungen["command_mode"] == 1
+    assert client.patch("/api/brother/druckereinstellungen",
+                        json={"druckdichte": 2}).status_code == 422
+
+
+# ----------------------------------------- Etikettensorten aus Treiberdateien
+def test_vorlagen_aus_den_treiberdateien():
+    v = brother.vorlagen()
+    assert set(v) == {"rd-51x26", "rd-50x30", "rd-40x50", "rd-40x60", "eigen-57x32"}
+    # Medieninformation (ESC i U) passt zur Tabelle 2.3.5 der Rasterreferenz.
+    assert (v["rd-51x26"]["rand_links_pins"], v["rd-51x26"]["druckbreite_pins"],
+            v["rd-51x26"]["zeilen"]) == (33, 382, 157)
+    assert (v["rd-40x50"]["rand_links_pins"], v["rd-40x50"]["druckbreite_pins"]) == (76, 296)
+    for key, profil in v.items():
+        cfg = {"etikett": key}
+        daten = brother.auftrag_bauen({"test": True}, cfg)
+        wieder = brother.analysieren(daten)
+        # Gleicher Kopf wie der Treiber (samt ESC i U), gleiche Zeilenzahl.
+        assert wieder["kopf"] == profil["kopf"], key
+        assert wieder["zeilen"] == profil["zeilen"] == wieder["zeilen_im_kopf"], key
+        assert wieder["tiff"] is True and wieder["druckbreite_pins"] == profil["druckbreite_pins"]
+
+
+def test_vorlage_legt_das_bild_wie_der_treiber():
+    profil = brother.vorlagen()["eigen-57x32"]          # 8 Pins frei, 432 breit
+    bild = brother.Image.new("1", (432, profil["zeilen"]), 0)   # ganz schwarz
+    daten = brother.rasterdaten(bild, profil, {})
+    zeile = brother.hochformat.unpackbits(
+        daten[len(bytes.fromhex(profil["kopf"])) + 3:][:57], 56)
+    assert zeile[0] == 0x00 and zeile[1] == 0xFF and zeile[54] == 0xFF and zeile[55] == 0x00
+
+
+def test_etikettensorte_waehlen(client, server):
+    z = client.get("/api/brother").json()
+    assert [e["key"] for e in z["etikettensorten"]][:2] == ["keine", "rd-40x50"]
+    client.patch("/api/settings/brother", json={"etikett": "rd-51x26"})
+    try:
+        z = client.get("/api/brother").json()
+        assert z["profil"]["quelle"] == "vorlage" and z["profil"]["name"].startswith("51 × 26")
+        assert z["masse_mm"] == {"breite": 47.8, "laenge": 19.6}
+        # Die Vorlage gilt - auch wenn der Drucker etwas anderes meldet (dann haelt
+        # der Server Auftraege an, statt falsch zu drucken).
+        cfg = brother.mit_medium({"etikett": "rd-51x26"}, {"media_type": "continuous_tape",
+                                                           "media_width_mm": 58})
+        assert brother.profil_aus(cfg)["key"] == "rd-51x26"
+    finally:
+        client.patch("/api/settings/brother", json={"etikett": ""})
+
+
+def test_keine_vorlage_waehlt_die_treiberdatei_ab():
+    profil = brother.analysieren(_treiberdatei())
+    # Altbestand (leer): die eingelesene Datei gilt weiter.
+    assert brother.etikett_wahl({"etikett": "", "profil": profil}) == "treiberdatei"
+    assert brother.vorlage({"etikett": "", "profil": profil}) is profil
+    # Ausdruecklich ohne Vorlage: Medium und Masse gelten.
+    cfg = {"etikett": brother.KEINE_VORLAGE, "profil": profil, "breite_mm": 51, "laenge_mm": 26}
+    assert brother.vorlage(cfg) is None
+    assert brother.profil_aus(cfg)["quelle"] == "standard"
+    assert brother.KEINE_VORLAGE in [e["key"] for e in brother.etikettensorten(cfg)]
+
+
+def test_vorlage_geht_vor_frueher_eingetragener_breite():
+    cfg = {"etikett": "rd-51x26", "breite_mm": 58, "laenge_mm": 40}
+    profil = brother.profil_aus(cfg)
+    soll = brother.erwartet(profil, cfg)
+    assert (soll["breite_mm"], soll["laenge_mm"]) == (51, 26)
+    medium = {"media_type": "die_cut_labels", "media_width_mm": 51, "media_length_mm": 26}
+    assert brother.medium_abweichung(soll, medium) == ""

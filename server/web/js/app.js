@@ -333,6 +333,11 @@ async function loadBrother() {
   if ($('#brother-haushalt') !== document.activeElement) {
     $('#brother-haushalt').innerHTML = brotherHaushaltOptionen(haushalte, z.einstellungen.haushalt || '');
   }
+  if ($('#brother-etikett') !== document.activeElement) {
+    const wahl = z.etikett_wahl || z.einstellungen.etikett || '';
+    $('#brother-etikett').innerHTML = (z.etikettensorten || []).map((e) =>
+      `<option value="${esc(e.key)}" ${e.key === wahl ? 'selected' : ''}>${esc(e.name)}</option>`).join('');
+  }
   const ps = z.printserver;
   const medium = ps.medium || {};
   $('#brother-status').innerHTML = ps.erreichbar
@@ -346,7 +351,10 @@ async function loadBrother() {
   $('#brother-profil').innerHTML = `<span class="muted">${p.quelle === 'treiber'
     ? `Aus ${esc(p.datei || 'Treiberdatei')}: ${esc(p.medium || '')} ${p.breite_mm} × ${p.laenge_mm || '–'} mm,
        ${p.zeilen} Zeilen zu ${p.bytes} Bytes, Befehl ${esc(p.zeilenbefehl)}${p.tiff ? ', gepackt' : ''}.`
-    : 'Ohne Treiberdatei: Befehle nach der Brother-Rasterreferenz TD-2020.'}
+    : p.quelle === 'vorlage'
+      ? `Etikettensorte ${esc(p.name)}: Befehle und Medieninformation aus dem Brother-Treiber,
+         ${p.zeilen} Zeilen, ${p.druckbreite_pins} Punkte breit ab Punkt ${p.rand_links_pins}.`
+      : 'Ohne Vorlage: Befehle nach der Brother-Rasterreferenz TD-2020.'}
     Gedruckt wird ${z.masse_mm.breite} × ${z.masse_mm.laenge} mm.
     ${z.sensor ? 'Gestanzte Etiketten: der Drucker setzt jedes Etikett selbst an der Lücke an.'
       : 'Endlosband: ohne Lückensensor, Länge wie eingestellt.'}</span>
@@ -357,6 +365,37 @@ async function loadBrother() {
   if (p.vorschau) $('#brother-treiber').src = p.vorschau;
 }
 $('#brother-pruefen').addEventListener('click', () => loadBrother().catch((e) => toast(e.message, 'error')));
+
+// Geraeteeinstellungen im Drucker (ueber den Printserver). Jede Aenderung geht
+// sofort hinaus - wie die anderen Felder auch.
+function brotherGeraetZeigen(r) {
+  $('#brother-geraet').innerHTML = r.einstellungen.map((e) => {
+    const abweichend = e.empfohlen !== null && e.wert >= 0 && e.wert !== e.empfohlen;
+    return `<label class="field">${esc(e.name)}
+      <select data-brother-geraet="${esc(e.key)}">
+        ${e.wert < 0 ? '<option value="" selected>– keine Antwort –</option>' : ''}
+        ${e.optionen.map((o) => `<option value="${o.wert}" ${o.wert === e.wert ? 'selected' : ''}>${esc(o.text)}</option>`).join('')}
+      </select>
+      ${e.warum ? `<span class="hint">${abweichend ? '<b>Empfohlen:</b> ' : ''}${esc(e.warum)}</span>` : ''}</label>`;
+  }).join('');
+}
+$('#brother-geraet-lesen').addEventListener('click', async (ev) => {
+  // Nach dem await ist ev.currentTarget null - den Knopf vorher festhalten.
+  const knopf = ev.currentTarget;
+  knopf.disabled = true;
+  try { brotherGeraetZeigen(await get('/api/brother/druckereinstellungen')); }
+  catch (e) { toast(e.message, 'error'); }
+  finally { knopf.disabled = false; }
+});
+document.addEventListener('change', async (ev) => {
+  const sel = ev.target.closest('select[data-brother-geraet]');
+  if (!sel || sel.value === '') return;
+  try {
+    brotherGeraetZeigen(await patch('/api/brother/druckereinstellungen',
+      { [sel.dataset.brotherGeraet]: Number(sel.value) }));
+    toast('Im Drucker gespeichert', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+});
 $('#brother-test').addEventListener('click', async () => {
   try { await post('/api/brother/test'); toast('Testetikett an den Brother gesendet', 'success'); }
   catch (e) { toast(e.message, 'error'); }
