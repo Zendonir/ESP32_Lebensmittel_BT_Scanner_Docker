@@ -369,6 +369,11 @@ tr.inv-kind td { background: color-mix(in srgb, var(--surface-2) 45%, transparen
 .kamera-ziel { position: absolute; border: 3px solid #fff; border-radius: 12px;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, .5); transition: border-color .2s; }
 .kamera-ziel.treffer { border-color: #43a047; }
+/* Aufblitzen nach einem Treffer (blitz() in api.js). */
+.blitz { position: fixed; inset: 0; z-index: 9999; pointer-events: none; background: #fff;
+  animation: blitz .35s ease-out forwards; }
+@keyframes blitz { from { opacity: .8; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .blitz { animation-duration: .6s; } @keyframes blitz { from { opacity: .4; } to { opacity: 0; } } }
 .kamera-info { padding: 12px 16px; background: #111; color: #fff; text-align: center; }
 /* Knoepfe auf dem dunklen Kamerastreifen - im hellen Design sonst dunkel auf dunkel. */
 .kamera-info button.ghost { color: #fff; border-color: rgba(255, 255, 255, .45); background: transparent; }

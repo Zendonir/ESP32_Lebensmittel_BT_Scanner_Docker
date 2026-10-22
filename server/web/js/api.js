@@ -47,6 +47,17 @@ export const del = (p) => api(p, { method: 'DELETE' });
 // `aktion` haengt einen Knopf an die Meldung, etwa "Rueckgaengig". Solche
 // Meldungen bleiben laenger stehen - wer den Knopf braucht, muss ihn noch
 // erreichen koennen, nachdem er begriffen hat, was gerade passiert ist.
+// Kurzes Aufblitzen des ganzen Bildschirms nach einem erkannten Scan -
+// Rueckmeldung auch ohne Ton und dort, wo vibrate() fehlt (iPhone/Safari).
+export function blitz() {
+  const node = document.createElement('div');
+  node.className = 'blitz';
+  node.setAttribute('aria-hidden', 'true');
+  node.addEventListener('animationend', () => node.remove());
+  document.body.appendChild(node);
+  setTimeout(() => node.remove(), 1000);    // falls animationend ausbleibt
+}
+
 export function toast(text, level = 'info', aktion = null) {
   const host = document.getElementById('toasts');
   if (!host) return;
