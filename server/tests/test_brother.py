@@ -704,3 +704,12 @@ def test_testetikett_wartet_hoechstens_einmal(client, server):
     zweites = client.post("/api/brother/test").json()
     assert zweites["job"] == erstes["job"] and zweites["wartet"] is True
     assert "wartet" not in erstes
+
+
+def test_gleichzeitige_testdrucke_legen_nur_eins_an(client, server):
+    """Zwei Browser oder ein Doppelklick - die Anfragen ueberlappen."""
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(6) as pool:
+        antworten = list(pool.map(lambda _: client.post("/api/brother/test").json(), range(6)))
+    assert len({a["job"] for a in antworten}) == 1
+    assert sum("wartet" not in a for a in antworten) == 1
