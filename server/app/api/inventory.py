@@ -111,8 +111,10 @@ async def patch_item(
 
     changes = patch.model_dump(exclude_unset=True, exclude_none=True)
     # Umlagern in den Gefrierschrank verlaengert das MHD (frische Ware) - wer
-    # das Datum im selben Zug selbst setzt, behaelt seins.
-    einfrieren = ("location" in changes and "expiry_date" not in changes
+    # das Datum im selben Zug selbst aendert, behaelt seins. Der Bearbeiten-
+    # Dialog schickt das unveraenderte Datum immer mit; das zaehlt nicht.
+    einfrieren = ("location" in changes
+                  and changes.get("expiry_date", row.expiry_date) == row.expiry_date
                   and changes["location"] != row.location
                   and await haltbarkeit.art_von_ort(session, row.location) != "tiefkuehl")
     for key, value in changes.items():

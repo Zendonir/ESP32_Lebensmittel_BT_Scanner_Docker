@@ -724,7 +724,15 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
     } catch { /* bleibt, wie es ist */ }
   }
   const anzeigen = (iso) => iso.split('-').reverse().join('.');
-  async function einfrieren(text) {
+  // Nur die juengste Rechnung zaehlt (Ort/Kategorie koennen sich waehrend
+  // einer Anfrage aendern), und Speichern wartet auf sie.
+  let einfrierNr = 0;
+  let einfrierLauf = Promise.resolve();
+  function einfrieren(text) {
+    einfrierLauf = einfrierenRechnen(text, ++einfrierNr);
+    return einfrierLauf;
+  }
+  async function einfrierenRechnen(text, nr) {
     if (!aufgedruckt) return;
     form.expiry_date.value = aufgedruckt;
     quelle.textContent = text;
@@ -733,7 +741,7 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
         + `&ort=${encodeURIComponent(form.location.value)}`
         + `&kategorie=${encodeURIComponent(form.category.value)}&barcode=${encodeURIComponent(code)}`
         + (vorlage ? `&vorlage=${vorlage.id}` : ''));
-      if (form.expiry_date.value !== aufgedruckt) return;   // inzwischen anders gesetzt
+      if (nr !== einfrierNr || form.expiry_date.value !== aufgedruckt) return;   // inzwischen anders gesetzt
       form.expiry_date.value = v.datum || aufgedruckt;
       if (v.verlaengert) quelle.textContent = `${anzeigen(v.datum)} – ${v.hinweis} (Packung ${anzeigen(aufgedruckt)})`;
       else if (v.hinweis) quelle.textContent = `${text} · ${v.hinweis}`;
@@ -851,6 +859,7 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
     document.activeElement?.blur?.();   // geleertes Zahlenfeld bekommt seine Vorgabe zurueck
     const knopf = form.querySelector('button.primary');
     knopf.disabled = true;
+    await einfrierLauf;                 // ein gerade eingetipptes MHD erst fertig rechnen
     const menge = parseFloat(form.quantity.value);
     const body = {
       name: form.name.value.trim(),

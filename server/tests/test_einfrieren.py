@@ -108,7 +108,13 @@ def test_umlagern_in_den_gefrierschrank(client):
     assert gefroren["expiry_date"] == packung
     zurueck = client.patch(f"/api/inventory/{labels[f'1{tag}']}", json={"location": f"Kuehl-{tag}"}).json()
     assert zurueck["expiry_date"] == shift_iso(GEFRIER_FLEISCH)    # Auftauen kuerzt nicht
-    # Datum im selben Zug selbst gesetzt: bleibt.
+    # Bearbeiten-Dialog schickt das unveraenderte Datum mit: verlaengert trotzdem.
+    r = client.post("/api/labels", json={"name": "x", "barcode": f"1{tag}", "category": "Fleisch & Fisch",
+                                         "expiry_date": packung, "location": f"Kuehl-{tag}", "print": False})
+    dialog = client.patch(f"/api/inventory/{r.json()['labels'][0]}",
+                          json={"location": f"Truhe-{tag}", "expiry_date": packung}).json()
+    assert dialog["expiry_date"] == shift_iso(GEFRIER_FLEISCH)
+    # Datum im selben Zug selbst geaendert: bleibt.
     eigen = shift_iso(5)
     r = client.patch(f"/api/inventory/{labels[f'1{tag}']}",
                      json={"location": f"Truhe-{tag}", "expiry_date": eigen}).json()
