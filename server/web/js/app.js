@@ -338,6 +338,7 @@ async function loadBrother() {
     $('#brother-etikett').innerHTML = (z.etikettensorten || []).map((e) =>
       `<option value="${esc(e.key)}" ${e.key === wahl ? 'selected' : ''}>${esc(e.name)}</option>`).join('');
   }
+  brotherSorteZeigen($('#brother-etikett').value, z.profil);
   const ps = z.printserver;
   const medium = ps.medium || {};
   $('#brother-status').innerHTML = ps.erreichbar
@@ -365,6 +366,24 @@ async function loadBrother() {
   if (p.vorschau) $('#brother-treiber').src = p.vorschau;
 }
 $('#brother-pruefen').addEventListener('click', () => loadBrother().catch((e) => toast(e.message, 'error')));
+
+// Mit einer Etikettensorte (oder Treiberdatei) stehen Medium und Masse fest -
+// die Felder dafuer gibt es nur bei "keine Vorlage".
+function brotherSorteZeigen(wahl, profil) {
+  const manuell = !wahl || wahl === 'keine';
+  document.querySelectorAll('.brother-manuell').forEach((el) => { el.hidden = !manuell; });
+  $('#brother-sorte-masse').hidden = manuell;
+  if (!manuell && profil && profil.quelle !== 'standard') {
+    const art = profil.laenge_mm ? 'Etiketten (gestanzt)' : 'Endlosband';
+    $('#brother-sorte-masse-wert').textContent =
+      `${profil.breite_mm} × ${profil.laenge_mm || '–'} mm · ${art}`;
+  }
+}
+$('#brother-etikett').addEventListener('change', (ev) => {
+  // Sofort umschalten; die Masse der neuen Sorte kommen mit dem naechsten Laden.
+  brotherSorteZeigen(ev.target.value, null);
+  $('#brother-sorte-masse-wert').textContent = '…';
+});
 
 // Geraeteeinstellungen im Drucker (ueber den Printserver). Jede Aenderung geht
 // sofort hinaus - wie die anderen Felder auch.
@@ -397,7 +416,11 @@ document.addEventListener('change', async (ev) => {
   } catch (e) { toast(e.message, 'error'); }
 });
 $('#brother-test').addEventListener('click', async () => {
-  try { await post('/api/brother/test'); toast('Testetikett an den Brother gesendet', 'success'); }
+  try {
+    const r = await post('/api/brother/test');
+    toast(r.wartet ? 'Ein Testetikett wartet schon – es kommt, sobald der Drucker bereit ist'
+      : 'Testetikett an den Brother gesendet', 'success');
+  }
   catch (e) { toast(e.message, 'error'); }
 });
 $('#brother-datei-laden').addEventListener('click', async () => {
@@ -1212,6 +1235,8 @@ document.addEventListener('change', async (ev) => {
     await loadLayouts().catch((e) => toast(e.message, 'error'));
     hochformatHinweise().catch(() => {});
   }
+  // Sorte, Layout, Drehung: Vorschau und Masse der Brother-Karte neu holen.
+  if (ok && bereich === 'brother') loadBrother().catch((e) => toast(e.message, 'error'));
 });
 
 // Verweise zwischen den Reitern ("steht unter Etiketten").

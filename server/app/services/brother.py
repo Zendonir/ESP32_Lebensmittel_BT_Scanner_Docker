@@ -579,8 +579,10 @@ def rasterdaten(bild: Image.Image, profil: dict, cfg: dict) -> bytes:
     x = (int(links) if links is not None and profil.get("druckbreite_pins")
          else (kopf_punkte - bild.width) // 2) + versatz
     leinwand.paste(bild.crop((0, 0, bild.width, min(bild.height, zeilen))), (x, 0))
-    if cfg.get("spiegeln"):
-        leinwand = leinwand.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    # Der TD-2020A legt die Punkte einer Rasterzeile spiegelverkehrt auf den
+    # Kopf - ungespiegelt kam jedes Etikett seitenverkehrt heraus (am Geraet
+    # bestaetigt). Deshalb immer, keine Einstellung.
+    leinwand = leinwand.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     # Schwarz = 1 fuer den Drucker; Pillow speichert Weiss als 1.
     roh = bytes(b ^ 0xFF for b in leinwand.tobytes())
 

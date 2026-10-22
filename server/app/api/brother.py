@@ -6,6 +6,8 @@ Die Einstellungen selbst laufen wie alle anderen ueber
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +21,10 @@ router = APIRouter(prefix="/api/brother", tags=["etiketten"])
 
 # Eine Treiberdatei fuer ein Etikett hat wenige KB; alles darueber ist keine.
 MAX_TREIBERDATEI = 2 * 1024 * 1024
+
+# Pruefen und Anlegen des Testetiketts am Stueck - zwei gleichzeitige Klicks
+# saehen sonst beide noch keins wartend.
+_testdruck_sperre = asyncio.Lock()
 
 
 def _profil_kurz(profil: dict) -> dict:
@@ -145,11 +151,21 @@ async def treiberdatei_vergessen(session: AsyncSession = Depends(get_session)):
 @router.post("/test")
 async def testdruck(session: AsyncSession = Depends(get_session)):
     """Testetikett mit Rahmen um das ganze Etikett - zeigt Versatz und Drehung."""
-    cfg = await settings_store.get(session, "brother", {}) or {}
-    if not brother.basis_url(cfg):
-        raise HTTPException(409, "Erst die Adresse des Printservers eintragen")
-    job = PrintJob(label="TEST", payload={"test": True}, status="queued", ziel=brother.ZIEL)
-    session.add(job)
-    await session.commit()
+    # Ein Testetikett genuegt: wer bei ausgeschaltetem Drucker mehrmals drueckt,
+    # bekam sonst alle auf einmal, sobald der Drucker da war. Alles unter der
+    # Sperre, auch das erste Lesen - sonst haelt die Lesetransaktion einen
+    # Stand von vor dem Anlegen durch die andere Anfrage.
+    async with _testdruck_sperre:
+        cfg = await settings_store.get(session, "brother", {}) or {}
+        if not brother.basis_url(cfg):
+            raise HTTPException(409, "Erst die Adresse des Printservers eintragen")
+        offen = (await session.execute(select(PrintJob).where(
+            PrintJob.ziel == brother.ZIEL, PrintJob.label == "TEST",
+            PrintJob.status.in_(("queued", "sent"))).limit(1))).scalar_one_or_none()
+        if offen is not None:
+            return {"ok": True, "job": offen.id, "wartet": True}
+        job = PrintJob(label="TEST", payload={"test": True}, status="queued", ziel=brother.ZIEL)
+        session.add(job)
+        await session.commit()
     brother.anstossen()
     return {"ok": True, "job": job.id}

@@ -151,10 +151,9 @@ DEFAULTS: dict[str, Any] = {
         # Aufbau des Etiketts: Schluessel aus brother_layouts.LAYOUTS.
         # Hochkant gelesene Etiketten nehmen ausser bei "standard" immer "hochkant".
         "layout": "standard",
-        # Verschiebung quer zum Druckkopf (+ = zur Seite der hoeheren Punkte).
+        # Verschiebung quer zum Druckkopf; die Richtung zeigt der Rahmen des
+        # Testetiketts (die Zeilen gehen gespiegelt hinaus).
         "versatz_mm": 0,
-        # Zeilen gespiegelt senden - falls der Drucker sie von rechts erwartet.
-        "spiegeln": False,
         # Aus einer Druckdatei des Originaltreibers gelesen (brother.analysieren).
         # Leer = Standardprofil.
         "profil": {},
