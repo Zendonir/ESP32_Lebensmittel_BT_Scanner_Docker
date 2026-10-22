@@ -353,6 +353,21 @@ def test_druckerfehler_und_neustart(client, server):
     assert jb.status == "failed" and "neu gestartet" in jb.error
 
 
+def test_stummer_drucker_gilt_als_gesendet_nicht_als_fehler(client, server):
+    a = client.post("/api/labels", json={"name": "Reis"}).json()["labels"][0]
+    b = client.post("/api/labels", json={"name": "Nudeln"}).json()["labels"][0]
+    _durchgang()
+    server.jobs[_job(a).payload["brother"]["id"]].update(
+        state="unknown", attempts=1,
+        message="sent; the printer reports no status, so the print is not confirmed")
+    server.jobs[_job(b).payload["brother"]["id"]].update(
+        state="unknown", attempts=1, message="sent, but the printer did not confirm the print")
+    _durchgang()
+    ja, jb = _job(a), _job(b)
+    assert ja.status == "done" and "keinen Status" in ja.error
+    assert jb.status == "failed" and "nicht bestätigt" in jb.error
+
+
 def test_terminal_fasst_brother_auftraege_nicht_an(client, server, monkeypatch):
     from app.device import workflow
     from app.device.hub import hub
