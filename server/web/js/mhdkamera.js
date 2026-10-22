@@ -34,16 +34,17 @@ const datumText = (iso) => (iso ? iso.split('-').reverse().join('.') : '');
 // Kamera nach einem Barcode von selbst aufging (das MHD bleibt dann der Vorschlag).
 export async function mhdKamera({ kiErlaubt = false, test = false, beiBild = null, endeText = null } = {}) {
   const ebene = document.createElement('div');
-  ebene.innerHTML = `<div style="position:fixed;inset:0;z-index:60;background:#000;display:flex;flex-direction:column">
-    <div style="position:relative;flex:1;overflow:hidden">
-      <video playsinline muted autoplay style="width:100%;height:100%;object-fit:cover"></video>
-      <div class="ziel" style="position:absolute;left:8%;right:8%;top:32%;height:32%;border:3px solid #fff;
-        border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,.5);transition:border-color .2s"></div>
+  // Aussehen wie der Barcode-Scan am Handy (.kamera in app.css), nur im Vollbild.
+  ebene.innerHTML = `<div class="kamera" style="position:fixed;inset:0;z-index:60;border-radius:0">
+    <div class="kamera-titel" style="padding-top:calc(12px + env(safe-area-inset-top))">MHD scannen</div>
+    <div class="kamera-bild" style="flex:1">
+      <video playsinline muted autoplay></video>
+      <div class="kamera-ziel ziel" style="left:8%;right:8%;top:32%;height:32%"></div>
       ${test ? `<div class="debug" style="position:absolute;left:0;right:0;top:0;padding:10px 12px;
         font:12px/1.4 ui-monospace,monospace;color:#fff;background:rgba(0,0,0,.65);max-height:34%;overflow:auto"></div>` : ''}
     </div>
-    <div style="padding:14px 16px calc(14px + env(safe-area-inset-bottom));display:grid;gap:10px;background:#111">
-      <div class="info" style="text-align:center;color:#fff">Datum in den Rahmen halten – quer oder hochkant</div>
+    <div class="kamera-info" style="padding-bottom:calc(14px + env(safe-area-inset-bottom));display:grid;gap:10px">
+      <div class="info">Datum in den Rahmen halten – quer oder hochkant</div>
       <div style="display:flex;gap:10px">
         ${test ? '<button type="button" class="merken" style="flex:1">Bild merken</button>' : ''}
         <button type="button" class="ghost ende" style="flex:1">${esc(endeText || (test ? 'Beenden' : 'Abbrechen'))}</button>

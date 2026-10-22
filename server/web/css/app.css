@@ -359,3 +359,16 @@ ol.steps code { background: var(--surface-2); padding: 1px 6px; border-radius: 4
 tr.inv-gruppe { cursor: pointer; }
 tr.inv-gruppe:hover td { background: var(--surface-2); }
 tr.inv-kind td { background: color-mix(in srgb, var(--surface-2) 45%, transparent); }
+
+/* Kamera mit Zielrahmen - Barcode-Scan am Handy und MHD-Kamera
+   (js/mhdkamera.js) sehen gleich aus: Titel, Bild mit Rahmen, Hinweis. */
+.kamera { display: flex; flex-direction: column; background: #000; border-radius: var(--radius); overflow: hidden; }
+.kamera-titel { padding: 12px 16px; background: #111; color: #fff; font-weight: 600; text-align: center; }
+.kamera-bild { position: relative; overflow: hidden; }
+.kamera-bild video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.kamera-ziel { position: absolute; border: 3px solid #fff; border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, .5); transition: border-color .2s; }
+.kamera-ziel.treffer { border-color: #43a047; }
+.kamera-info { padding: 12px 16px; background: #111; color: #fff; text-align: center; }
+/* Knoepfe auf dem dunklen Kamerastreifen - im hellen Design sonst dunkel auf dunkel. */
+.kamera-info button.ghost { color: #fff; border-color: rgba(255, 255, 255, .45); background: transparent; }

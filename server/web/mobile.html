@@ -141,7 +141,9 @@
     #toasts { left: 12px; right: 12px; bottom: calc(70px + env(safe-area-inset-bottom)); }
 
     #scanview { padding: 12px; }
-    #cam { width: 100%; border-radius: var(--radius); background: #000; aspect-ratio: 4/3; object-fit: cover; }
+    #scanview .kamera-bild { aspect-ratio: 4/3; }
+    /* Barcodes sind breit und flach - der Rahmen auch. Erkannt wird im ganzen Bild. */
+    #scanview .kamera-ziel { left: 8%; right: 8%; top: 28%; height: 44%; }
 
     /* Formulare am Telefon: volle Breite, Finger-taugliche Hoehe. */
     .mform { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
@@ -415,12 +417,17 @@ function renderScan() {
       Container. Bis dahin den Code bitte eintippen.</div>`;
 
   view.innerHTML = `<div id="scanview">
-    ${kamera ? '<video id="cam" playsinline muted autoplay></video>' : hinweis}
+    ${kamera ? `<div class="kamera">
+      <div class="kamera-titel">Barcode / Label scannen</div>
+      <div class="kamera-bild"><video id="cam" playsinline muted autoplay></video>
+        <div class="kamera-ziel" id="scanziel"></div></div>
+      <div class="kamera-info" id="scanhint">Code in den Rahmen halten</div>
+    </div>` : hinweis}
     <form class="row" id="manual" style="margin-top:12px">
       <input id="code" placeholder="Barcode / LEB000123" style="flex:1" inputmode="text">
       <button class="primary">Senden</button>
     </form>
-    <p class="muted" style="margin-top:10px" id="scanhint">
+    <p class="muted" style="margin-top:10px">
       Eigenes Etikett = auslagern. Produkt-Barcode = einlagern – Stückzahl, MHD und Ort
       gibst du danach hier am Handy ein.</p>
     <div id="scanresult"></div></div>`;
@@ -447,6 +454,12 @@ async function treffer(value) {
   if (!value || Date.now() < pauseBis) return;
   pauseBis = Date.now() + SCAN_PAUSE_MS;
   navigator.vibrate?.(60);
+  // Wie bei der MHD-Kamera: der Rahmen zeigt den Treffer.
+  const ziel = document.getElementById('scanziel');
+  if (ziel) {
+    ziel.classList.add('treffer');
+    setTimeout(() => ziel.classList.remove('treffer'), 1200);
+  }
   await sendScan(value);
 }
 
@@ -487,10 +500,7 @@ async function startCamera() {
     if (hint) hint.textContent = 'Decoder nicht verfügbar - Code bitte eintippen.';
     return;
   }
-  if (hint) {
-    hint.textContent = 'Code vor die Kamera halten. Eigenes Etikett = auslagern, '
-      + 'Produkt-Barcode = einlagern.';
-  }
+  if (hint) hint.textContent = 'Code in den Rahmen halten';
 
   const hints = new Map();
   hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
