@@ -695,6 +695,10 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
   // MHD-Vorschlag: haengt am Lagerort (Raum/Kuehl/Gefrier) und an der
   // Kategorie, und folgt beiden, bis man das Datum selbst setzt.
   let mhdVonHand = false;
+  // Das Datum von der Packung (gescannt oder eingetippt). Im Gefrierschrank
+  // verlaengert es der Server, ausser die Ware ist schon tiefgekuehlt
+  // gekauft - dann bleibt es 1:1 (/api/haltbarkeit/eingefroren).
+  let aufgedruckt = '';
   let kiHalt = null;
   const ARTNAME = { raum: 'Raumtemperatur', kuehl: 'Kühlschrank', tiefkuehl: 'Gefrierschrank' };
   const quelle = document.getElementById('mhd-quelle');
@@ -719,12 +723,48 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
         : `Kein Vorschlag${art ? ` für ${ARTNAME[art]}` : ''} – Datum bitte setzen`;
     } catch { /* bleibt, wie es ist */ }
   }
-  form.category.addEventListener('change', () => { sorten(); mhdNeu(); });
-  form.location.addEventListener('change', mhdNeu);
+  const anzeigen = (iso) => iso.split('-').reverse().join('.');
+  // Nur die juengste Rechnung zaehlt (Ort/Kategorie koennen sich waehrend
+  // einer Anfrage aendern), und Speichern wartet auf sie.
+  let einfrierNr = 0;
+  let einfrierLauf = Promise.resolve();
+  function einfrieren(text) {
+    einfrierLauf = einfrierenRechnen(text, ++einfrierNr);
+    return einfrierLauf;
+  }
+  async function einfrierenRechnen(text, nr) {
+    if (!aufgedruckt) return;
+    form.expiry_date.value = aufgedruckt;
+    quelle.textContent = text;
+    try {
+      const v = await get(`/api/haltbarkeit/eingefroren?mhd=${aufgedruckt}`
+        + `&ort=${encodeURIComponent(form.location.value)}`
+        + `&kategorie=${encodeURIComponent(form.category.value)}&barcode=${encodeURIComponent(code)}`
+        + (vorlage ? `&vorlage=${vorlage.id}` : ''));
+      if (nr !== einfrierNr || form.expiry_date.value !== aufgedruckt) return;   // inzwischen anders gesetzt
+      form.expiry_date.value = v.datum || aufgedruckt;
+      if (v.verlaengert) quelle.textContent = `${anzeigen(v.datum)} – ${v.hinweis} (Packung ${anzeigen(aufgedruckt)})`;
+      else if (v.hinweis) quelle.textContent = `${text} · ${v.hinweis}`;
+    } catch { /* bleibt das aufgedruckte */ }
+  }
+  let einfrierText = 'von Hand gesetzt';
+  form.category.addEventListener('change', () => {
+    sorten();
+    if (aufgedruckt) einfrieren(einfrierText); else mhdNeu();
+  });
+  form.location.addEventListener('change', () => {
+    if (aufgedruckt) einfrieren(einfrierText); else mhdNeu();
+  });
   form.expiry_date.addEventListener('input', () => { mhdVonHand = true; quelle.textContent = 'von Hand gesetzt'; });
+  form.expiry_date.addEventListener('change', () => {
+    aufgedruckt = form.expiry_date.value;
+    einfrierText = 'von Hand gesetzt';
+    einfrieren(einfrierText);
+  });
   form.querySelectorAll('[data-tage]').forEach((b) => b.addEventListener('click', () => {
     form.expiry_date.value = b.dataset.tage === '' ? '' : plusTage(+b.dataset.tage);
     mhdVonHand = true;
+    aufgedruckt = '';
     quelle.textContent = 'von Hand gesetzt';
   }));
 
@@ -734,10 +774,11 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
   const fotoKnopf = document.getElementById('mhd-foto');
   const fotoDatei = document.getElementById('mhd-datei');
   function mhdUebernehmen(r) {
-    form.expiry_date.value = r.datum;
     mhdVonHand = true;
-    quelle.textContent = `gescannt – bitte prüfen: ${r.datum.split('-').reverse().join('.')}`
+    aufgedruckt = r.datum;
+    einfrierText = `gescannt – bitte prüfen: ${anzeigen(r.datum)}`
       + (r.gelesen ? ` (gelesen „${r.gelesen}“${r.quelle === 'ki' ? ', KI' : ''})` : '');
+    einfrieren(einfrierText);
     navigator.vibrate?.(40);
   }
   fotoKnopf?.addEventListener('click', async () => {
@@ -818,6 +859,7 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
     document.activeElement?.blur?.();   // geleertes Zahlenfeld bekommt seine Vorgabe zurueck
     const knopf = form.querySelector('button.primary');
     knopf.disabled = true;
+    await einfrierLauf;                 // ein gerade eingetipptes MHD erst fertig rechnen
     const menge = parseFloat(form.quantity.value);
     const body = {
       name: form.name.value.trim(),

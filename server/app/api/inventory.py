@@ -19,7 +19,7 @@ from ..schemas import (
     Stats,
 )
 from ..services import inventory as inv
-from ..services import haushalte, mengen, openfoodfacts, settings_store
+from ..services import haltbarkeit, haushalte, mengen, openfoodfacts, settings_store
 from ..services.dates import shift_iso, today_iso
 
 router = APIRouter(prefix="/api/inventory", tags=["inventar"])
@@ -110,8 +110,21 @@ async def patch_item(
         raise HTTPException(404, "Etikett unbekannt")
 
     changes = patch.model_dump(exclude_unset=True, exclude_none=True)
+    # Umlagern in den Gefrierschrank verlaengert das MHD (frische Ware) - wer
+    # das Datum im selben Zug selbst aendert, behaelt seins. Der Bearbeiten-
+    # Dialog schickt das unveraenderte Datum immer mit; das zaehlt nicht.
+    einfrieren = ("location" in changes
+                  and changes.get("expiry_date", row.expiry_date) == row.expiry_date
+                  and changes["location"] != row.location
+                  and await haltbarkeit.art_von_ort(session, row.location) != "tiefkuehl")
     for key, value in changes.items():
         setattr(row, key, value)
+    if einfrieren:
+        neu = await haltbarkeit.eingefroren(
+            session, mhd=row.expiry_date, ort=row.location, kategorie=row.category,
+            produkt=await inv.product_for_barcode(session, row.barcode) if row.barcode else None)
+        if neu["verlaengert"]:
+            row.expiry_date = changes["expiry_date"] = neu["datum"]
     row.quantity, row.unit = mengen.normalisieren(row.quantity, row.unit)
     await inv.log_event(
         session, "edit", label=row.label, name=row.name, payload=changes

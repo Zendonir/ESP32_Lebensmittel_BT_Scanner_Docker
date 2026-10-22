@@ -87,6 +87,7 @@ class ProductOut(ORMModel):
     image_url: str
     default_shelf_days: int
     haltbarkeit: dict | None = None
+    lagerart: str = ""
     source: str
     fetched_at: datetime | None
 
