@@ -334,7 +334,7 @@ async function loadBrother() {
     $('#brother-haushalt').innerHTML = brotherHaushaltOptionen(haushalte, z.einstellungen.haushalt || '');
   }
   if ($('#brother-etikett') !== document.activeElement) {
-    const wahl = z.einstellungen.etikett || '';
+    const wahl = z.etikett_wahl || z.einstellungen.etikett || '';
     $('#brother-etikett').innerHTML = (z.etikettensorten || []).map((e) =>
       `<option value="${esc(e.key)}" ${e.key === wahl ? 'selected' : ''}>${esc(e.name)}</option>`).join('');
   }
@@ -380,10 +380,12 @@ function brotherGeraetZeigen(r) {
   }).join('');
 }
 $('#brother-geraet-lesen').addEventListener('click', async (ev) => {
-  ev.currentTarget.disabled = true;
+  // Nach dem await ist ev.currentTarget null - den Knopf vorher festhalten.
+  const knopf = ev.currentTarget;
+  knopf.disabled = true;
   try { brotherGeraetZeigen(await get('/api/brother/druckereinstellungen')); }
   catch (e) { toast(e.message, 'error'); }
-  finally { ev.currentTarget.disabled = false; }
+  finally { knopf.disabled = false; }
 });
 document.addEventListener('change', async (ev) => {
   const sel = ev.target.closest('select[data-brother-geraet]');

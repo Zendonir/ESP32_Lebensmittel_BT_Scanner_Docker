@@ -652,7 +652,7 @@ def test_vorlage_legt_das_bild_wie_der_treiber():
 
 def test_etikettensorte_waehlen(client, server):
     z = client.get("/api/brother").json()
-    assert [e["key"] for e in z["etikettensorten"]][:2] == ["", "rd-40x50"]
+    assert [e["key"] for e in z["etikettensorten"]][:2] == ["keine", "rd-40x50"]
     client.patch("/api/settings/brother", json={"etikett": "rd-51x26"})
     try:
         z = client.get("/api/brother").json()
@@ -665,3 +665,24 @@ def test_etikettensorte_waehlen(client, server):
         assert brother.profil_aus(cfg)["key"] == "rd-51x26"
     finally:
         client.patch("/api/settings/brother", json={"etikett": ""})
+
+
+def test_keine_vorlage_waehlt_die_treiberdatei_ab():
+    profil = brother.analysieren(_treiberdatei())
+    # Altbestand (leer): die eingelesene Datei gilt weiter.
+    assert brother.etikett_wahl({"etikett": "", "profil": profil}) == "treiberdatei"
+    assert brother.vorlage({"etikett": "", "profil": profil}) is profil
+    # Ausdruecklich ohne Vorlage: Medium und Masse gelten.
+    cfg = {"etikett": brother.KEINE_VORLAGE, "profil": profil, "breite_mm": 51, "laenge_mm": 26}
+    assert brother.vorlage(cfg) is None
+    assert brother.profil_aus(cfg)["quelle"] == "standard"
+    assert brother.KEINE_VORLAGE in [e["key"] for e in brother.etikettensorten(cfg)]
+
+
+def test_vorlage_geht_vor_frueher_eingetragener_breite():
+    cfg = {"etikett": "rd-51x26", "breite_mm": 58, "laenge_mm": 40}
+    profil = brother.profil_aus(cfg)
+    soll = brother.erwartet(profil, cfg)
+    assert (soll["breite_mm"], soll["laenge_mm"]) == (51, 26)
+    medium = {"media_type": "die_cut_labels", "media_width_mm": 51, "media_length_mm": 26}
+    assert brother.medium_abweichung(soll, medium) == ""

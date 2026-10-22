@@ -453,6 +453,9 @@ def mit_medium(cfg: dict, medium: dict | None) -> dict:
 _VORLAGEN_DATEI = pathlib.Path(__file__).with_name("brother_vorlagen.json")
 
 
+KEINE_VORLAGE = "keine"
+
+
 @functools.lru_cache(maxsize=1)
 def vorlagen() -> dict[str, dict]:
     daten = json.loads(_VORLAGEN_DATEI.read_text(encoding="utf-8"))
@@ -462,14 +465,25 @@ def vorlagen() -> dict[str, dict]:
 def vorlage(cfg: dict) -> dict | None:
     """Profil der gewaehlten Etikettensorte (`brother.etikett`) - eine
     mitgelieferte Vorlage oder die eingelesene Treiberdatei - sonst None."""
-    wahl = cfg.get("etikett") or ""
+    wahl = etikett_wahl(cfg)
     if wahl in vorlagen():
         return vorlagen()[wahl]
-    profil = cfg.get("profil") or {}
-    # Ohne Wahl gilt eine frueher eingelesene Treiberdatei weiter.
-    if wahl in ("", "treiberdatei") and profil.get("kopf") and profil.get("zeilen"):
-        return profil
+    if wahl == "treiberdatei":
+        return cfg["profil"]
     return None
+
+
+def etikett_wahl(cfg: dict) -> str:
+    """Die wirksame Etikettensorte. "keine" heisst ausdruecklich ohne Vorlage;
+    leer stammt aus der Zeit vor der Auswahl - dann gilt eine frueher
+    eingelesene Treiberdatei weiter."""
+    wahl = cfg.get("etikett") or ""
+    if wahl in vorlagen():
+        return wahl
+    profil = cfg.get("profil") or {}
+    if wahl in ("", "treiberdatei") and profil.get("kopf") and profil.get("zeilen"):
+        return "treiberdatei"
+    return KEINE_VORLAGE
 
 
 def profil_aus(cfg: dict) -> dict:
@@ -491,7 +505,7 @@ def masse(profil: dict, cfg: dict) -> tuple[int, int]:
     if profil.get("druckbreite_pins"):
         # Aus der Medieninformation des Treibers - genau so breit wie er druckt.
         return min(kopf, int(profil["druckbreite_pins"])), int(profil["zeilen"])
-    breite_mm = float(cfg.get("breite_mm") or 0) or float(profil.get("breite_mm") or 0) or 51
+    breite_mm = float(profil.get("breite_mm") or 0) or float(cfg.get("breite_mm") or 0) or 51
     return min(kopf, druckbreite(breite_mm)), int(profil["zeilen"])
 
 
@@ -850,7 +864,9 @@ async def _abgleichen(client: httpx.AsyncClient, job: PrintJob) -> bool:
 # statt ein verrutschtes oder verworfenes Etikett zu riskieren.
 def erwartet(profil: dict, cfg: dict) -> dict:
     """Was der Auftrag dem Drucker als Medium ankuendigt."""
-    breite = int(round(float(cfg.get("breite_mm") or 0) or float(profil.get("breite_mm") or 0)))
+    # Das Profil traegt die Breite, die der Auftrag ankuendigt (ESC i z) - bei
+    # einer Vorlage gilt eine frueher eingetragene Breite nicht.
+    breite = int(round(float(profil.get("breite_mm") or 0) or float(cfg.get("breite_mm") or 0)))
     laenge = int(profil.get("laenge_mm") or 0)
     return {"typ": "die_cut_labels" if laenge else "continuous_tape",
             "breite_mm": breite, "laenge_mm": laenge}
@@ -1018,7 +1034,7 @@ def oeffentlich(cfg: dict) -> dict[str, Any]:
 
 def etikettensorten(cfg: dict) -> list[dict]:
     """Auswahl "Etikettensorte": ohne Vorlage, die mitgelieferten, die eingelesene."""
-    liste = [{"key": "", "name": "keine Vorlage – Medium und Maße unten"}]
+    liste = [{"key": KEINE_VORLAGE, "name": "keine Vorlage – Medium und Maße unten"}]
     liste += [{"key": k, "name": v["name"]} for k, v in vorlagen().items()]
     profil = cfg.get("profil") or {}
     if profil.get("kopf"):

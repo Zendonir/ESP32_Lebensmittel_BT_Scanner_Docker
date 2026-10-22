@@ -73,6 +73,7 @@ async def zustand(request: Request, session: AsyncSession = Depends(get_session)
         "sichtbar": True,
         "einstellungen": brother.oeffentlich(gespeichert),
         "etikettensorten": brother.etikettensorten(gespeichert),
+        "etikett_wahl": brother.etikett_wahl(gespeichert),
         "printserver": printserver,
         "profil": _profil_kurz(profil),
         "masse_mm": {"breite": round(breite / brother.DOTS_PER_MM, 1),
@@ -135,7 +136,7 @@ async def treiberdatei_vergessen(session: AsyncSession = Depends(get_session)):
     """Zurueck zum Standardprofil."""
     cfg = await settings_store.get(session, "brother", {}) or {}
     await settings_store.merge(session, "brother", {
-        "profil": {}, "etikett": "" if cfg.get("etikett") == "treiberdatei" else cfg.get("etikett", "")})
+        "profil": {}, "etikett": brother.KEINE_VORLAGE if cfg.get("etikett") == "treiberdatei" else cfg.get("etikett", "")})
     await session.commit()
     await hub.notify_ui("settings")
     return {"ok": True}
