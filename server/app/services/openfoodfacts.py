@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 import httpx
 from sqlalchemy import select
@@ -20,8 +21,43 @@ from . import categories as cat
 
 log = logging.getLogger(__name__)
 
-_FIELDS = "code,product_name,product_name_de,brands,quantity,categories_tags,nutriscore_grade,image_front_small_url"
+_FIELDS = ("code,product_name,product_name_de,brands,quantity,categories_tags,nutriscore_grade,"
+           "image_front_small_url,storage_conditions_tags,conservation_conditions_de,"
+           "conservation_conditions")
 _inflight: dict[str, asyncio.Task] = {}
+
+
+# storage_conditions_tags kennt genau drei Werte (Taxonomie
+# storage_conditions.txt) - sie passen auf unsere Lagerarten.
+_LAGER_TAGS = {"en:frozen": "tiefkuehl", "en:refrigerated": "kuehl", "en:ambient": "raum"}
+# Was nach dem Oeffnen gilt, sagt nichts darueber, wie es verkauft wird.
+_NACH_OEFFNEN = re.compile(r"nach (dem )?(öffnen|oeffnen|anbruch)|geöffnet|geoeffnet|after opening|once opened")
+_GEFROREN = re.compile(r"[-−–]\s*1[58]\s*°|tiefgekühlt|tiefgekuehlt|tiefgefroren|nicht wieder einfrieren"
+                       r"|aufgetaut|frozen|keep frozen")
+_GEKUEHLT = re.compile(r"gekühlt|gekuehlt|kühlschrank|kuehlschrank|\+?\s*[2-8]\s*°\s*c|refrigerat")
+
+
+def lagerart(product: dict) -> str:
+    """raum/kuehl/tiefkuehl aus einem OpenFoodFacts-Datensatz, "" = unbekannt.
+
+    Zuerst das eigene Feld, dann die Kategorie "frozen-foods", zuletzt der
+    Text auf der Packung ("bei -18 °C lagern", "gekühlt lagern"). Dort zaehlt
+    nur, was vor "nach dem Öffnen" steht.
+    """
+    for tag in product.get("storage_conditions_tags") or []:
+        if tag in _LAGER_TAGS:
+            return _LAGER_TAGS[tag]
+    if any(t == "en:frozen-foods" or t.startswith("en:frozen-")
+           for t in product.get("categories_tags") or []):
+        return "tiefkuehl"
+    text = (product.get("conservation_conditions_de")
+            or product.get("conservation_conditions") or "").lower()
+    text = _NACH_OEFFNEN.split(text, maxsplit=1)[0]
+    if _GEFROREN.search(text):
+        return "tiefkuehl"
+    if _GEKUEHLT.search(text):
+        return "kuehl"
+    return ""
 
 
 async def _fetch_remote(barcode: str, available: list[str]) -> dict | None:
@@ -56,6 +92,7 @@ async def _fetch_remote(barcode: str, available: list[str]) -> dict | None:
         "subcategory": cat.match_subcategory(matched, tags),
         "nutriscore": (product.get("nutriscore_grade") or "").upper()[:1],
         "image_url": product.get("image_front_small_url") or "",
+        "lagerart": lagerart(product),
     }
 
 
@@ -107,6 +144,7 @@ async def lookup(session: AsyncSession, barcode: str, refresh: bool = False) -> 
         cached.subcategory = remote["subcategory"] or cached.subcategory
         cached.nutriscore = remote["nutriscore"] or cached.nutriscore
         cached.image_url = remote["image_url"] or cached.image_url
+        cached.lagerart = remote["lagerart"] or cached.lagerart
         cached.source = "off"
     elif not cached.name:
         cached.source = "unknown"

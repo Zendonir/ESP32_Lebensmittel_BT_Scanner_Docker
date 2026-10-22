@@ -78,6 +78,7 @@ _ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("products", "haltbarkeit", "JSON"),
     ("templates", "haltbarkeit", "JSON"),
     ("print_jobs", "ziel", "VARCHAR(16) DEFAULT ''"),
+    ("products", "lagerart", "VARCHAR(16) DEFAULT ''"),
 )
 
 

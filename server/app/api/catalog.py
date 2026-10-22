@@ -24,6 +24,7 @@ from ..schemas import (
 from ..device import workflow
 from ..services import inventory as inv
 from ..services import haltbarkeit, openfoodfacts, seed
+from ..services.dates import to_iso_date
 
 router = APIRouter(prefix="/api", tags=["stammdaten"])
 
@@ -275,6 +276,25 @@ async def mhd_vorschlag(ort: str = "", kategorie: str = "", barcode: str = "",
             eigene_tage=0 if tpl.haltbarkeit else tpl.shelf_days, vorlage=tpl.haltbarkeit,
             herkunft="Vorlage")
     return await haltbarkeit.vorschlag(session, ort=ort, kategorie=kategorie, produkt=produkt)
+
+
+@router.get("/haltbarkeit/eingefroren")
+async def mhd_eingefroren(mhd: str, ort: str = "", kategorie: str = "", barcode: str = "",
+                          vorlage: int | None = None,
+                          session: AsyncSession = Depends(get_session)):
+    """Aufgedrucktes MHD fuer den Lagerort: im Gefrierschrank verlaengert,
+    ausser die Ware wird schon gefroren verkauft. Dieselbe Rechnung wie am
+    Terminal."""
+    mhd = to_iso_date(mhd)
+    produkt = await inv.product_for_barcode(session, barcode) if barcode else None
+    tpl = await session.get(Template, vorlage) if vorlage else None
+    if tpl is not None:
+        return await haltbarkeit.eingefroren(
+            session, mhd=mhd, ort=ort, kategorie=kategorie or tpl.category,
+            eigene_tage=0 if tpl.haltbarkeit else tpl.shelf_days, vorlage=tpl.haltbarkeit,
+            herkunft="Vorlage")
+    return await haltbarkeit.eingefroren(session, mhd=mhd, ort=ort, kategorie=kategorie,
+                                         produkt=produkt)
 
 
 @router.get("/ki")

@@ -108,6 +108,10 @@ class Product(Base, TimestampMixin):
     # Haltbarkeit dieses Produkts je Lagerart, wie bei der Kategorie. Geht ihr
     # vor. Kommt von Hand oder als KI-Vorschlag (services/ki.py).
     haltbarkeit: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Wie es verkauft wird: raum/kuehl/tiefkuehl, "" = unbekannt. Aus
+    # OpenFoodFacts (storage_conditions_tags). Entscheidet, ob das MHD beim
+    # Einfrieren verlaengert wird (services/haltbarkeit.eingefroren).
+    lagerart: Mapped[str] = mapped_column(String(16), default="")
     source: Mapped[str] = mapped_column(String(32), default="manual")  # off|manual
     fetched_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

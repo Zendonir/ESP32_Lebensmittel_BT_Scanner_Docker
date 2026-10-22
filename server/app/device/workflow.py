@@ -1282,6 +1282,21 @@ async def _tap_confirm_save(session, sess, item) -> None:
     await _save_draft(session, sess)
 
 
+async def _einfrieren(session: AsyncSession, sess: DeviceSession) -> None:
+    """Aufgedrucktes MHD im Gefrierschrank verlaengern - ausser die Ware ist
+    schon tiefgekuehlt gekauft (services/haltbarkeit.eingefroren)."""
+    draft = sess.draft
+    if draft.template_id is not None:
+        return                          # Vorlagen rechnen ihr MHD selbst
+    produkt = await inv.product_for_barcode(session, draft.barcode) if draft.barcode else None
+    neu = await haltbarkeit.eingefroren(session, mhd=draft.expiry_date, ort=sess.location,
+                                        kategorie=draft.category, produkt=produkt)
+    if neu["verlaengert"]:
+        draft.expiry_date = neu["datum"]
+        await hub.send_to(sess.device_id, proto.toast(
+            f"Eingefroren: MHD {to_display(neu['datum'])}", "success"))
+
+
 async def on_input(session: AsyncSession, sess: DeviceSession, value) -> None:
     """Wert aus einem date/number/text-Bildschirm uebernehmen."""
     sess.touch()
@@ -1289,6 +1304,7 @@ async def on_input(session: AsyncSession, sess: DeviceSession, value) -> None:
     current = sess.current
     if current == ENTER_DATE:
         sess.draft.expiry_date = to_iso_date(value)
+        await _einfrieren(session, sess)
     elif current == ENTER_QTY:
         try:
             sess.draft.count = max(1, min(20, int(float(value))))

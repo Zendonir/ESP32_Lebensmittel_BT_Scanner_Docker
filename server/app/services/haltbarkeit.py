@@ -12,6 +12,13 @@ Reihenfolge, was gilt:
                                            "7 Tage" meint gekuehlt, nicht gefroren
   3. Kategorie, Lagerart passend
 0 heisst ueberall "keine Angabe"; ist am Ende nichts da, bleibt das MHD leer.
+
+Das aufgedruckte MHD und der Gefrierschrank (`eingefroren()`): Wer frische
+Ware einfriert, verlaengert sie - das Datum wird auf den Gefrier-Vorschlag
+angehoben, nie verkuerzt. Ware, die schon tiefgekuehlt verkauft wird
+(`Product.lagerart` aus OpenFoodFacts, sonst Kategorie "Tiefkühl"), behaelt
+ihr aufgedrucktes MHD 1:1 - der Hersteller hat es fuer den Gefrierschrank
+berechnet.
 """
 
 from __future__ import annotations
@@ -111,3 +118,33 @@ async def vorschlag(
 
     return {"tage": tage, "datum": shift_iso(tage) if tage else "",
             "quelle": quelle, "art": art}
+
+
+GEFROREN_KATEGORIE = "Tiefkühl"
+
+
+def schon_gefroren(produkt: Product | None, kategorie: str = "") -> bool:
+    """Wird es tiefgekuehlt verkauft? Die Angabe am Produkt geht vor."""
+    if produkt is not None and produkt.lagerart:
+        return produkt.lagerart == "tiefkuehl"
+    return (kategorie or (produkt.category if produkt else "")) == GEFROREN_KATEGORIE
+
+
+async def eingefroren(session: AsyncSession, *, mhd: str, ort: str, kategorie: str = "",
+                      produkt: Product | None = None, **vorschlag_kw) -> dict:
+    """Aufgedrucktes MHD fuer den Lagerort: {"datum", "verlaengert", "hinweis"}.
+
+    Ausserhalb des Gefrierschranks und bei schon gefrorener Ware bleibt es,
+    wie es ist. Sonst gilt das spaetere von aufgedrucktem MHD und
+    Gefrier-Vorschlag (`vorschlag()`, gleiche Reihenfolge wie dort).
+    """
+    gleich = {"datum": mhd, "verlaengert": False, "hinweis": ""}
+    if not mhd or await art_von_ort(session, ort) != "tiefkuehl":
+        return gleich
+    if schon_gefroren(produkt, kategorie):
+        return {**gleich, "hinweis": "schon tiefgekühlt – MHD bleibt"}
+    v = await vorschlag(session, ort=ort, kategorie=kategorie, produkt=produkt, **vorschlag_kw)
+    if v["datum"] and v["datum"] > mhd:
+        return {"datum": v["datum"], "verlaengert": True,
+                "hinweis": f"eingefroren – {v['quelle']} · {v['tage']} Tage"}
+    return gleich
