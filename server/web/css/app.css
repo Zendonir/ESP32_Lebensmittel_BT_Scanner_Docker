@@ -124,6 +124,8 @@ main { padding: 18px; max-width: 1400px; margin: 0 auto; }
 input[type="checkbox"], input[type="radio"] { width: auto; flex: none; margin: 0; }
 label.row { flex-wrap: nowrap; }
 label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+div.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+div.field .wert { font-size: 14px; color: var(--text, inherit); padding: 9px 0; }
 
 input, select, textarea {
   font: inherit;

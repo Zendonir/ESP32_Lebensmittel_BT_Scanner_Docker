@@ -267,18 +267,21 @@
           <span class="hint">gilt am Terminal, beim Nachdruck und als Vorauswahl im Web</span></label>
         <label class="field">Etikettensorte
           <select data-setting="brother.etikett" id="brother-etikett"></select>
-          <span class="hint">Befehle wie der Brother-Treiber für genau diese Etiketten – Medium und Maße daneben gelten dann nicht</span></label>
-        <label class="field">Medium
+          <span class="hint">Befehle und Maße wie der Brother-Treiber für genau diese Etiketten</span></label>
+        <div class="field" id="brother-sorte-masse" hidden>Maße
+          <div class="wert" id="brother-sorte-masse-wert">–</div>
+          <span class="hint">kommen aus der Etikettensorte – für eigene Maße „keine Vorlage“ wählen</span></div>
+        <label class="field brother-manuell">Medium
           <select data-setting="brother.medium">
             <option value="drucker">wie vom Drucker gemeldet</option>
             <option value="etiketten">Etiketten (gestanzt, Lückensensor)</option>
             <option value="endlos">Endlosband</option>
           </select>
           <span class="hint">muss zu dem passen, was im Drucker eingestellt ist</span></label>
-        <label class="field">Etikettenbreite (mm)
+        <label class="field brother-manuell">Etikettenbreite (mm)
           <input data-setting="brother.breite_mm" data-art="float" type="number" min="0" max="62" step="0.5">
           <span class="hint">quer zum Druckkopf · 0 = wie vom Drucker gemeldet</span></label>
-        <label class="field">Etikettenlänge (mm)
+        <label class="field brother-manuell">Etikettenlänge (mm)
           <input data-setting="brother.laenge_mm" data-art="float" type="number" min="0" max="300" step="0.5">
           <span class="hint">Etiketten: Länge des Etiketts · Endlosband: Länge je Etikett</span></label>
         <label class="field">Lesen
