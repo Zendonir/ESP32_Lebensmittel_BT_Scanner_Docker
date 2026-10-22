@@ -172,7 +172,7 @@
 
 <div id="toasts"></div>
 <script type="module">
-import { get, post, del, put, toast, auslagern, fmtDate, daysPill, esc, gruppieren, mengeText, EINHEITEN, liveConnect, tagEditor, HAUSHALT, fremdHinweis, zielOptionen, zielAuswerten, zielVorauswahl } from '/static/js/api.js';
+import { get, post, del, put, toast, blitz, auslagern, fmtDate, daysPill, esc, gruppieren, mengeText, EINHEITEN, liveConnect, tagEditor, HAUSHALT, fremdHinweis, zielOptionen, zielAuswerten, zielVorauswahl } from '/static/js/api.js';
 import { mhdKamera, jpegAus } from '/static/js/mhdkamera.js';
 import { kameraHolen, kameraFreigeben } from '/static/js/kamera.js';
 
@@ -454,6 +454,7 @@ async function treffer(value) {
   if (!value || Date.now() < pauseBis) return;
   pauseBis = Date.now() + SCAN_PAUSE_MS;
   navigator.vibrate?.(60);
+  blitz();
   // Wie bei der MHD-Kamera: der Rahmen zeigt den Treffer.
   const ziel = document.getElementById('scanziel');
   if (ziel) {
@@ -780,6 +781,7 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
       + (r.gelesen ? ` (gelesen „${r.gelesen}“${r.quelle === 'ki' ? ', KI' : ''})` : '');
     einfrieren(einfrierText);
     navigator.vibrate?.(40);
+    blitz();
   }
   fotoKnopf?.addEventListener('click', async () => {
     if (!kameraMoeglich()) { fotoDatei.click(); return; }
