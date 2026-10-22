@@ -839,6 +839,11 @@ async def _abgleichen(client: httpx.AsyncClient, job: PrintJob) -> bool:
         return True
     if zustand in FERTIG_GUT:
         job.status, job.error = "done", ""
+    elif zustand == "unknown" and "no status" in meldung:
+        # Der Drucker meldet ueber USB grundsaetzlich nichts (Printserver ab
+        # 0.5.4: "stumm"). Gesendet ist es - rot waere bei jedem Etikett falsch.
+        job.status = "done"
+        job.error = "gesendet – Drucker meldet keinen Status"
     elif zustand == "unknown":
         job.status = "failed"
         job.error = "Drucker hat den Druck nicht bestätigt – Etikett prüfen"
