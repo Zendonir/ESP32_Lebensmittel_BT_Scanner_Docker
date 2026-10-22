@@ -36,8 +36,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import functools
 import io
+import json
 import logging
+import pathlib
 from typing import Any
 
 import httpx
@@ -354,6 +357,7 @@ def analysieren(daten: bytes) -> dict:
     laengen = {len(zl) for zl in gelesen["zeilen"] if zl is not None}
     bytes_je_zeile = max(laengen) if laengen else KOPF_BYTES
     info = _esc_i_z(daten, z)
+    medien = medieninfo(daten[:start])
     ende = daten[gelesen["ende"]:gelesen["ende"] + 1]
     return {
         "quelle": "treiber",
@@ -370,8 +374,39 @@ def analysieren(daten: bytes) -> dict:
         "medium": {0x0A: "Endlos", 0x0B: "Etiketten"}.get(info["medium"], f"0x{info['medium']:02X}"),
         "zeilen_im_kopf": info["zeilen"],
         "weitere_seiten": gelesen["weitere_seiten"],
+        **medien,
         "vorschau": _vorschau_png(gelesen["zeilen"], bytes_je_zeile),
     }
+
+
+def medieninfo(kopf: bytes) -> dict:
+    """Was der Treiber in ESC i U w 01h (127 Bytes) ueber das Papierformat sagt.
+
+    Nicht dokumentiert; abgelesen aus Treiberdateien fuer 51x26, 50x30,
+    40x50, 40x60 und 57x32 - die Werte stimmen dort mit der Tabelle 2.3.5 der
+    Rasterreferenz ueberein:
+      [6..7]   Pins links frei (51 mm: 33, 40 mm: 76, 57 mm: 8)
+      [8..9]   bedruckbare Pins quer (51 mm: 382)
+      [10..11] Druckzeilen (51x26: 157)
+      dahinter der Name des Papierformats im Treiber ("40mm x 50mm").
+    """
+    i = kopf.find(b"\x1biUw\x01")
+    if i < 0 or len(kopf) < i + 5 + 12:
+        return {}
+    b = kopf[i + 5:i + 5 + 127]
+    name, lauf = "", bytearray()
+    for c in b[12:] + b"\x00":
+        if 0x20 <= c < 0x7F:
+            lauf.append(c)
+            continue
+        if len(lauf) >= 3:
+            name = lauf.decode("ascii").strip()
+            break
+        lauf.clear()
+    pins = b[8] | b[9] << 8
+    if not 0 < pins <= KOPF_BYTES * 8:
+        return {}
+    return {"medium_name": name, "rand_links_pins": b[6] | b[7] << 8, "druckbreite_pins": pins}
 
 
 def _vorschau_png(zeilen: list[bytes | None], breite_bytes: int) -> str:
@@ -394,7 +429,7 @@ def mit_medium(cfg: dict, medium: dict | None) -> dict:
     Der TD-2020A nennt im Status (ESC i S, ueber den Printserver) Breite und
     bei gestanzten Etiketten auch die Laenge der eingelegten Rolle.
     """
-    if (cfg.get("profil") or {}).get("kopf") or not medium:
+    if vorlage(cfg) or not medium:
         return cfg
     # Ausdruecklich gewaehltes Medium (Etiketten/Endlosband) gilt, was immer
     # der Drucker meldet - passt die Rolle nicht, haelt medium_abweichung an.
@@ -411,11 +446,36 @@ def mit_medium(cfg: dict, medium: dict | None) -> dict:
     return neu
 
 
-def profil_aus(cfg: dict) -> dict:
-    """Gespeichertes Profil oder das Standardprofil zu den eingestellten Massen."""
+# Etikettensorten aus Druckdateien des Brother-Treibers (je Groesse der Kopf
+# bis zur ersten Rasterzeile, samt Medieninformation ESC i U). Wer eine
+# waehlt, bekommt genau die Befehle, mit denen der Treiber diese Sorte druckt.
+_VORLAGEN_DATEI = pathlib.Path(__file__).with_name("brother_vorlagen.json")
+
+
+@functools.lru_cache(maxsize=1)
+def vorlagen() -> dict[str, dict]:
+    daten = json.loads(_VORLAGEN_DATEI.read_text(encoding="utf-8"))
+    return {v["key"]: v for v in daten["vorlagen"]}
+
+
+def vorlage(cfg: dict) -> dict | None:
+    """Profil der gewaehlten Etikettensorte (`brother.etikett`) - eine
+    mitgelieferte Vorlage oder die eingelesene Treiberdatei - sonst None."""
+    wahl = cfg.get("etikett") or ""
+    if wahl in vorlagen():
+        return vorlagen()[wahl]
     profil = cfg.get("profil") or {}
-    if profil.get("kopf") and profil.get("zeilen"):
+    # Ohne Wahl gilt eine frueher eingelesene Treiberdatei weiter.
+    if wahl in ("", "treiberdatei") and profil.get("kopf") and profil.get("zeilen"):
         return profil
+    return None
+
+
+def profil_aus(cfg: dict) -> dict:
+    """Gewaehlte Etikettensorte oder das Standardprofil zu den eingestellten Massen."""
+    gewaehlt = vorlage(cfg)
+    if gewaehlt:
+        return gewaehlt
     endlos = cfg.get("medium") == "endlos" or (cfg.get("medium") != "etiketten" and cfg.get("endlos"))
     if endlos:
         return standard_profil(float(cfg.get("breite_mm") or 58), 0,
@@ -427,6 +487,9 @@ def profil_aus(cfg: dict) -> dict:
 def masse(profil: dict, cfg: dict) -> tuple[int, int]:
     """(Breite quer zum Druckkopf, Zeilen in Laufrichtung) in Punkten."""
     kopf = int(profil.get("bytes") or KOPF_BYTES) * 8
+    if profil.get("druckbreite_pins"):
+        # Aus der Medieninformation des Treibers - genau so breit wie er druckt.
+        return min(kopf, int(profil["druckbreite_pins"])), int(profil["zeilen"])
     breite_mm = float(cfg.get("breite_mm") or 0) or float(profil.get("breite_mm") or 0) or 51
     return min(kopf, druckbreite(breite_mm)), int(profil["zeilen"])
 
@@ -490,7 +553,10 @@ def rasterdaten(bild: Image.Image, profil: dict, cfg: dict) -> bytes:
 
     leinwand = Image.new("1", (kopf_punkte, zeilen), 1)
     versatz = int(round(float(cfg.get("versatz_mm") or 0) * DOTS_PER_MM))
-    x = (kopf_punkte - bild.width) // 2 + versatz
+    # Wo der Treiber das Etikett hinlegt (Pins links frei), sonst mittig.
+    links = profil.get("rand_links_pins")
+    x = (int(links) if links is not None and profil.get("druckbreite_pins")
+         else (kopf_punkte - bild.width) // 2) + versatz
     leinwand.paste(bild.crop((0, 0, bild.width, min(bild.height, zeilen))), (x, 0))
     if cfg.get("spiegeln"):
         leinwand = leinwand.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
@@ -941,3 +1007,14 @@ def oeffentlich(cfg: dict) -> dict[str, Any]:
     profil = dict(cfg.get("profil") or {})
     profil.pop("kopf", None)
     return {**cfg, "profil": profil}
+
+
+def etikettensorten(cfg: dict) -> list[dict]:
+    """Auswahl "Etikettensorte": ohne Vorlage, die mitgelieferten, die eingelesene."""
+    liste = [{"key": "", "name": "keine Vorlage – Medium und Maße unten"}]
+    liste += [{"key": k, "name": v["name"]} for k, v in vorlagen().items()]
+    profil = cfg.get("profil") or {}
+    if profil.get("kopf"):
+        liste.append({"key": "treiberdatei",
+                      "name": f"eingelesene Treiberdatei ({profil.get('datei') or 'ohne Namen'})"})
+    return liste

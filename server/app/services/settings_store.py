@@ -133,6 +133,10 @@ DEFAULTS: dict[str, Any] = {
         # Wohin gedruckt wird, wenn beim Drucken nichts gewaehlt ist (Terminal,
         # Nachdruck, Web-Vorauswahl): "brother" | "terminal".
         "standardziel": "brother",
+        # Etikettensorte: Schluessel aus brother_vorlagen.json (Kopf aus einer
+        # Druckdatei des Brother-Treibers), "treiberdatei" (selbst eingelesen)
+        # oder "" = keine Vorlage, dann gelten medium/breite_mm/laenge_mm.
+        "etikett": "",
         # Was eingelegt ist: "drucker" = wie der Drucker meldet, "etiketten"
         # (gestanzt, Lueckensensor) oder "endlos" (Endlosband, Laenge je Etikett
         # = laenge_mm). Eine Treiberdatei geht vor.

@@ -72,6 +72,7 @@ async def zustand(request: Request, session: AsyncSession = Depends(get_session)
     return {
         "sichtbar": True,
         "einstellungen": brother.oeffentlich(gespeichert),
+        "etikettensorten": brother.etikettensorten(gespeichert),
         "printserver": printserver,
         "profil": _profil_kurz(profil),
         "masse_mm": {"breite": round(breite / brother.DOTS_PER_MM, 1),
@@ -123,7 +124,7 @@ async def treiberdatei(datei: UploadFile = File(...),
     except brother.BrotherFehler as e:
         raise HTTPException(422, str(e)) from e
     profil["datei"] = (datei.filename or "")[:100]
-    await settings_store.merge(session, "brother", {"profil": profil})
+    await settings_store.merge(session, "brother", {"profil": profil, "etikett": "treiberdatei"})
     await session.commit()
     await hub.notify_ui("settings")
     return _profil_kurz(profil)
@@ -132,7 +133,9 @@ async def treiberdatei(datei: UploadFile = File(...),
 @router.delete("/treiberdatei")
 async def treiberdatei_vergessen(session: AsyncSession = Depends(get_session)):
     """Zurueck zum Standardprofil."""
-    await settings_store.merge(session, "brother", {"profil": {}})
+    cfg = await settings_store.get(session, "brother", {}) or {}
+    await settings_store.merge(session, "brother", {
+        "profil": {}, "etikett": "" if cfg.get("etikett") == "treiberdatei" else cfg.get("etikett", "")})
     await session.commit()
     await hub.notify_ui("settings")
     return {"ok": True}

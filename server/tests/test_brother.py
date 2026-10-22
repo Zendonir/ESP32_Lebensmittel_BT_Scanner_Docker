@@ -621,3 +621,47 @@ def test_druckereinstellungen_ueber_den_printserver(client, server):
     assert r.status_code == 200 and server.einstellungen["command_mode"] == 1
     assert client.patch("/api/brother/druckereinstellungen",
                         json={"druckdichte": 2}).status_code == 422
+
+
+# ----------------------------------------- Etikettensorten aus Treiberdateien
+def test_vorlagen_aus_den_treiberdateien():
+    v = brother.vorlagen()
+    assert set(v) == {"rd-51x26", "rd-50x30", "rd-40x50", "rd-40x60", "eigen-57x32"}
+    # Medieninformation (ESC i U) passt zur Tabelle 2.3.5 der Rasterreferenz.
+    assert (v["rd-51x26"]["rand_links_pins"], v["rd-51x26"]["druckbreite_pins"],
+            v["rd-51x26"]["zeilen"]) == (33, 382, 157)
+    assert (v["rd-40x50"]["rand_links_pins"], v["rd-40x50"]["druckbreite_pins"]) == (76, 296)
+    for key, profil in v.items():
+        cfg = {"etikett": key}
+        daten = brother.auftrag_bauen({"test": True}, cfg)
+        wieder = brother.analysieren(daten)
+        # Gleicher Kopf wie der Treiber (samt ESC i U), gleiche Zeilenzahl.
+        assert wieder["kopf"] == profil["kopf"], key
+        assert wieder["zeilen"] == profil["zeilen"] == wieder["zeilen_im_kopf"], key
+        assert wieder["tiff"] is True and wieder["druckbreite_pins"] == profil["druckbreite_pins"]
+
+
+def test_vorlage_legt_das_bild_wie_der_treiber():
+    profil = brother.vorlagen()["eigen-57x32"]          # 8 Pins frei, 432 breit
+    bild = brother.Image.new("1", (432, profil["zeilen"]), 0)   # ganz schwarz
+    daten = brother.rasterdaten(bild, profil, {})
+    zeile = brother.hochformat.unpackbits(
+        daten[len(bytes.fromhex(profil["kopf"])) + 3:][:57], 56)
+    assert zeile[0] == 0x00 and zeile[1] == 0xFF and zeile[54] == 0xFF and zeile[55] == 0x00
+
+
+def test_etikettensorte_waehlen(client, server):
+    z = client.get("/api/brother").json()
+    assert [e["key"] for e in z["etikettensorten"]][:2] == ["", "rd-40x50"]
+    client.patch("/api/settings/brother", json={"etikett": "rd-51x26"})
+    try:
+        z = client.get("/api/brother").json()
+        assert z["profil"]["quelle"] == "vorlage" and z["profil"]["name"].startswith("51 × 26")
+        assert z["masse_mm"] == {"breite": 47.8, "laenge": 19.6}
+        # Die Vorlage gilt - auch wenn der Drucker etwas anderes meldet (dann haelt
+        # der Server Auftraege an, statt falsch zu drucken).
+        cfg = brother.mit_medium({"etikett": "rd-51x26"}, {"media_type": "continuous_tape",
+                                                           "media_width_mm": 58})
+        assert brother.profil_aus(cfg)["key"] == "rd-51x26"
+    finally:
+        client.patch("/api/settings/brother", json={"etikett": ""})
