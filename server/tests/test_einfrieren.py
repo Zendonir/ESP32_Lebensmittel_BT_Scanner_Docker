@@ -50,6 +50,10 @@ def _orte_und_produkte(tag):
     ({"storage_conditions_tags": ["en:refrigerated"]}, "kuehl"),
     ({"storage_conditions_tags": ["en:ambient"]}, "raum"),
     ({"categories_tags": ["en:meals", "en:frozen-foods"]}, "tiefkuehl"),
+    ({"categories_tags": ["en:pizzas", "de:tiefkuhlpizza"]}, "tiefkuehl"),
+    ({"categories_tags": ["fr:surgeles"]}, "tiefkuehl"),
+    ({"categories_tags": ["en:frozen-desserts"]}, "tiefkuehl"),
+    ({"categories_tags": ["en:dairies", "en:yogurts"]}, ""),
     ({"conservation_conditions_de": "Bei -18 °C lagern. Nach dem Auftauen nicht wieder einfrieren."},
      "tiefkuehl"),
     ({"conservation_conditions_de": "Gekühlt bei max. +7 °C lagern."}, "kuehl"),
@@ -198,3 +202,48 @@ def test_von_hand_gesetzt_ueberschreibt_openfoodfacts_nicht():
     assert haltbarkeit.gefroren_setzen(p, True) is False      # nichts zu tun
     assert haltbarkeit.gefroren_setzen(p, False) is True
     assert p.lagerart == "" and haltbarkeit.schon_gefroren(p, "Tiefkühl") is False
+
+
+def test_alte_produkte_holen_die_lagerart_einmal_nach(client, monkeypatch):
+    """Vor dem Update gescannt: beim naechsten Scan einmal OpenFoodFacts fragen,
+    nur die Lagerart uebernehmen, danach nicht wieder."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.services import inventory as inv
+    code = f"5{uuid.uuid4().hex[:10]}"
+    alt = datetime.now(timezone.utc) - timedelta(days=30)
+
+    async def anlegen():
+        async with session_scope() as session:
+            session.add(Product(barcode=code, name="Eigener Name", source="off", fetched_at=alt))
+            await session.commit()
+    _run(anlegen())
+
+    fragen = []
+
+    async def remote(barcode, available):
+        fragen.append(barcode)
+        return {"name": "OFF-Name", "brand": "", "amount": "", "category": "", "subcategory": "",
+                "nutriscore": "", "image_url": "", "lagerart": "tiefkuehl"}
+    monkeypatch.setattr(openfoodfacts, "_fetch_remote", remote)
+    import dataclasses
+    monkeypatch.setattr(openfoodfacts, "settings",
+                        dataclasses.replace(openfoodfacts.settings, openfoodfacts_enabled=True))
+
+    antwort = client.post("/api/inventory/scan", json={"code": code}).json()["product"]
+    assert antwort["gefroren"] is True and antwort["name"] == "Eigener Name"
+    client.post("/api/inventory/scan", json={"code": code})
+    assert fragen == [code]                                   # nur einmal
+
+    # Gezielt abgewaehlt: bleibt so, auch wenn OpenFoodFacts "gefroren" sagt.
+    r = client.post("/api/labels", json={"name": "Eigener Name", "barcode": code, "print": False,
+                                         "gefroren": False})
+    assert r.status_code == 201, r.text
+    assert client.post("/api/inventory/scan", json={"code": code}).json()["product"]["gefroren"] is False
+
+    async def holen():
+        async with session_scope() as session:
+            p = await inv.product_for_barcode(session, code)
+            await openfoodfacts.lookup(session, code, refresh=True)
+            return p.lagerart, p.lagerart_fest
+    assert _run(holen()) == ("", True)

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import timedelta, timezone
 
 import httpx
 from sqlalchemy import select
@@ -37,18 +38,22 @@ _GEFROREN = re.compile(r"[-−–]\s*1[58]\s*°|tiefgekühlt|tiefgekuehlt|tiefge
 _GEKUEHLT = re.compile(r"gekühlt|gekuehlt|kühlschrank|kuehlschrank|\+?\s*[2-8]\s*°\s*c|refrigerat")
 
 
+# Kategorie-Tags fuer Tiefkuehlware, auch in nicht uebersetzten Sprachen:
+# en:frozen-foods, en:frozen-pizzas, de:tiefkuhlprodukte, fr:surgeles ...
+_TK_KATEGORIE = re.compile(r"^[a-z]{2}:(frozen|tiefk(u|ue)hl|tiefgek(u|ue)hlt|tiefgefroren|surgel)")
+
+
 def lagerart(product: dict) -> str:
     """raum/kuehl/tiefkuehl aus einem OpenFoodFacts-Datensatz, "" = unbekannt.
 
-    Zuerst das eigene Feld, dann die Kategorie "frozen-foods", zuletzt der
+    Zuerst das eigene Feld, dann eine Tiefkuehl-Kategorie, zuletzt der
     Text auf der Packung ("bei -18 °C lagern", "gekühlt lagern"). Dort zaehlt
     nur, was vor "nach dem Öffnen" steht.
     """
     for tag in product.get("storage_conditions_tags") or []:
         if tag in _LAGER_TAGS:
             return _LAGER_TAGS[tag]
-    if any(t == "en:frozen-foods" or t.startswith("en:frozen-")
-           for t in product.get("categories_tags") or []):
+    if any(_TK_KATEGORIE.search(t) for t in product.get("categories_tags") or []):
         return "tiefkuehl"
     text = (product.get("conservation_conditions_de")
             or product.get("conservation_conditions") or "").lower()
@@ -96,6 +101,32 @@ async def _fetch_remote(barcode: str, available: list[str]) -> dict | None:
     }
 
 
+# Wie oft ein gescheitertes Nachholen der Lagerart wiederholt wird - sonst
+# wartete ohne Netz jeder Scan eines alten Produkts auf die Zeitgrenze.
+NACHHOLEN_ABSTAND = timedelta(days=1)
+
+
+def _lagerart_fehlt(p: Product) -> bool:
+    """Im Cache, aus OpenFoodFacts, aber nie nach der Lagerart gefragt?"""
+    if p.source != "off" or p.lagerart_fest or p.lagerart_abgefragt:
+        return False
+    zuletzt = p.fetched_at
+    if zuletzt is not None and zuletzt.tzinfo is None:       # SQLite: ohne Zone
+        zuletzt = zuletzt.replace(tzinfo=timezone.utc)
+    return zuletzt is None or utcnow() - zuletzt > NACHHOLEN_ABSTAND
+
+
+async def _lagerart_nachholen(session: AsyncSession, p: Product) -> None:
+    """Nur die Lagerart nachtragen - Name, Marke und Kategorie bleiben, wie
+    sie (womoeglich von Hand) gesetzt sind."""
+    remote = await _fetch_remote(p.barcode, [])
+    p.fetched_at = utcnow()
+    if remote is not None:
+        p.lagerart_abgefragt = True
+        p.lagerart = remote["lagerart"] or p.lagerart
+    await session.flush()
+
+
 async def lookup(session: AsyncSession, barcode: str, refresh: bool = False) -> Product | None:
     """Produkt aus dem Cache holen, sonst online nachschlagen.
 
@@ -112,6 +143,8 @@ async def lookup(session: AsyncSession, barcode: str, refresh: bool = False) -> 
     ).scalar_one_or_none()
     if cached is not None and not refresh:
         if cached.source != "unknown" or cached.fetched_at is not None:
+            if settings.openfoodfacts_enabled and _lagerart_fehlt(cached):
+                await _lagerart_nachholen(session, cached)
             return cached
 
     if not settings.openfoodfacts_enabled:
@@ -146,6 +179,7 @@ async def lookup(session: AsyncSession, barcode: str, refresh: bool = False) -> 
         cached.image_url = remote["image_url"] or cached.image_url
         if not cached.lagerart_fest:          # von Hand gesetzt bleibt
             cached.lagerart = remote["lagerart"] or cached.lagerart
+        cached.lagerart_abgefragt = True
         cached.source = "off"
     elif not cached.name:
         cached.source = "unknown"

@@ -80,6 +80,7 @@ _ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("print_jobs", "ziel", "VARCHAR(16) DEFAULT ''"),
     ("products", "lagerart", "VARCHAR(16) DEFAULT ''"),
     ("products", "lagerart_fest", "BOOLEAN DEFAULT FALSE"),
+    ("products", "lagerart_abgefragt", "BOOLEAN DEFAULT FALSE"),
 )
 
 
