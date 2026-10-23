@@ -11,7 +11,7 @@ from ..device import workflow
 from ..device.hub import hub
 from ..models import InventoryItem, PrintJob
 from ..schemas import LabelCreate, LabelCreateResult, PrintJobOut
-from ..services import brother, calibration, druckertest, haushalte, hochformat
+from ..services import brother, calibration, druckertest, haltbarkeit, haushalte, hochformat
 from ..services import inventory as inv
 from ..services import labels as label_service
 from ..services import settings_store
@@ -150,6 +150,8 @@ async def create_labels(body: LabelCreate, request: Request,
     produkt = await inv.produkt_merken(session, barcode=body.barcode, name=body.name,
                                        brand=body.brand, category=body.category,
                                        subcategory=body.subcategory)
+    if produkt is not None and body.gefroren is not None:
+        haltbarkeit.gefroren_setzen(produkt, body.gefroren)
     await session.commit()
     from ..services import ki
     ki.im_hintergrund(produkt.id if produkt else None)

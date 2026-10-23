@@ -88,6 +88,7 @@ class ProductOut(ORMModel):
     default_shelf_days: int
     haltbarkeit: dict | None = None
     lagerart: str = ""
+    lagerart_fest: bool = False
     source: str
     fetched_at: datetime | None
 
@@ -202,6 +203,8 @@ class LabelCreate(BaseModel):
     device_id: str | None = None
     # Druckziel: "brother", "terminal" oder leer = Standardziel.
     ziel: str = Field(default="", pattern="^(|brother|terminal)$")
+    # Haken "Im Original gefroren" (Handy): None = nicht gezeigt/unveraendert.
+    gefroren: bool | None = None
 
     @field_validator("expiry_date")
     @classmethod

@@ -125,23 +125,42 @@ GEFROREN_KATEGORIE = "Tiefkühl"
 
 def schon_gefroren(produkt: Product | None, kategorie: str = "") -> bool:
     """Wird es tiefgekuehlt verkauft? Die Angabe am Produkt geht vor."""
-    if produkt is not None and produkt.lagerart:
+    if produkt is not None and (produkt.lagerart or produkt.lagerart_fest):
         return produkt.lagerart == "tiefkuehl"
     return (kategorie or (produkt.category if produkt else "")) == GEFROREN_KATEGORIE
 
 
+def gefroren_setzen(produkt: Product, gefroren: bool) -> bool:
+    """Haken "Im Original gefroren" ans Produkt schreiben - nur wenn er von
+    dem abweicht, was ohnehin gilt. Dann ist es von Hand festgelegt.
+
+    Verglichen wird wie beim Scan, der den Haken vorbelegt: mit dem Produkt
+    und seiner eigenen Kategorie, nicht mit der in der Maske gewaehlten.
+    """
+    if schon_gefroren(produkt) == gefroren:
+        return False
+    if gefroren:
+        produkt.lagerart = "tiefkuehl"
+    elif produkt.lagerart == "tiefkuehl":
+        produkt.lagerart = ""
+    produkt.lagerart_fest = True
+    return True
+
+
 async def eingefroren(session: AsyncSession, *, mhd: str, ort: str, kategorie: str = "",
-                      produkt: Product | None = None, **vorschlag_kw) -> dict:
+                      produkt: Product | None = None, gefroren: bool | None = None,
+                      **vorschlag_kw) -> dict:
     """Aufgedrucktes MHD fuer den Lagerort: {"datum", "verlaengert", "hinweis"}.
 
     Ausserhalb des Gefrierschranks und bei schon gefrorener Ware bleibt es,
     wie es ist. Sonst gilt das spaetere von aufgedrucktem MHD und
     Gefrier-Vorschlag (`vorschlag()`, gleiche Reihenfolge wie dort).
+    `gefroren` ueberstimmt, was am Produkt steht (Haken in der Maske).
     """
     gleich = {"datum": mhd, "verlaengert": False, "hinweis": ""}
     if not mhd or await art_von_ort(session, ort) != "tiefkuehl":
         return gleich
-    if schon_gefroren(produkt, kategorie):
+    if schon_gefroren(produkt, kategorie) if gefroren is None else gefroren:
         return {**gleich, "hinweis": "schon tiefgekühlt – MHD bleibt"}
     v = await vorschlag(session, ort=ort, kategorie=kategorie, produkt=produkt, **vorschlag_kw)
     if v["datum"] and v["datum"] > mhd:

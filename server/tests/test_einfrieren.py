@@ -143,3 +143,54 @@ def test_terminal_verlaengert_beim_eintippen(client, monkeypatch):
     assert _run(tippen(f"1{tag}")) == shift_iso(GEFRIER_FLEISCH)
     assert any("Eingefroren" in str(m) for m in gesendet)
     assert _run(tippen(f"2{tag}")) == packung
+
+
+def test_haken_im_original_gefroren_wird_gemerkt(client, monkeypatch):
+    """Falsch erkannt -> beim Einlagern umstellen; der naechste Scan kennt es."""
+    tag = uuid.uuid4().hex[:8]
+    _orte_und_produkte(tag)
+    packung = shift_iso(3)
+
+    async def nachschlagen(session, code, refresh=False):
+        from app.services import inventory as inv
+        return await inv.product_for_barcode(session, code)
+    monkeypatch.setattr(openfoodfacts, "lookup", nachschlagen)
+
+    def scan(code):
+        r = client.post("/api/inventory/scan", json={"code": code})
+        assert r.status_code == 200, r.text
+        return r.json()["product"]
+
+    def einlagern(code, gefroren):
+        r = client.post("/api/labels", json={"name": "x", "barcode": code, "category": "Fleisch & Fisch",
+                                             "expiry_date": packung, "location": f"Truhe-{tag}",
+                                             "print": False, "gefroren": gefroren})
+        assert r.status_code == 201, r.text
+
+    frisch, pizza = f"1{tag}", f"3{tag}"
+    assert scan(frisch)["gefroren"] is False
+    assert scan(pizza)["gefroren"] is True            # ueber die Kategorie "Tiefkühl"
+
+    # Haken setzen bzw. wegnehmen - danach so beim naechsten Scan.
+    einlagern(frisch, True)
+    einlagern(pizza, False)
+    assert scan(frisch)["gefroren"] is True
+    assert scan(pizza)["gefroren"] is False
+
+    # Die Rechnung folgt dem Haken, auch bevor gespeichert ist.
+    frage = {"mhd": packung, "ort": f"Truhe-{tag}", "kategorie": "Fleisch & Fisch", "barcode": f"2{tag}"}
+    assert not client.get("/api/haltbarkeit/eingefroren", params=frage).json()["verlaengert"]
+    assert client.get("/api/haltbarkeit/eingefroren",
+                      params={**frage, "gefroren": "false"}).json()["verlaengert"]
+
+
+def test_von_hand_gesetzt_ueberschreibt_openfoodfacts_nicht():
+    p = Product(barcode="x", lagerart="", lagerart_fest=False, category="Tiefkühl")
+    assert haltbarkeit.gefroren_setzen(p, False) is True      # Kategorie sagt gefroren
+    assert p.lagerart == "" and p.lagerart_fest
+    p = Product(barcode="y", lagerart="", lagerart_fest=False, category="")
+    assert haltbarkeit.gefroren_setzen(p, True) is True
+    assert p.lagerart == "tiefkuehl" and p.lagerart_fest
+    assert haltbarkeit.gefroren_setzen(p, True) is False      # nichts zu tun
+    assert haltbarkeit.gefroren_setzen(p, False) is True
+    assert p.lagerart == "" and haltbarkeit.schon_gefroren(p, "Tiefkühl") is False

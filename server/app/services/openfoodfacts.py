@@ -144,7 +144,8 @@ async def lookup(session: AsyncSession, barcode: str, refresh: bool = False) -> 
         cached.subcategory = remote["subcategory"] or cached.subcategory
         cached.nutriscore = remote["nutriscore"] or cached.nutriscore
         cached.image_url = remote["image_url"] or cached.image_url
-        cached.lagerart = remote["lagerart"] or cached.lagerart
+        if not cached.lagerart_fest:          # von Hand gesetzt bleibt
+            cached.lagerart = remote["lagerart"] or cached.lagerart
         cached.source = "off"
     elif not cached.name:
         cached.source = "unknown"
