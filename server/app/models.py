@@ -116,6 +116,9 @@ class Product(Base, TimestampMixin):
     # dann ohne Rueckfall auf die Kategorie, und OpenFoodFacts ueberschreibt
     # es nicht mehr.
     lagerart_fest: Mapped[bool] = mapped_column(Boolean, default=False)
+    # OpenFoodFacts nach der Lagerart gefragt (mit Antwort). Produkte aus der
+    # Zeit davor holen das beim naechsten Scan einmal nach.
+    lagerart_abgefragt: Mapped[bool] = mapped_column(Boolean, default=False)
     source: Mapped[str] = mapped_column(String(32), default="manual")  # off|manual
     fetched_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
