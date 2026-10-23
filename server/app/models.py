@@ -112,6 +112,10 @@ class Product(Base, TimestampMixin):
     # OpenFoodFacts (storage_conditions_tags). Entscheidet, ob das MHD beim
     # Einfrieren verlaengert wird (services/haltbarkeit.eingefroren).
     lagerart: Mapped[str] = mapped_column(String(16), default="")
+    # Von Hand gesetzt (Haken "Im Original gefroren" beim Einlagern): gilt
+    # dann ohne Rueckfall auf die Kategorie, und OpenFoodFacts ueberschreibt
+    # es nicht mehr.
+    lagerart_fest: Mapped[bool] = mapped_column(Boolean, default=False)
     source: Mapped[str] = mapped_column(String(32), default="manual")  # off|manual
     fetched_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

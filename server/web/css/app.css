@@ -369,6 +369,23 @@ tr.inv-kind td { background: color-mix(in srgb, var(--surface-2) 45%, transparen
 .kamera-ziel { position: absolute; border: 3px solid #fff; border-radius: 12px;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, .5); transition: border-color .2s; }
 .kamera-ziel.treffer { border-color: #43a047; }
+/* Haken "Im Original gefroren" in der Einlagern-Maske - an: sieht vereist aus. */
+.ef-frost { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 10px;
+  border: 1px dashed var(--border); border-radius: var(--radius); cursor: pointer; font-weight: 600;
+  transition: background .3s, border-color .3s, box-shadow .3s, color .3s; }
+.ef-frost input { width: 22px; height: 22px; flex: none; accent-color: #2b8fd6; }
+.ef-frost small { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+.ef-frost .flocke { font-size: 22px; filter: grayscale(1); opacity: .45; transition: opacity .3s, filter .3s; }
+.ef-frost.an { color: #0b3a5c; border: 1px solid #8fd0fb;
+  background:
+    radial-gradient(circle at 12% 30%, rgba(255, 255, 255, .9) 0 2px, transparent 3px),
+    radial-gradient(circle at 78% 22%, rgba(255, 255, 255, .8) 0 1.5px, transparent 2.5px),
+    radial-gradient(circle at 60% 80%, rgba(255, 255, 255, .7) 0 1.5px, transparent 2.5px),
+    linear-gradient(135deg, #eaf7ff 0%, #bfe4ff 50%, #e3f4ff 100%);
+  box-shadow: inset 0 0 14px rgba(255, 255, 255, .85), 0 0 12px rgba(100, 185, 255, .45); }
+.ef-frost.an small { color: #2a6185; }
+.ef-frost.an .flocke { filter: none; opacity: 1; }
+
 /* Aufblitzen nach einem Treffer (blitz() in api.js). */
 .blitz { position: fixed; inset: 0; z-index: 9999; pointer-events: none; background: #fff;
   animation: blitz .35s ease-out forwards; }

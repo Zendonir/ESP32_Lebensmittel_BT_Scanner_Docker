@@ -280,7 +280,7 @@ async def mhd_vorschlag(ort: str = "", kategorie: str = "", barcode: str = "",
 
 @router.get("/haltbarkeit/eingefroren")
 async def mhd_eingefroren(mhd: str, ort: str = "", kategorie: str = "", barcode: str = "",
-                          vorlage: int | None = None,
+                          vorlage: int | None = None, gefroren: bool | None = None,
                           session: AsyncSession = Depends(get_session)):
     """Aufgedrucktes MHD fuer den Lagerort: im Gefrierschrank verlaengert,
     ausser die Ware wird schon gefroren verkauft. Dieselbe Rechnung wie am
@@ -294,7 +294,7 @@ async def mhd_eingefroren(mhd: str, ort: str = "", kategorie: str = "", barcode:
             eigene_tage=0 if tpl.haltbarkeit else tpl.shelf_days, vorlage=tpl.haltbarkeit,
             herkunft="Vorlage")
     return await haltbarkeit.eingefroren(session, mhd=mhd, ort=ort, kategorie=kategorie,
-                                         produkt=produkt)
+                                         produkt=produkt, gefroren=gefroren)
 
 
 @router.get("/ki")

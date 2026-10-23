@@ -251,6 +251,8 @@ async def scan(req: ScanRequest, request: Request,
             # Vorschlag fuers MHD, wie am Terminal (shift_iso).
             "expiry_date": shift_iso(product.default_shelf_days)
             if product.default_shelf_days else "",
+            # Haken "Im Original gefroren" vorbelegen.
+            "gefroren": haltbarkeit.schon_gefroren(product),
         },
     }
 

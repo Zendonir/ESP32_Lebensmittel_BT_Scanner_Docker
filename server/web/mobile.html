@@ -654,6 +654,11 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
   // Alles auf einen Bildschirm: kleine Feldnamen, mehrere Felder je Zeile,
   // die MHD-Knoepfe in einer seitlich wischbaren Reihe (Stil #einlagern oben).
   view.innerHTML = `<form class="card" id="einlagern">
+    ${code && !vorlage ? `<label class="ef-frost${p.gefroren ? ' an' : ''}">
+      <input type="checkbox" name="gefroren" ${p.gefroren ? 'checked' : ''}>
+      <span class="flocke" aria-hidden="true">❄️</span>
+      <span>Im Original gefroren<small>MHD bleibt im Gefrierschrank, wie es auf der Packung steht</small></span>
+    </label>` : ''}
     ${code ? `<div class="ef-code"><span class="mono">${esc(code)}</span>
       <span class="muted">${produkt ? 'erkannt' : 'unbekannt – bitte Namen eingeben'}</span></div>`
     : vorlage ? '' : `<div class="ef-code muted">Ohne Vorlage · ${esc(p.category || '')}</div>`}
@@ -692,6 +697,23 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
       .map((s) => `<option value="${esc(s)}">`).join('');
   };
   sorten();
+
+  // Gefroren gekauft gehoert in den Gefrierschrank - dann stehen nur dessen
+  // Orte zur Wahl. Frisches darf ueberall hin (eingefroren wird es
+  // verlaengert). Ohne Gefrierort bleibt alles waehlbar. Lagerart wie im
+  // Server (Location.kind, sonst haltbarkeit.art_raten nach dem Namen).
+  const ortArt = (o) => o.kind || (/gefrier|truhe|tiefk(ü|ue)hl|frost|eis/i.test(o.name) ? 'tiefkuehl'
+    : /k(ü|ue)hl|fridge/i.test(o.name) ? 'kuehl' : 'raum');
+  function orteFiltern() {
+    const nurTief = form.gefroren?.checked;
+    const tief = orte.filter((o) => ortArt(o) === 'tiefkuehl');
+    const liste = nurTief && tief.length ? tief : orte;
+    const alt = form.location.value;
+    const neu = liste.some((o) => o.name === alt) ? alt : (liste[0] || {}).name || '';
+    form.location.innerHTML = opt(liste.map((o) => o.name), neu);
+    return neu !== alt;
+  }
+  orteFiltern();
 
   // MHD-Vorschlag: haengt am Lagerort (Raum/Kuehl/Gefrier) und an der
   // Kategorie, und folgt beiden, bis man das Datum selbst setzt.
@@ -740,6 +762,7 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
     try {
       const v = await get(`/api/haltbarkeit/eingefroren?mhd=${aufgedruckt}`
         + `&ort=${encodeURIComponent(form.location.value)}`
+        + (form.gefroren ? `&gefroren=${form.gefroren.checked}` : '')
         + `&kategorie=${encodeURIComponent(form.category.value)}&barcode=${encodeURIComponent(code)}`
         + (vorlage ? `&vorlage=${vorlage.id}` : ''));
       if (nr !== einfrierNr || form.expiry_date.value !== aufgedruckt) return;   // inzwischen anders gesetzt
@@ -754,6 +777,13 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
     if (aufgedruckt) einfrieren(einfrierText); else mhdNeu();
   });
   form.location.addEventListener('change', () => {
+    if (aufgedruckt) einfrieren(einfrierText); else mhdNeu();
+  });
+  // Haken "Im Original gefroren": falsch erkannt -> hier umstellen. Er wird
+  // beim Einlagern am Produkt gemerkt und gilt beim naechsten Scan.
+  form.gefroren?.addEventListener('change', () => {
+    form.gefroren.closest('.ef-frost').classList.toggle('an', form.gefroren.checked);
+    orteFiltern();
     if (aufgedruckt) einfrieren(einfrierText); else mhdNeu();
   });
   form.expiry_date.addEventListener('input', () => { mhdVonHand = true; quelle.textContent = 'von Hand gesetzt'; });
@@ -866,6 +896,7 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
     const body = {
       name: form.name.value.trim(),
       barcode: code,
+      gefroren: form.gefroren ? form.gefroren.checked : null,
       brand: form.brand.value.trim(),
       category: form.category.value,
       subcategory: form.subcategory.value.trim(),
