@@ -1108,11 +1108,21 @@ async function templateForm(tpl) {
     </div>
     ${tpl ? '<button type="button" class="danger" id="tpl-del">Vorlage löschen</button>' : ''}</form>`;
 
-  // Platzhalter zeigen, was die gewaehlte Kategorie vorgibt.
-  document.querySelector('#tplform [name="category"]').addEventListener('change', (ev) => {
-    const h = katHalt(ev.target.value);
-    halt.forEach(([k]) => { document.querySelector(`#tplform [name="h_${k}"]`).placeholder = h[k] || '–'; });
-  });
+  // Platzhalter zeigen, was die gewaehlte Kategorie vorgibt. Eine neue
+  // Vorlage uebernimmt die Werte der Kategorie als eigene (die Kategorie ist
+  // nur die Grundempfehlung) - bis man ein Feld selbst aendert.
+  const haltFeld = (k) => document.querySelector(`#tplform [name="h_${k}"]`);
+  const katUebernehmen = (name) => {
+    const h = katHalt(name);
+    halt.forEach(([k]) => {
+      const f = haltFeld(k);
+      f.placeholder = h[k] || '–';
+      if (!tpl && !f.dataset.vonHand) f.value = h[k] || '';
+    });
+  };
+  halt.forEach(([k]) => haltFeld(k).addEventListener('input', (ev) => { ev.target.dataset.vonHand = '1'; }));
+  document.querySelector('#tplform [name="category"]').addEventListener('change', (ev) => katUebernehmen(ev.target.value));
+  katUebernehmen(document.querySelector('#tplform [name="category"]').value);
   const brands = tagEditor(document.getElementById('f-brands'), tpl?.brands || [], 'Marke hinzufügen …');
   const sorten = tagEditor(document.getElementById('f-sorten'), tpl?.sorten || [], 'Sorte hinzufügen …');
   // Haken gesetzt: Sortenliste zeigen und, wenn leer, mit denen der
