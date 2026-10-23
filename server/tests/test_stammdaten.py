@@ -1,16 +1,8 @@
-"""Umbenennen in den Stammdaten muss bei den Artikeln ankommen.
-
-Kategorie und Lagerort stehen an Artikeln, Vorlagen und Produkten als Text,
-nicht als Verweis. Wer in den Stammdaten "Getraenke" in "Getränke" umbenannte,
-aenderte bisher nur die Stammdatenzeile - die Artikel trugen weiter den alten
-Namen. Sie fielen damit aus dem Kategoriefilter, standen in der Uebersicht als
-eigene, farblose Gruppe, und am Terminal lebte die alte Kategorie in den
-Vorlagen weiter. Der naheliegende Weg, einen Namen zu korrigieren, hat also
-still Daten auseinandergerissen.
-"""
+"""Vorlagen und Stammdaten exportieren und wieder einlesen."""
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pytest
@@ -25,123 +17,79 @@ def client():
         yield c
 
 
-def _eindeutig(prefix: str) -> str:
-    return f"{prefix}-{uuid.uuid4().hex[:6]}"
+def _import(client, daten, **params):
+    return client.post("/api/stammdaten/import", params=params,
+                       files={"file": ("s.json", json.dumps(daten).encode(), "application/json")})
 
 
-def test_kategorie_umbenennen_zieht_artikel_und_vorlagen_mit(client):
-    alt, neu = _eindeutig("Getraenke"), _eindeutig("Getränke")
-    cat = client.post("/api/categories", json={"name": alt}).json()
-    label = client.post(
-        "/api/labels", json={"name": "Apfelsaft", "category": alt, "print": False}
-    ).json()["labels"][0]
-    tpl = client.post(
-        "/api/templates", json={"name": _eindeutig("Saft"), "category": alt}
-    ).json()
-
-    r = client.put(f"/api/categories/{cat['id']}", json={"name": neu, "color": cat["color"]})
-    assert r.status_code == 200
-
-    assert client.get(f"/api/inventory/{label}").json()["category"] == neu
-    vorlagen = {t["id"]: t for t in client.get("/api/templates").json()}
-    assert vorlagen[tpl["id"]]["category"] == neu
-    # Der Filter findet den Artikel unter dem neuen Namen.
-    gefunden = client.get("/api/inventory", params={"category": neu}).json()
-    assert [i["label"] for i in gefunden] == [label]
+def test_export_enthaelt_alle_teile_ohne_bestand(client):
+    tag = uuid.uuid4().hex[:6]
+    client.post("/api/templates", json={"name": f"Hack {tag}", "category": "Fleisch & Fisch",
+                                        "haltbarkeit": {"kuehl": 1, "tiefkuehl": 90},
+                                        "brands": ["Metzger"], "sorten": ["Rind"]})
+    r = client.get("/api/stammdaten/export")
+    assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
+    d = r.json()
+    assert d["art"] == "lebensmittel-stammdaten" and "inventory" not in d
+    assert {"haushalte", "kategorien", "lagerorte", "vorlagen", "produkte"} <= set(d)
+    hack = next(v for v in d["vorlagen"] if v["name"] == f"Hack {tag}")
+    assert hack["haltbarkeit"] == {"kuehl": 1, "tiefkuehl": 90} and hack["brands"] == ["Metzger"]
+    assert "id" not in hack
+    nur = client.get("/api/stammdaten/export", params={"teile": "kategorien"}).json()
+    assert "kategorien" in nur and "vorlagen" not in nur
+    assert client.get("/api/stammdaten/export", params={"teile": "bestand"}).status_code == 400
 
 
-def test_lagerort_umbenennen_zieht_artikel_mit(client):
-    alt, neu = _eindeutig("Kuehlschrank"), _eindeutig("Kühlschrank")
-    loc = client.post("/api/locations", json={"name": alt}).json()
-    label = client.post(
-        "/api/labels", json={"name": "Butter", "location": alt, "print": False}
-    ).json()["labels"][0]
+def test_import_ergaenzt_ueberschreibt_und_prueft(client):
+    tag = uuid.uuid4().hex[:6]
+    datei = {"art": "lebensmittel-stammdaten", "version": 1,
+             "kategorien": [{"name": f"Eis {tag}", "color": "#00aaff", "haltbarkeit": {"tiefkuehl": 60}}],
+             "lagerorte": [{"name": f"Truhe {tag}", "kind": "tiefkuehl"}],
+             "vorlagen": [{"name": f"Suppe {tag}", "category": f"Eis {tag}", "unit": "ml",
+                           "haltbarkeit": {"kuehl": 3, "tiefkuehl": 120}, "brands": ["Oma"]}],
+             "produkte": [{"barcode": f"77{tag}", "name": "Pizza", "lagerart": "tiefkuehl",
+                           "lagerart_fest": True}]}
 
-    r = client.put(f"/api/locations/{loc['id']}", json={"name": neu})
-    assert r.status_code == 200
-    assert client.get(f"/api/inventory/{label}").json()["location"] == neu
+    # Pruefen schreibt nichts.
+    r = _import(client, datei, probe=True).json()
+    assert r["probe"] and r["teile"]["vorlagen"]["neu"] == 1
+    assert not any(v["name"] == f"Suppe {tag}" for v in client.get("/api/templates").json())
 
+    r = _import(client, datei).json()
+    assert all(t["neu"] == 1 for t in r["teile"].values())
+    tpl = next(v for v in client.get("/api/templates").json() if v["name"] == f"Suppe {tag}")
+    assert tpl["haltbarkeit"] == {"kuehl": 3, "tiefkuehl": 120} and tpl["unit"] == "ml"
+    ort = next(o for o in client.get("/api/locations").json() if o["name"] == f"Truhe {tag}")
+    assert ort["kind"] == "tiefkuehl"
 
-def test_umbenennen_auf_vorhandenen_namen_wird_abgewiesen(client):
-    """Kein Serverfehler, sondern eine verstaendliche Absage."""
-    a = client.post("/api/categories", json={"name": _eindeutig("A")}).json()
-    b = client.post("/api/categories", json={"name": _eindeutig("B")}).json()
-    r = client.put(f"/api/categories/{a['id']}", json={"name": b["name"]})
-    assert r.status_code == 409
-    assert "existiert" in r.json()["detail"]
+    # Ergaenzen laesst Vorhandenes stehen, Ueberschreiben nimmt die Datei.
+    datei["vorlagen"][0]["haltbarkeit"] = {"tiefkuehl": 200}
+    r = _import(client, datei).json()
+    assert r["teile"]["vorlagen"] == {"neu": 0, "geaendert": 0, "gleich": 0, "uebersprungen": 1}
+    r = _import(client, datei, modus="ueberschreiben").json()
+    assert r["teile"]["vorlagen"]["geaendert"] == 1
+    tpl = next(v for v in client.get("/api/templates").json() if v["name"] == f"Suppe {tag}")
+    assert tpl["haltbarkeit"] == {"tiefkuehl": 200}
 
-
-# --------------------------------------------------------- Umschriften nachziehen
-#
-# Eigene, leere Datenbank im Speicher: die gemeinsame Testdatenbank ist schon
-# mit den neuen Namen befuellt, dort gaebe es nichts nachzuziehen.
-async def _frische_sitzung():
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-    from app.models import Base
-
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    return engine, async_sessionmaker(engine, expire_on_commit=False)
-
-
-@pytest.mark.asyncio
-async def test_alte_umschriften_werden_einmal_nachgezogen():
-    from sqlalchemy import select
-
-    from app.models import Category, InventoryItem, Template
-    from app.services import seed
-
-    engine, maker = await _frische_sitzung()
-    async with maker() as s:
-        s.add_all([
-            Category(name="Getraenke"), Category(name="Tiefkuehl"),
-            InventoryItem(label="LEB900001", name="Wasser", category="Getraenke"),
-            Template(name="Gebaeck", category="Backwaren", brands=[], sorten=[]),
-        ])
-        await s.commit()
-
-        await seed.run(s)
-
-        namen = set((await s.execute(select(Category.name))).scalars())
-        assert {"Getränke", "Tiefkühl"} <= namen
-        assert not {"Getraenke", "Tiefkuehl"} & namen
-        item = (await s.execute(select(InventoryItem))).scalar_one()
-        assert item.category == "Getränke"
-        assert (await s.execute(select(Template.name))).scalar_one() == "Gebäck"
-
-        # Ein zweiter Start aendert nichts mehr.
-        await seed.run(s)
-        assert set((await s.execute(select(Category.name))).scalars()) == namen
-    await engine.dispose()
+    # Nur gewaehlte Teile.
+    datei["kategorien"][0]["color"] = "#ff0000"
+    r = _import(client, datei, modus="ueberschreiben", teile="vorlagen").json()
+    assert set(r["teile"]) == {"vorlagen"}
+    kat = next(k for k in client.get("/api/categories").json() if k["name"] == f"Eis {tag}")
+    assert kat["color"] == "#00aaff"
 
 
-@pytest.mark.asyncio
-async def test_bewusst_angelegtes_ziel_bleibt_unberuehrt():
-    """Gibt es "Getränke" schon, wird nicht zusammengelegt - das waere eine
-    Entscheidung, die der Server nicht treffen soll."""
-    from sqlalchemy import select
-
-    from app.models import Category
-    from app.services import seed
-
-    engine, maker = await _frische_sitzung()
-    async with maker() as s:
-        s.add_all([Category(name="Getraenke"), Category(name="Getränke")])
-        await s.commit()
-        await seed.run(s)
-        namen = set((await s.execute(select(Category.name))).scalars())
-        assert {"Getraenke", "Getränke"} <= namen
-    await engine.dispose()
+def test_falsche_dateien_werden_abgelehnt(client):
+    assert client.post("/api/stammdaten/import",
+                       files={"file": ("x.json", b"{kaputt", "application/json")}).status_code == 400
+    assert _import(client, {"version": 2, "inventory": []}).status_code == 400
+    assert _import(client, {"art": "lebensmittel-stammdaten", "version": 99}).status_code == 400
+    assert _import(client, {"art": "lebensmittel-stammdaten", "version": 1},
+                   modus="loeschen").status_code == 422
 
 
-def test_lagerort_hat_eine_farbe_und_behaelt_sie_beim_umbenennen(client):
-    loc = client.post("/api/locations", json={"name": _eindeutig("Truhe")}).json()
-    assert loc["color"].startswith("#") and len(loc["color"]) == 7
-    r = client.put(f"/api/locations/{loc['id']}", json={"name": _eindeutig("Truhe")})
-    assert r.json()["color"] == loc["color"]
-    r = client.put(f"/api/locations/{loc['id']}", json={"name": r.json()["name"], "color": "#ff0000"})
-    assert r.json()["color"] == "#ff0000"
-    assert client.put(f"/api/locations/{loc['id']}",
-                      json={"name": "x", "color": "rot"}).status_code == 422
+def test_nur_ein_standardort_nach_dem_import(client):
+    tag = uuid.uuid4().hex[:6]
+    _import(client, {"art": "lebensmittel-stammdaten", "version": 1,
+                     "lagerorte": [{"name": f"Keller {tag}", "is_default": True}]})
+    assert sum(o["is_default"] for o in client.get("/api/locations").json()) == 1

@@ -378,6 +378,32 @@
       </div>
     </div>
     <div class="card" style="margin-top:14px">
+      <h2 style="margin:0 0 6px">Import / Export</h2>
+      <p class="muted" style="margin:0 0 10px">Vorlagen und Stammdaten als Datei – zum Sichern, für eine zweite
+        Installation oder zum Teilen. Der Bestand gehört nicht dazu (dafür System → Sicherung).
+        Zugeordnet wird über den Namen, bei Produkten über den Barcode. Beim Import wird nie etwas gelöscht.</p>
+      <div class="row" id="sd-teile" style="flex-wrap:wrap;gap:14px;margin-bottom:10px">
+        <label class="row tight"><input type="checkbox" value="vorlagen" checked> Vorlagen</label>
+        <label class="row tight"><input type="checkbox" value="kategorien" checked> Kategorien</label>
+        <label class="row tight"><input type="checkbox" value="lagerorte" checked> Lagerorte</label>
+        <label class="row tight"><input type="checkbox" value="haushalte" checked> Haushalte</label>
+        <label class="row tight"><input type="checkbox" value="produkte" checked> Produkt-Cache</label>
+      </div>
+      <div class="row" style="flex-wrap:wrap;gap:10px">
+        <button class="primary" id="sd-export">Exportieren</button>
+        <form class="row" id="sd-import-form" style="flex-wrap:wrap;gap:10px;flex:1">
+          <input type="file" id="sd-file" accept=".json,application/json" required style="flex:1;min-width:180px">
+          <select id="sd-modus">
+            <option value="ergaenzen">Nur Fehlendes ergänzen</option>
+            <option value="ueberschreiben">Vorhandenes überschreiben</option>
+          </select>
+          <button type="submit" class="ghost" data-probe="1">Prüfen</button>
+          <button type="submit">Importieren</button>
+        </form>
+      </div>
+      <div id="sd-result" style="margin-top:10px"></div>
+    </div>
+    <div class="card" style="margin-top:14px">
       <div class="row"><h2 style="margin:0;flex:1">Produkt-Cache</h2><input id="prod-q" placeholder="Suchen" style="width:220px"></div>
       <div class="table-wrap"><table>
         <thead><tr><th>Barcode</th><th>Name</th><th>Marke</th><th>Kategorie</th><th>Menge</th><th>Quelle</th><th class="right">Aktion</th></tr></thead>

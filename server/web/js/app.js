@@ -657,6 +657,19 @@ async function templateDialog(tpl) {
     };
     select.addEventListener('change', offer);
     offer();
+    // Eine neue Vorlage uebernimmt die Haltbarkeit der Kategorie als eigene
+    // Werte (die Kategorie ist nur die Grundempfehlung) - bis man ein Feld
+    // selbst aendert. Bestehende Vorlagen bleiben, wie sie sind.
+    if (!tpl) {
+      const felder = Object.keys(ARTEN).map((k) => body.querySelector(`[name="h_${k}"]`)).filter(Boolean);
+      felder.forEach((f) => f.addEventListener('input', () => { f.dataset.vonHand = '1'; }));
+      const uebernehmen = () => {
+        const h = state.categories.find((c) => c.name === select.value)?.haltbarkeit || {};
+        felder.forEach((f) => { if (!f.dataset.vonHand) f.value = h[f.name.slice(2)] || 0; });
+      };
+      select.addEventListener('change', uebernehmen);
+      uebernehmen();
+    }
   });
   if (!values) return;
 
@@ -758,6 +771,59 @@ async function loadCatalogPage() {
 
   await loadProducts();
 }
+
+// Import / Export von Vorlagen und Stammdaten (services/stammdaten.py).
+const sdTeile = () => [...document.querySelectorAll('#sd-teile input:checked')].map((c) => c.value).join(',');
+const SD_NAMEN = { vorlagen: 'Vorlagen', kategorien: 'Kategorien', lagerorte: 'Lagerorte',
+  haushalte: 'Haushalte', produkte: 'Produkt-Cache' };
+
+$('#sd-export').addEventListener('click', () => {
+  const teile = sdTeile();
+  if (!teile) { toast('Mindestens einen Teil wählen', 'warn'); return; }
+  const a = document.createElement('a');
+  a.href = `/api/stammdaten/export?teile=${encodeURIComponent(teile)}`;
+  a.download = '';
+  document.body.appendChild(a); a.click(); a.remove();
+});
+
+$('#sd-import-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const file = $('#sd-file').files[0];
+  const teile = sdTeile();
+  if (!file || !teile) { toast('Datei und mindestens einen Teil wählen', 'warn'); return; }
+  const probe = !!ev.submitter?.dataset.probe;
+  const modus = $('#sd-modus').value;
+  if (!probe && modus === 'ueberschreiben'
+      && !confirm('Vorhandene Einträge mit gleichem Namen werden mit den Werten aus der Datei überschrieben. Weiter?')) return;
+  const body = new FormData();
+  body.append('file', file);
+  const box = $('#sd-result');
+  box.innerHTML = '<span class="muted">Wird verarbeitet…</span>';
+  try {
+    const res = await fetch(`/api/stammdaten/import?teile=${encodeURIComponent(teile)}`
+      + `&modus=${modus}&probe=${probe}`, { method: 'POST', body });
+    const data = await res.json();
+    if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Fehler');
+    const zeilen = Object.entries(data.teile);
+    box.innerHTML = `<span class="pill ${probe ? '' : 'ok'}">${probe ? 'Prüflauf – nichts geändert' : 'Importiert'}</span>
+      <div class="table-wrap" style="margin-top:8px"><table>
+        <thead><tr><th></th><th class="right">neu</th><th class="right">geändert</th>
+          <th class="right">unverändert</th><th class="right">übersprungen</th></tr></thead>
+        <tbody>${zeilen.map(([t, z]) => `<tr><td>${esc(SD_NAMEN[t] || t)}</td><td class="right">${z.neu}</td>
+          <td class="right">${z.geaendert}</td><td class="right">${z.gleich}</td>
+          <td class="right">${z.uebersprungen}</td></tr>`).join('')}</tbody></table></div>
+      ${modus === 'ergaenzen' && zeilen.some(([, z]) => z.uebersprungen)
+    ? '<p class="muted" style="margin:6px 0 0">„übersprungen“: gibt es schon mit anderen Werten – zum Übernehmen „Vorhandenes überschreiben“ wählen.</p>' : ''}`;
+    if (!probe) {
+      toast('Stammdaten übernommen', 'success');
+      await Promise.all([loadCatalogPage().catch(() => {}), loadTemplates().catch(() => {}),
+        loadCatalogData().catch(() => {})]);
+    }
+  } catch (e) {
+    box.innerHTML = '';
+    toast(e.message, 'error');
+  }
+});
 
 async function loadProducts() {
   const q = $('#prod-q').value.trim();

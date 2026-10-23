@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import json
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -23,7 +27,7 @@ from ..schemas import (
 )
 from ..device import workflow
 from ..services import inventory as inv
-from ..services import haltbarkeit, openfoodfacts, seed
+from ..services import haltbarkeit, openfoodfacts, seed, stammdaten
 from ..services.dates import to_iso_date
 
 router = APIRouter(prefix="/api", tags=["stammdaten"])
@@ -486,3 +490,47 @@ async def delete_product(barcode: str, session: AsyncSession = Depends(get_sessi
     await session.delete(row)
     await session.commit()
     return {"ok": True}
+
+
+# ------------------------------------------------------- Import / Export
+def _teile(teile: str) -> tuple[str, ...]:
+    """"kategorien,vorlagen" -> ("kategorien", "vorlagen"); leer = alle."""
+    gewaehlt = tuple(t for t in (x.strip() for x in teile.split(",")) if t)
+    falsch = [t for t in gewaehlt if t not in stammdaten.TEILE]
+    if falsch:
+        raise HTTPException(400, f"Unbekannte Teile: {', '.join(falsch)}")
+    return gewaehlt or stammdaten.TEILE
+
+
+@router.get("/stammdaten/export")
+async def stammdaten_export(teile: str = "", session: AsyncSession = Depends(get_session)):
+    """Vorlagen und Stammdaten als JSON-Datei (ohne Bestand)."""
+    daten = await stammdaten.exportieren(session, _teile(teile))
+    name = f"lebensmittel-stammdaten-{date.today().isoformat()}.json"
+    return Response(json.dumps(daten, ensure_ascii=False, indent=2, default=str),
+                    media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.post("/stammdaten/import")
+async def stammdaten_import(file: UploadFile, teile: str = "",
+                            modus: str = Query("ergaenzen", pattern="^(ergaenzen|ueberschreiben)$"),
+                            probe: bool = False, session: AsyncSession = Depends(get_session)):
+    """Datei aus /stammdaten/export einlesen. Loescht nie etwas; `probe`
+    zaehlt nur, was passieren wuerde."""
+    inhalt = await file.read()
+    if len(inhalt) > 20 * 1024 * 1024:
+        raise HTTPException(413, "Datei zu groß (Grenze 20 MB)")
+    try:
+        daten = json.loads(inhalt)
+    except (UnicodeDecodeError, ValueError):
+        raise HTTPException(400, "Keine gültige JSON-Datei") from None
+    try:
+        ergebnis = await stammdaten.importieren(session, daten, teile=_teile(teile),
+                                                modus=modus, probe=probe)
+    except stammdaten.Ungueltig as e:
+        raise HTTPException(400, str(e)) from None
+    if not probe:
+        await session.commit()
+        await hub.notify_ui("catalog")
+    return {"probe": probe, "modus": modus, "teile": ergebnis}
