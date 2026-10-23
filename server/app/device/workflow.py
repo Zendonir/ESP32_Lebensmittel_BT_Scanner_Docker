@@ -1772,7 +1772,7 @@ async def _usb_daten(session: AsyncSession, job: PrintJob, cfg: dict,
         select(InventoryItem).where(InventoryItem.label == job.label))).scalars().first()
     if item is not None:
         payload = brother.auftrag({c.name: getattr(item, c.name) for c in InventoryItem.__table__.columns})
-    elif (job.label or "").upper() == "TEST":
+    elif (job.label or "").upper() == "TEST" and (job.payload or {}).get("testetikett"):
         payload = {"test": True}
     else:
         return "Messstreifen und ESC/POS-Tests gehen nur an einen seriellen Drucker"

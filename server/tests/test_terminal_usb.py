@@ -32,7 +32,8 @@ def _run(coro):
     return asyncio.get_event_loop_policy().new_event_loop().run_until_complete(coro)
 
 
-def _drucken(drucker: str, caps, label: str, mit_artikel: bool = True):
+def _drucken(drucker: str, caps, label: str, mit_artikel: bool = True,
+             testetikett: bool = False):
     """Einen Auftrag an ein Terminal mit dieser Druckerart schicken."""
     async def scenario():
         await init_db()
@@ -50,9 +51,11 @@ def _drucken(drucker: str, caps, label: str, mit_artikel: bool = True):
         sess.caps, sess.drucker = caps, drucker
         try:
             async with session_scope() as session:
-                job = PrintJob(label=label, status="queued",
-                               payload=labels.render_label({"label": label, "name": "x"},
-                                                           {"label_layout": "standard"}))
+                payload = labels.render_label({"label": label, "name": "x"},
+                                              {"label_layout": "standard"})
+                if testetikett:
+                    payload["testetikett"] = True
+                job = PrintJob(label=label, status="queued", payload=payload)
                 session.add(job)
                 await session.commit()
                 gesendet = await workflow.flush_print_queue(session, geraet)
@@ -90,6 +93,18 @@ def test_usb_ohne_passende_firmware_scheitert_mit_hinweis():
 def test_usb_kann_keine_esc_pos_messstreifen():
     _, status, fehler, _, _ = _drucken("usb", {proto.USB_DRUCK}, "KALIB", mit_artikel=False)
     assert status == "failed" and "seriellen" in fehler
+
+
+def test_usb_druckertest_wird_nicht_zum_brother_testetikett():
+    # Druckertests (/api/labels/tests/...) heissen ebenfalls "TEST".
+    _, status, fehler, gesendet, _ = _drucken("usb", {proto.USB_DRUCK}, "TEST", mit_artikel=False)
+    assert status == "failed" and "seriellen" in fehler and not gesendet
+
+
+def test_usb_testetikett_wird_brother_test():
+    anzahl, status, _, gesendet, _ = _drucken("usb", {proto.USB_DRUCK}, "TEST",
+                                              mit_artikel=False, testetikett=True)
+    assert anzahl == 1 and status == "sent" and any(m["t"] == "usbdruck" for m in gesendet)
 
 
 def test_terminal_ohne_drucker_bekommt_nichts():

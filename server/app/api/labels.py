@@ -243,6 +243,10 @@ async def test_print(
     # Drucker. Ein eigener Testartikel mit anderen Angaben liess Zeilen
     # scheinbar verschwinden.
     payload = label_service.render_label(_SAMPLE, printer_cfg)
+    # Merker fuer den Brother am USB: nur dieses Testetikett wird dort als
+    # Brother-Test gezeichnet. Druckertests tragen ebenfalls "TEST", sind aber
+    # ESC/POS-Befehle und gehen nur an einen seriellen Drucker.
+    payload["testetikett"] = True
     job = PrintJob(label="TEST", payload=payload, status="queued")
     session.add(job)
     await label_service.consume_roll(session, 1)
