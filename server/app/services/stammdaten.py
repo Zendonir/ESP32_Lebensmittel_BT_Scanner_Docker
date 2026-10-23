@@ -95,6 +95,9 @@ FELDER = {
         "haltbarkeit": haltbarkeit.bereinigen,
         "lagerart": lambda v: v if v in haltbarkeit.ARTEN else "",
         "lagerart_fest": bool,
+        # Sonst fragte jedes umgezogene OFF-Produkt beim naechsten Scan erneut
+        # (openfoodfacts._lagerart_fehlt) und koennte die Lagerart ueberschreiben.
+        "lagerart_abgefragt": bool,
         "source": lambda v: v if v in ("off", "manual") else "manual",
     }),
 }

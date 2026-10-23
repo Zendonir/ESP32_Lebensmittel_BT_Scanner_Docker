@@ -48,7 +48,7 @@ def test_import_ergaenzt_ueberschreibt_und_prueft(client):
              "vorlagen": [{"name": f"Suppe {tag}", "category": f"Eis {tag}", "unit": "ml",
                            "haltbarkeit": {"kuehl": 3, "tiefkuehl": 120}, "brands": ["Oma"]}],
              "produkte": [{"barcode": f"77{tag}", "name": "Pizza", "lagerart": "tiefkuehl",
-                           "lagerart_fest": True}]}
+                           "lagerart_fest": False, "lagerart_abgefragt": True, "source": "off"}]}
 
     # Pruefen schreibt nichts.
     r = _import(client, datei, probe=True).json()
@@ -61,6 +61,10 @@ def test_import_ergaenzt_ueberschreibt_und_prueft(client):
     assert tpl["haltbarkeit"] == {"kuehl": 3, "tiefkuehl": 120} and tpl["unit"] == "ml"
     ort = next(o for o in client.get("/api/locations").json() if o["name"] == f"Truhe {tag}")
     assert ort["kind"] == "tiefkuehl"
+    # Schon abgefragt: kein erneuter OpenFoodFacts-Abruf nach dem Umzug.
+    pizza = next(p for p in client.get("/api/stammdaten/export", params={"teile": "produkte"}).json()["produkte"]
+                 if p["barcode"] == f"77{tag}")
+    assert pizza["lagerart_abgefragt"] is True and pizza["lagerart"] == "tiefkuehl"
 
     # Ergaenzen laesst Vorhandenes stehen, Ueberschreiben nimmt die Datei.
     datei["vorlagen"][0]["haltbarkeit"] = {"tiefkuehl": 200}
