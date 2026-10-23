@@ -188,6 +188,10 @@ def test_von_hand_gesetzt_ueberschreibt_openfoodfacts_nicht():
     p = Product(barcode="x", lagerart="", lagerart_fest=False, category="Tiefkühl")
     assert haltbarkeit.gefroren_setzen(p, False) is True      # Kategorie sagt gefroren
     assert p.lagerart == "" and p.lagerart_fest
+    # Kategorie "Tiefkühl" erst aus derselben Maske: der Haken wird trotzdem fest.
+    p = Product(barcode="z", lagerart="", lagerart_fest=False, category="Tiefkühl")
+    assert haltbarkeit.gefroren_setzen(p, True) is True
+    assert p.lagerart == "tiefkuehl" and p.lagerart_fest
     p = Product(barcode="y", lagerart="", lagerart_fest=False, category="")
     assert haltbarkeit.gefroren_setzen(p, True) is True
     assert p.lagerart == "tiefkuehl" and p.lagerart_fest

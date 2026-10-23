@@ -131,18 +131,24 @@ def schon_gefroren(produkt: Product | None, kategorie: str = "") -> bool:
 
 
 def gefroren_setzen(produkt: Product, gefroren: bool) -> bool:
-    """Haken "Im Original gefroren" ans Produkt schreiben - nur wenn er von
-    dem abweicht, was ohnehin gilt. Dann ist es von Hand festgelegt.
+    """Haken "Im Original gefroren" ans Produkt schreiben; was so gesetzt
+    wird, ist von Hand festgelegt (`lagerart_fest`).
 
-    Verglichen wird wie beim Scan, der den Haken vorbelegt: mit dem Produkt
-    und seiner eigenen Kategorie, nicht mit der in der Maske gewaehlten.
+    Gesetzt wird er immer festgeschrieben, ausser die Lagerart sagt es schon
+    selbst - ein Rueckschluss nur ueber die Kategorie reicht nicht, die kann
+    gerade erst aus derselben Maske gekommen sein und von OpenFoodFacts nie
+    geschuetzt. Weggenommen zaehlt er nur, wenn das Produkt sonst als
+    gefroren gaelte.
     """
-    if schon_gefroren(produkt) == gefroren:
-        return False
     if gefroren:
+        if produkt.lagerart == "tiefkuehl":
+            return False
         produkt.lagerart = "tiefkuehl"
-    elif produkt.lagerart == "tiefkuehl":
-        produkt.lagerart = ""
+    else:
+        if not schon_gefroren(produkt):
+            return False
+        if produkt.lagerart == "tiefkuehl":
+            produkt.lagerart = ""
     produkt.lagerart_fest = True
     return True
 
