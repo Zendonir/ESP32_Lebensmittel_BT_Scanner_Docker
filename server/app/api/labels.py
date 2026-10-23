@@ -104,7 +104,7 @@ async def druck_terminals(request: Request, session: AsyncSession = Depends(get_
     Die Handyansicht fragt nur nach, wenn es mehr als eines ist.
     """
     haushalt = await haushalte.aus_anfrage(request, session)
-    ids = workflow.terminals_fuer(haushalt) if haushalt else hub.online_ids()
+    ids = workflow.terminals_fuer(haushalt) if haushalt else workflow.drucker_online()
     return [{"device_id": d, "name": await _terminal_name(session, d)} for d in ids]
 
 
@@ -163,8 +163,8 @@ async def create_labels(body: LabelCreate, request: Request,
         printed = True
     elif jobs:
         # Ohne Haushalt (Verwaltung ueber alle) wie bisher: irgendein Terminal.
-        if target is None and not haushalt and hub.online_ids():
-            target = hub.online_ids()[0]
+        if target is None and not haushalt and workflow.drucker_online():
+            target = workflow.drucker_online()[0]
         if target:
             printed = await workflow.flush_print_queue(session, target) > 0
 
@@ -186,7 +186,7 @@ async def druckziele(request: Request, session: AsyncSession = Depends(get_sessi
     haushalt = await haushalte.aus_anfrage(request, session)
     besitzer = haushalt or await haushalte.standard(session)
     cfg = await settings_store.get(session, "brother", {})
-    ids = workflow.terminals_fuer(haushalt) if haushalt else hub.online_ids()
+    ids = workflow.terminals_fuer(haushalt) if haushalt else workflow.drucker_online()
     return {
         "standard": brother.standardziel(cfg, besitzer),
         "brother": brother.zustaendig(cfg, besitzer),
@@ -247,7 +247,7 @@ async def test_print(
     session.add(job)
     await label_service.consume_roll(session, 1)
     await session.commit()
-    target = device_id or (hub.online_ids()[0] if hub.online_ids() else None)
+    target = device_id or next(iter(workflow.drucker_online()), None)
     if not target:
         raise HTTPException(503, "Kein Terminal online – der Drucker hängt am Terminal")
     sent = await workflow.flush_print_queue(session, target)
@@ -293,7 +293,7 @@ async def run_test(
     stack_mm, line_mm = label_service.feed_and_line_mm(printer_cfg)
     payload = druckertest.build(test_id, stack_mm, line_mm,
                                 int(printer_cfg.get("paper_chars", 32)))
-    target = device_id or (hub.online_ids()[0] if hub.online_ids() else None)
+    target = device_id or next(iter(workflow.drucker_online()), None)
     if not target:
         raise HTTPException(503, "Kein Terminal online – der Drucker hängt am Terminal")
     job = PrintJob(label="TEST", payload=payload, status="queued")
@@ -330,7 +330,7 @@ async def calibrate(
     # Etikett, und er verbraucht ohnehin mehrere Teilungen.
     await session.commit()
 
-    target = device_id or (hub.online_ids()[0] if hub.online_ids() else None)
+    target = device_id or next(iter(workflow.drucker_online()), None)
     if not target:
         raise HTTPException(503, "Kein Terminal online – der Drucker hängt am Terminal")
     sent = await workflow.flush_print_queue(session, target)

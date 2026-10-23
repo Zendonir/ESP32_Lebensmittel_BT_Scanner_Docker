@@ -102,6 +102,18 @@ async def patch_device(
         sess = workflow.session_for(device_id)
         sess.location = body.active_location
         await workflow.push_screen(session, sess)
+
+    # Drucker/USB-Scanner: Sitzung umstellen und dem Terminal sofort sagen,
+    # ob es den USB-Anschluss als Host betreiben soll.
+    if body.drucker is not None or body.usb_scanner is not None:
+        sess = workflow.session_for(device_id)
+        sess.drucker = row.drucker
+        sess.usb_scanner = bool(row.usb_scanner)
+        device_cfg = await settings_store.get(session, "device_ui", {})
+        await hub.send_to(device_id, proto.config(workflow.config_fuer_geraet(device_cfg, sess)))
+        if row.drucker != "keiner":
+            await workflow.flush_print_queue(session, device_id)
+        await hub.notify_ui("devices")
     return row
 
 

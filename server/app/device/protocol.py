@@ -22,7 +22,9 @@ Server -> Geraet
     toast       {text, level}
     beep        {pattern}   ok · scan · print · warn · error · ort (Lagerort waehlen)
     print       {job, chars, blocks}
-    config      {brightness, beep, idle_seconds, scanner_minutes, label_prefix}
+    config      {brightness, beep, idle_seconds, scanner_minutes, label_prefix,
+                 drucker (keiner|seriell|usb), usb_scanner}
+    usbdruck    {job, teil, letzter, daten (Base64)} - Brother-Raster an USB
     offline_ack {n}         die ersten n gesammelten Scans sind verbucht
     ping        {}
     reboot      {}
@@ -105,6 +107,17 @@ def print_job(job_id: int, rendered: dict, baud: int = 9600) -> dict:
         "baud": baud,
         "blocks": rendered.get("blocks", []),
     }
+
+
+# Faehigkeit der Firmware: Brother-Raster an einen Drucker am USB-Anschluss.
+USB_DRUCK = "usbdruck"
+
+
+def usb_druck(job_id: int, teil: int, letzter: bool, daten_b64: str) -> dict:
+    """Ein Stueck Brother-Raster fuer den Drucker am USB-Anschluss. Die Stuecke
+    eines Auftrags kommen in Reihenfolge; nach dem letzten meldet die Firmware
+    print_result. Teil 0 beginnt den Auftrag neu (Reconnect)."""
+    return {"t": "usbdruck", "job": job_id, "teil": teil, "letzter": letzter, "daten": daten_b64}
 
 
 def config(payload: dict) -> dict:
