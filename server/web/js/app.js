@@ -1051,7 +1051,8 @@ function usbFelder(d) {
       ${d.usb_scanner ? 'checked' : ''}> Barcodescanner am USB-Anschluss</label>
     ${braucht ? (caps.includes('usb')
     ? `<div class="muted" style="margin-top:6px">USB: ${usb.aktiv ? angeschlossen : 'wird eingeschaltet…'}</div>`
-    : '<div class="notice" style="margin-top:8px"><span>Für USB braucht das Terminal eine neuere Firmware – „Firmware-Update“.</span></div>') : ''}`;
+    : '<div class="notice" style="margin-top:8px"><span>Für USB braucht das Terminal eine neuere Firmware – „Firmware-Update“.</span></div>') : ''}
+    ${!braucht && usb.aktiv ? '<div class="muted" style="margin-top:6px">USB ist noch an – aus erst nach einem Neustart des Terminals.</div>' : ''}`;
 }
 
 document.addEventListener('change', async (ev) => {

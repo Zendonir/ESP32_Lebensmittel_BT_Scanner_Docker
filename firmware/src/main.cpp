@@ -29,6 +29,7 @@
 #include "ui/Buzzer.h"
 #include "ui/Screen.h"
 #include "ui/Touch.h"
+#include "usb/UsbHost.h"
 
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "dev"
@@ -157,6 +158,20 @@ static void runOta(const String &path, const String &version) {
 // ---------------------------------------------------------------------------
 // Nachrichten vom Server
 // ---------------------------------------------------------------------------
+// Ergebnis eines Druckauftrags melden. Ohne Verbindung merken: sonst haelt
+// der Server den Auftrag nach einer Weile fuer verloren und druckt ihn ein
+// zweites Mal.
+static void reportPrint(int jobId, bool ok, const String &error) {
+    JsonDocument doc;
+    doc["t"] = "print_result";
+    doc["job"] = jobId;
+    doc["ok"] = ok;
+    doc["error"] = error;
+    if (!net.send(doc) && pendingResults.size() < 16) {
+        pendingResults.push_back({jobId, ok, error});
+    }
+}
+
 static void onServerMessage(JsonDocument &doc) {
     const String type = String(doc["t"] | "");
 
@@ -192,6 +207,16 @@ static void onServerMessage(JsonDocument &doc) {
             net.send(reply);
         }
 
+    } else if (type == "usbdruck") {
+        // Brother-Raster fuer den Drucker am USB, in Stuecken. Gebaut hat es
+        // der Server; hier wird es nur gesammelt und weitergereicht.
+        const int jobId = doc["job"] | 0;
+        String error;
+        if (!usbHost.addChunk(jobId, doc["teil"] | 0, doc["letzter"] | false,
+                              doc["daten"] | "", error)) {
+            reportPrint(jobId, false, error);
+        }
+
     } else if (type == "config") {
         screen.setBrightness(doc["brightness"] | 80);
         buzzer.setEnabled(doc["beep"] | true);
@@ -204,6 +229,15 @@ static void onServerMessage(JsonDocument &doc) {
             bleScanner.setIdleTimeout((uint32_t)(m * 60000.0f));
         }
         if (doc["label_prefix"].is<const char *>()) labelPrefix = String(doc["label_prefix"] | "");
+        // Drucker und Scanner am USB, je Terminal im Web eingestellt. Nur die
+        // config der eigenen Verbindung traegt die Felder.
+        if (doc["drucker"].is<const char *>()) {
+            const bool usb = String(doc["drucker"] | "") == "usb" || (doc["usb_scanner"] | false);
+            settings.saveUsbHost(usb);
+            if (usb && !usbHost.active()) usbHost.begin();
+            // Abschalten wirkt erst nach einem Neustart - der Host laeuft bis
+            // dahin weiter, die Telemetrie zeigt es.
+        }
 
     } else if (type == "ping") {
         net.sendEvent("pong");
@@ -240,6 +274,12 @@ static void sendTelemetry() {
     scanner["setup_ms"]  = bleScanner.lastSetupMs();
     scanner["idle_min"]  = bleScanner.idleTimeoutMs() / 60000;
 
+    JsonObject usb = doc["usb"].to<JsonObject>();
+    usb["aktiv"]  = usbHost.active();
+    usb["geraet"] = usbHost.deviceKind();
+    usb["name"]   = usbHost.deviceName();
+    usb["wunsch"] = settings.usbHost;   // weicht ab: Neustart noetig
+
     net.send(doc);
 }
 
@@ -254,7 +294,7 @@ static void storeOffline(const String &code) {
     screen.toast("Gespeichert - wird spaeter verbucht", "warn");
 }
 
-static void sendScan(const String &code) {
+static void sendScan(const String &code, const char *source) {
     // Solange noch Gesammeltes aussteht, hinten anstellen - sonst kaeme ein
     // neuer Scan vor aelteren beim Server an.
     if (!net.serverConnected() || offlineQueue.size() > 0) {
@@ -264,7 +304,7 @@ static void sendScan(const String &code) {
     JsonDocument doc;
     doc["t"] = "scan";
     doc["code"] = code;
-    doc["source"] = "ble";
+    doc["source"] = source;
     if (net.send(doc)) screen.setBusy(true);
     else storeOffline(code);
 }
@@ -345,6 +385,9 @@ void setup() {
     net.begin();
     esp_task_wdt_reset();
 
+    // Erst jetzt: ab hier ist die serielle Konsole ueber USB stumm.
+    if (settings.usbHost) usbHost.begin();
+
     if (net.portalActive()) {
         screen.showBoot("Einrichtung", String("WLAN ") + AP_SSID + " - 192.168.4.1");
     } else {
@@ -411,6 +454,7 @@ void loop() {
     }
 
     bleScanner.loop();
+    usbHost.loop();
     buzzer.loop();
     screen.loop();
 
@@ -420,7 +464,13 @@ void loop() {
         screen.wake();
         net.noteUserActivity();
         buzzer.play("scan");
-        sendScan(code);
+        sendScan(code, "ble");
+    }
+    if (usbHost.readCode(code)) {
+        screen.wake();
+        net.noteUserActivity();
+        buzzer.play("scan");
+        sendScan(code, "usb");
     }
 
     // --- Hardwaretaster ---------------------------------------------------
@@ -506,18 +556,13 @@ void loop() {
         bool ok = false;
         String error;
         const int jobId = printer.process(ok, error);
-        if (jobId > 0) {
-            JsonDocument doc;
-            doc["t"] = "print_result";
-            doc["job"] = jobId;
-            doc["ok"] = ok;
-            doc["error"] = error;
-            // Ohne Verbindung merken: sonst haelt der Server den Auftrag nach
-            // einer Weile fuer verloren und druckt ihn ein zweites Mal.
-            if (!net.send(doc) && pendingResults.size() < 16) {
-                pendingResults.push_back({jobId, ok, error});
-            }
-        }
+        if (jobId > 0) reportPrint(jobId, ok, error);
+    }
+    if (usbHost.queued() > 0) {
+        bool ok = false;
+        String error;
+        const int jobId = usbHost.process(ok, error);
+        if (jobId > 0) reportPrint(jobId, ok, error);
     }
     if (!pendingResults.empty() && net.serverConnected() && millis() - connectedAt > 1500) {
         for (const PrintResult &r : pendingResults) {

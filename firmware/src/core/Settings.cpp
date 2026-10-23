@@ -26,6 +26,7 @@ void Settings::begin() {
     token      = prefs.getString("token", DEFAULT_DEVICE_TOKEN);
     deviceName = prefs.getString("name", "");
     useTls     = prefs.getBool("tls", false);
+    usbHost    = prefs.getBool("usb", false);
     prefs.end();
 
     if (deviceName.isEmpty()) deviceName = "Terminal-" + deviceId().substring(6);
@@ -54,6 +55,16 @@ void Settings::save() {
     // Stille Spiegelung; ohne Karte oder bei vollem Speicher passiert
     // einfach nichts - das NVS bleibt in jedem Fall die verbindliche Quelle.
     sdStore.saveSettings();
+}
+
+// Eigener Schreibvorgang ohne SD-Spiegel: es ist keine Zugangsangabe, und die
+// Karte soll nicht bei jeder Umstellung im Web beschrieben werden.
+void Settings::saveUsbHost(bool on) {
+    if (on == usbHost) return;
+    usbHost = on;
+    prefs.begin(NS, false);
+    prefs.putBool("usb", on);
+    prefs.end();
 }
 
 void Settings::clear() {
