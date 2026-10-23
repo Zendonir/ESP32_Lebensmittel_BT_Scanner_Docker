@@ -88,7 +88,11 @@ def test_aufgedrucktes_mhd_im_gefrierschrank(client):
     assert frage(f"1{tag}", "Kuehl")["datum"] == packung
     # Nie verkuerzt: Konserve mit langem MHD im Gefrierschrank.
     spaet = shift_iso(GEFRIER_FLEISCH + 400)
-    assert frage(f"1{tag}", "Truhe", mhd=spaet)["datum"] == spaet
+    v = frage(f"1{tag}", "Truhe", mhd=spaet)
+    assert v["datum"] == spaet and "länger" in v["hinweis"]
+    # Getraenke haben keine Gefrier-Haltbarkeit (0): bleibt, mit Begruendung.
+    v = frage(f"9{tag}", "Truhe", kategorie="Getränke")
+    assert not v["verlaengert"] and v["datum"] == packung and "Getränke" in v["hinweis"]
     # Anzeigeformat wird verstanden.
     tt = packung.split("-")
     assert frage(f"1{tag}", "Truhe", mhd=f"{tt[2]}.{tt[1]}.{tt[0]}")["verlaengert"]

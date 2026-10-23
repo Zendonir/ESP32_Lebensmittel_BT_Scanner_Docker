@@ -172,4 +172,9 @@ async def eingefroren(session: AsyncSession, *, mhd: str, ort: str, kategorie: s
     if v["datum"] and v["datum"] > mhd:
         return {"datum": v["datum"], "verlaengert": True,
                 "hinweis": f"eingefroren – {v['quelle']} · {v['tage']} Tage"}
-    return gleich
+    # Sagen, warum nichts verlaengert wird - sonst sieht es nach einem Fehler aus.
+    if not v["datum"]:
+        wofuer = f"„{kategorie}“" if kategorie else "dieses Produkt"
+        return {**gleich, "hinweis": f"keine Gefrier-Haltbarkeit für {wofuer} hinterlegt "
+                                     "(Stammdaten → Kategorien) – MHD bleibt"}
+    return {**gleich, "hinweis": f"Packung hält länger als eingefroren ({v['tage']} Tage) – MHD bleibt"}
