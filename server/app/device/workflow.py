@@ -1295,6 +1295,8 @@ async def _einfrieren(session: AsyncSession, sess: DeviceSession) -> None:
         draft.expiry_date = neu["datum"]
         await hub.send_to(sess.device_id, proto.toast(
             f"Eingefroren: MHD {to_display(neu['datum'])}", "success"))
+    elif neu["hinweis"]:                # Gefrierschrank, aber MHD bleibt - und warum
+        await hub.send_to(sess.device_id, proto.toast(neu["hinweis"].split(" (")[0]))
 
 
 async def on_input(session: AsyncSession, sess: DeviceSession, value) -> None:
