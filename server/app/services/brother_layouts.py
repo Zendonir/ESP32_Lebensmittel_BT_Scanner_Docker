@@ -30,6 +30,10 @@ LAYOUTS = {
     "raster": "C QR links, Felder",
     "tabelle": "D Tabelle",
     "hochkant": "E Hochkant – alles untereinander",
+    "stufen": "F Stufen – Name, Sorte, MHD, dann klein Menge · Haushalt · Ort",
+    "kopf": "G Kopfleiste – MHD und Haushalt im schwarzen Balken",
+    "spalten": "H Spalten – MHD-Block links, Angaben in der Mitte, QR rechts",
+    "ecke": "I Haushalt-Ecke – Haushalt als Marke über dem QR",
 }
 
 # Der Druckbereich des Brother hat seinen Rand schon (je 3 mm an den Enden,
@@ -50,7 +54,16 @@ def daten(item: dict) -> dict:
         "ort": str(item.get("location") or "").strip(),
         "ein": ein,
         "label": str(item.get("label") or ""),
+        # Fuer F-I einzeln statt im Namen: Name und Sorte stehen untereinander.
+        "produkt": str(item.get("name") or "").strip() or "Unbekannt",
+        "sorte": _sorte(item),
+        "haushalt": str(item.get("household") or "").strip(),
     }
+
+
+def _sorte(item: dict) -> str:
+    sorte = str(item.get("subcategory") or "").strip()
+    return "" if sorte.lower() in str(item.get("name") or "").lower() else sorte
 
 
 # ------------------------------------------------------------ Bausteine
@@ -280,8 +293,141 @@ def hochkant(item: dict, breite: int, hoehe: int) -> Image.Image:
     return bild
 
 
+# ---------------------------------------------------- F-I: nach Wichtigkeit
+# Reihenfolge: Produkt, MHD, Sorte, Menge, Haushalt, Lagerort, Einlagerdatum.
+# Faellt etwas weg, dann von hinten (`_stapel`) - das Einlagerdatum zuerst.
+def _punkte(*teile: str) -> str:
+    return " · ".join(t for t in teile if t)
+
+
+def _ein(d: dict) -> str:
+    return f"eingel. {d['ein']}" if d["ein"] else ""
+
+
+def stufen(item: dict, breite: int, hoehe: int) -> Image.Image:
+    """F: links abgestuft Produkt, Sorte, MHD, darunter klein zwei Zeilen
+    (Menge · Haushalt / Ort · eingelagert); QR rechts ueber die volle Hoehe."""
+    d = daten(item)
+    bild = Image.new("L", (breite, hoehe), 255)
+    z = ImageDraw.Draw(bild)
+    code = _code(d["label"], int(breite * 0.32), hoehe - 2 * RAND)
+    code_b = code.width if code else 0
+    links = breite - 2 * RAND - code_b - (RAND if code else 0)
+    teile = _stapel([Eintrag(d["produkt"], 38, 16, True, 2, True),
+                     Eintrag(d["sorte"], 22, 12, abstand=2),
+                     Eintrag(_mhd(d), 34, 16, True, 1, True, 4),
+                     Eintrag(_punkte(d["menge"], d["haushalt"]), 18, 11),
+                     Eintrag(_punkte(d["ort"], _ein(d)), 16, 11)], links, hoehe - 2 * RAND)
+    _schreiben(z, teile, RAND, RAND - 4)
+    if code:
+        bild.paste(code, (breite - RAND - code_b, (hoehe - code.height) // 2))
+    return bild
+
+
+def kopf(item: dict, breite: int, hoehe: int) -> Image.Image:
+    """G: schwarzer Balken mit MHD links und Haushalt rechts - im
+    gemeinsamen Gefrierschrank sieht man beides zuerst."""
+    d = daten(item)
+    bild = Image.new("L", (breite, hoehe), 255)
+    z = ImageDraw.Draw(bild)
+    groesste = max(16, min(34, int(hoehe * 0.2)))
+    haus = _stapel([Eintrag(d["haushalt"], max(12, groesste - 8), 11, True)],
+                   int(breite * 0.45), hoehe) if d["haushalt"] else []
+    haus_b = int(haus[0][0].getlength(haus[0][1][0])) + RAND if haus else 0
+    mhd = _stapel([Eintrag(_mhd(d), groesste, 14, True, 1, True)],
+                  breite - 2 * RAND - haus_b, hoehe)
+    schrift, zeilen, _ = mhd[0]
+    balken_h = _zeilenhoehe(schrift) + 4
+    z.rectangle([0, 0, breite, balken_h], fill=0)
+    z.text((RAND, 2), zeilen[0], font=schrift, fill=255)
+    if haus:
+        hs, hz, _ = haus[0]
+        z.text((breite - RAND - hs.getlength(hz[0]), (balken_h - _zeilenhoehe(hs)) // 2 + 1),
+               hz[0], font=hs, fill=255)
+    rest = hoehe - balken_h - RAND - 4
+    code = _code(d["label"], int(breite * 0.3), rest, nummer=rest >= 120)
+    code_b = code.width if code else 0
+    links = breite - 2 * RAND - code_b - (RAND if code else 0)
+    teile = _stapel([Eintrag(d["produkt"], 32, 16, True, 2, True),
+                     Eintrag(d["sorte"], 20, 12, abstand=2),
+                     Eintrag(d["menge"], 18, 11),
+                     Eintrag(_punkte(d["ort"], _ein(d)), 15, 11)], links, rest)
+    _schreiben(z, teile, RAND, balken_h + 3)
+    if code:
+        bild.paste(code, (breite - RAND - code_b, balken_h + 4))
+    return bild
+
+
+def spalten(item: dict, breite: int, hoehe: int) -> Image.Image:
+    """H: Produkt und Sorte ueber die ganze Breite; darunter links ein MHD-Block,
+    in der Mitte Menge/Haushalt/Ort/eingelagert, rechts der QR."""
+    d = daten(item)
+    bild = Image.new("L", (breite, hoehe), 255)
+    z = ImageDraw.Draw(bild)
+    innen = breite - 2 * RAND
+    oben = _stapel([Eintrag(d["produkt"], 32, 15, True, 1, True),
+                    Eintrag(d["sorte"], 18, 11)], innen, int(hoehe * 0.42))
+    y = _schreiben(z, oben, RAND, RAND - 4) + 1
+    z.line([RAND, y, breite - RAND, y], fill=0, width=2)
+    y += 4
+    rest = hoehe - RAND - y
+    code = _code(d["label"], int(breite * 0.26), rest, nummer=False)
+    code_b = code.width if code else 0
+    if code:
+        bild.paste(code, (breite - RAND - code_b, y - 2))
+    block_b = int((innen - code_b) * 0.46)
+    ueber = _schrift(12, False)
+    z.text((RAND, y), "MHD", font=ueber, fill=0)
+    wert = _stapel([Eintrag(d["mhd"] or "–", 30, 14, True, 1, True)], block_b - 4,
+                   rest - _zeilenhoehe(ueber))
+    _schreiben(z, wert, RAND, y + _zeilenhoehe(ueber) - 2)
+    x = RAND + block_b
+    z.line([x - 4, y, x - 4, hoehe - RAND], fill=0, width=1)
+    mitte = breite - x - RAND - code_b - (6 if code else 0)
+    teile = _stapel([Eintrag(d["menge"], 16, 10, True),
+                     Eintrag(d["haushalt"], 15, 10),
+                     Eintrag(d["ort"], 14, 10),
+                     Eintrag(_ein(d), 13, 10)], mitte, rest)
+    _schreiben(z, teile, x, y - 2)
+    return bild
+
+
+def ecke(item: dict, breite: int, hoehe: int) -> Image.Image:
+    """I: wie Stufen, der Haushalt aber als schwarze Marke ueber dem QR -
+    wem es gehoert, sieht man an derselben Stelle auf jedem Etikett."""
+    d = daten(item)
+    bild = Image.new("L", (breite, hoehe), 255)
+    z = ImageDraw.Draw(bild)
+    spalte = int(breite * 0.32)
+    marke_h = 0
+    if d["haushalt"]:
+        # Lange Namen ("Wohnung Mueller-Luedenscheidt") duerfen zweizeilig.
+        marke = _stapel([Eintrag(d["haushalt"], 18, 11, True, 2)], spalte - 8, hoehe)
+        ms, mz, _ = marke[0]
+        marke_h = _zeilenhoehe(ms) * len(mz) + 6
+        x0 = breite - RAND - spalte
+        z.rounded_rectangle([x0, RAND - 4, breite - RAND, RAND - 4 + marke_h], 6, fill=0)
+        for n, zeile in enumerate(mz):
+            z.text((x0 + (spalte - ms.getlength(zeile)) / 2, RAND - 2 + n * _zeilenhoehe(ms)),
+                   zeile, font=ms, fill=255)
+    code = _code(d["label"], spalte, hoehe - 2 * RAND - marke_h, nummer=False)
+    code_b = code.width if code else 0
+    if code:
+        bild.paste(code, (breite - RAND - spalte + (spalte - code_b) // 2,
+                          hoehe - RAND - code.height + 4))
+    links = breite - 2 * RAND - max(code_b, spalte if d["haushalt"] else 0) - RAND
+    teile = _stapel([Eintrag(d["produkt"], 38, 16, True, 2, True),
+                     Eintrag(d["sorte"], 22, 12, abstand=2),
+                     Eintrag(_mhd(d), 34, 16, True, 1, True, 4),
+                     Eintrag(d["menge"], 18, 11),
+                     Eintrag(_punkte(d["ort"], _ein(d)), 16, 11)], links, hoehe - 2 * RAND)
+    _schreiben(z, teile, RAND, RAND - 4)
+    return bild
+
+
 ZEICHNER = {"klassisch": klassisch, "balken": balken, "raster": raster,
-            "tabelle": tabelle, "hochkant": hochkant}
+            "tabelle": tabelle, "hochkant": hochkant,
+            "stufen": stufen, "kopf": kopf, "spalten": spalten, "ecke": ecke}
 
 
 def zeichnen(layout: str, item: dict, breite: int, hoehe: int) -> Image.Image | None:
