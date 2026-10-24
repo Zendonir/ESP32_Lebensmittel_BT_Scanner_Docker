@@ -809,3 +809,28 @@ def test_vorschau_fuer_gewaehlte_sorte(client, server):
     z = client.get("/api/brother?sorte=eigen-57x32").json()
     assert z["vorschau_sorte"] == "eigen-57x32" and z["masse_mm"]["breite"] == 54.0
     assert z["vorschau"].startswith("data:image/png")
+
+
+def test_entfernter_drucker_gibt_abgegebene_auftraege_nicht_weiter(client, server):
+    """Ein schon abgegebener Auftrag gehoert seinem Printserver - nie einem anderen."""
+    erster = client.post("/api/brother/drucker", json={"url": "http://ps-eins"}).json()
+    label = client.post("/api/labels", json={"name": "Reis"}).json()["labels"][0]
+    _durchgang()
+    assert _job(label).status == "sent" and _job(label).payload["drucker"] in (erster["id"], "1")
+    for d in client.get("/api/brother/geraet").json()["drucker"]:
+        if d["id"] == _job(label).payload["drucker"]:
+            client.delete(f"/api/brother/drucker/{d['id']}")
+    client.post("/api/brother/drucker", json={"url": "http://ps-zwei"})
+    vorher = len(server.hosts)
+    _durchgang()
+    job = _job(label)
+    assert job.status == "failed" and "entfernt" in job.error
+    assert len(server.hosts) == vorher          # nicht beim anderen nachgedruckt
+
+
+def test_standardsorte_ist_gespeichert(client, server):
+    client.patch("/api/settings/brother", json={"etikett": "rd-50x30"})
+    try:
+        assert client.get("/api/brother").json()["vorschau_sorte"] == "rd-50x30"
+    finally:
+        client.patch("/api/settings/brother", json={"etikett": ""})

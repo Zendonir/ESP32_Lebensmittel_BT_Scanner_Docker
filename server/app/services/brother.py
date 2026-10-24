@@ -197,6 +197,7 @@ def gehoert_zu(cfg: dict | None, haushalt: str | None) -> bool:
 # und gilt fuer jeden Brother - WLAN wie USB am Terminal.
 DRUCKER_FELDER = ("name", "url", "haushalt", "etikett", "aktiv")
 KEIN_DRUCKER = "Kein Brother-Drucker für diesen Haushalt eingerichtet"
+DRUCKER_ENTFERNT = "Drucker entfernt – Ergebnis unbekannt, bei Bedarf nachdrucken"
 
 
 def _drucker_sauber(d: dict) -> dict:
@@ -1019,11 +1020,13 @@ async def _medium_live(client: httpx.AsyncClient) -> dict | None:
 
 def _drucker_von(cfg: dict, job: PrintJob) -> dict | None:
     """Welcher Brother einen Auftrag druckt: der beim Senden gemerkte (oder beim
-    Testdruck gewaehlte), sonst der des Haushalts."""
+    Testdruck gewaehlte), sonst der des Haushalts. Ein schon abgegebener
+    Auftrag gehoert seinem Printserver - einen anderen nach dessen Nummer zu
+    fragen hiesse, ihn fuer verloren zu halten und doppelt zu drucken."""
     gemerkt = (job.payload or {}).get("drucker")
     if gemerkt:
         d = drucker_nach_id(cfg, str(gemerkt))
-        if d is not None:
+        if d is not None or job.status == "sent":
             return d
     return drucker_fuer(cfg, job.household or "")
 
@@ -1101,6 +1104,10 @@ async def durchgang() -> bool:
             if d is None:
                 if job.status == "queued":
                     job.error = KEIN_DRUCKER
+                else:
+                    # Sein Printserver wurde entfernt: ob er gedruckt hat, weiss
+                    # keiner mehr - nie selbsttaetig nachdrucken.
+                    job.status, job.error = "failed", DRUCKER_ENTFERNT
                 continue
             gruppen.setdefault(d["drucker_id"], (d, []))[1].append(job)
         gestoert = [not erreichbar or bool(sperre) for erreichbar, sperre in

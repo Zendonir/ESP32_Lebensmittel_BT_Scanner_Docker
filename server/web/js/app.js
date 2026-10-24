@@ -371,9 +371,7 @@ function brotherDruckerKarte(d, haushalte, sorten) {
 
 let brotherZustand = null;
 async function loadBrother() {
-  const sorte = $('#brother-vorschau-sorte').value || '';
-  const [z, haushalte] = await Promise.all([
-    get(`/api/brother${sorte ? `?sorte=${encodeURIComponent(sorte)}` : ''}`), get('/api/households')]);
+  const [z, haushalte] = await Promise.all([get('/api/brother'), get('/api/households')]);
   brotherZustand = { ...z, haushalte };
   $('#brother-vorschau-sorte').innerHTML = brotherSortenOptionen(z.etikettensorten, z.vorschau_sorte);
   // Offene Eingaben in einer Druckerkarte nicht ueberschreiben.
@@ -398,7 +396,14 @@ async function loadBrother() {
   $('#brother-treiber-fig').hidden = !p.vorschau;
   if (p.vorschau) $('#brother-treiber').src = p.vorschau;
 }
-$('#brother-vorschau-sorte').addEventListener('change', () => loadBrother().catch((e) => toast(e.message, 'error')));
+// Die Standardsorte wird gespeichert (brother.etikett) - sie gilt fuer jedes
+// USB-Terminal ohne eigene Wahl und fuer Drucker ohne Etikettensorte.
+$('#brother-vorschau-sorte').addEventListener('change', async (ev) => {
+  try {
+    await patch('/api/settings/brother', { etikett: ev.target.value });
+    await loadBrother();
+  } catch (e) { toast(e.message, 'error'); }
+});
 
 // Neuer Drucker
 $('#brother-drucker-neu').addEventListener('click', () => {
@@ -1123,7 +1128,7 @@ function usbFelder(d) {
       </select></label>
     ${d.drucker === 'usb' ? `<label class="field" style="margin-top:8px">Etikettensorte im USB-Brother
       <select data-dev-brotheretikett="${esc(d.device_id)}">
-        <option value="" ${d.brother_etikett ? '' : 'selected'}>wie unter Etiketten (Vorschau)</option>
+        <option value="" ${d.brother_etikett ? '' : 'selected'}>Standard (Etiketten → Brother-Etikett)</option>
         ${brotherSortenOptionen(state.brotherSorten, d.brother_etikett)}
       </select><span class="hint">Aussehen des Etiketts: Etiketten → Brother-Etikett</span></label>` : ''}
     <label class="row tight" style="margin-top:8px"><input type="checkbox" data-dev-usbscanner="${esc(d.device_id)}"

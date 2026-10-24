@@ -94,7 +94,9 @@ async def zustand(request: Request, sorte: str = "",
     zustaende = list(await asyncio.gather(*(_drucker_zustand(d, printer_cfg) for d in drucker)))
     sorten = brother.etikettensorten(cfg)
     if sorte not in {e["key"] for e in sorten}:
-        sorte = zustaende[0]["etikett"] if zustaende else brother.etikett_wahl(cfg)
+        # Die gespeicherte Standardsorte (brother.etikett): gilt fuer jeden
+        # Drucker und jedes USB-Terminal ohne eigene Wahl.
+        sorte = brother.etikett_wahl(cfg)
     ansicht = {**cfg, "etikett": sorte}
     profil = brother.profil_aus(ansicht)
     try:
