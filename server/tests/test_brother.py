@@ -20,7 +20,7 @@ from sqlalchemy import select
 from app.db import session_scope
 from app.main import app
 from app.models import PrintJob
-from app.services import brother, settings_store
+from app.services import brother, brother_layouts, settings_store
 
 
 def _run(coro):
@@ -728,3 +728,30 @@ def test_gleichzeitige_testdrucke_legen_nur_eins_an(client, server):
         antworten = list(pool.map(lambda _: client.post("/api/brother/test").json(), range(6)))
     assert len({a["job"] for a in antworten}) == 1
     assert sum("wartet" not in a for a in antworten) == 1
+
+
+def test_alle_layouts_testen_druckt_je_layout_ein_musteretikett(client, server):
+    """Quer gelesen sind alle Layouts verschieden - je eins, hoechstens ein Satz."""
+    erstes = client.post("/api/brother/test/layouts").json()
+    assert erstes["layouts"] == list(brother_layouts.LAYOUTS) and erstes["anzahl"] == 10
+    assert client.post("/api/brother/test/layouts").json()["wartet"] is True
+    # Das einzelne Testetikett wartet nicht auf den Satz.
+    assert "wartet" not in client.post("/api/brother/test").json()
+
+
+def test_layout_test_zeichnet_im_genannten_layout():
+    cfg = {"etikett": "rd-51x26", "layout": "standard"}
+    profil = brother.profil_aus(cfg)
+    ecke = brother.auftrag_bauen({"test": True, "layout": "ecke"}, cfg)
+    stufen = brother.auftrag_bauen({"test": True, "layout": "stufen"}, cfg)
+    assert ecke != stufen and len(ecke) > 100
+    # Das Musteretikett traegt die Kennung des Layouts im Namen.
+    assert brother._muster("ecke")["name"].startswith("I: ")
+    assert brother.etikett_bild(brother._muster("ecke"), profil, {**cfg, "layout": "ecke"}).size
+
+
+def test_hochkant_gelesen_nur_standard_und_e():
+    assert brother.layouts_zum_testen({"etikett": "rd-40x60"}) == ["standard", "hochkant"]
+    assert brother.layouts_zum_testen({"etikett": "rd-51x26", "drehung": "links"}) == [
+        "standard", "hochkant"]
+    assert len(brother.layouts_zum_testen({"etikett": "rd-51x26"})) == 10

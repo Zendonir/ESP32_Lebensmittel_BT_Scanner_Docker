@@ -159,9 +159,11 @@ async def testdruck(session: AsyncSession = Depends(get_session)):
         cfg = await settings_store.get(session, "brother", {}) or {}
         if not brother.basis_url(cfg):
             raise HTTPException(409, "Erst die Adresse des Printservers eintragen")
-        offen = (await session.execute(select(PrintJob).where(
+        # Ein wartender Satz Layout-Tests zaehlt hier nicht mit.
+        offen = next((j for j in (await session.execute(select(PrintJob).where(
             PrintJob.ziel == brother.ZIEL, PrintJob.label == "TEST",
-            PrintJob.status.in_(("queued", "sent"))).limit(1))).scalar_one_or_none()
+            PrintJob.status.in_(("queued", "sent"))))).scalars().all()
+            if not (j.payload or {}).get("layout")), None)
         if offen is not None:
             return {"ok": True, "job": offen.id, "wartet": True}
         job = PrintJob(label="TEST", payload={"test": True}, status="queued", ziel=brother.ZIEL)
@@ -169,3 +171,26 @@ async def testdruck(session: AsyncSession = Depends(get_session)):
         await session.commit()
     brother.anstossen()
     return {"ok": True, "job": job.id}
+
+
+@router.post("/test/layouts")
+async def layouts_testen(session: AsyncSession = Depends(get_session)):
+    """Je Layout ein Musteretikett auf der eingestellten Etikettengroesse -
+    zum Vergleichen und Aussuchen. Wie beim Testetikett hoechstens ein Satz
+    auf einmal."""
+    async with _testdruck_sperre:
+        cfg = await settings_store.get(session, "brother", {}) or {}
+        if not brother.basis_url(cfg):
+            raise HTTPException(409, "Erst die Adresse des Printservers eintragen")
+        offen = (await session.execute(select(PrintJob).where(
+            PrintJob.ziel == brother.ZIEL, PrintJob.label == "TEST",
+            PrintJob.status.in_(("queued", "sent"))))).scalars().all()
+        if any((j.payload or {}).get("layout") for j in offen):
+            return {"ok": True, "anzahl": 0, "wartet": True}
+        layouts = brother.layouts_zum_testen(cfg)
+        for layout in layouts:
+            session.add(PrintJob(label="TEST", payload={"test": True, "layout": layout},
+                                 status="queued", ziel=brother.ZIEL))
+        await session.commit()
+    brother.anstossen()
+    return {"ok": True, "anzahl": len(layouts), "layouts": layouts}

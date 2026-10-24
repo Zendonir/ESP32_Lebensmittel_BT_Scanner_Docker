@@ -222,3 +222,43 @@ def test_testseite_zeigt_zwischenschritte(client, monkeypatch):
     r = client.post("/api/mhd/test", json={"bild": bild, "ki": True})
     assert r.status_code == 200
     assert r.json()["lokal"]["datum"] == "2027-10-07" and r.json()["ki"] is None   # KI nicht eingerichtet
+
+
+# Tiefkuehlware: Einfrierdatum (EFD) ueber dem MHD, Kopfzeile nennt beide.
+_EFD_KOPF = "Ungeoffnetbei-18Cmindestenshaltbarbis(MHD):/Eingefrorenam(EFD)："
+
+
+def test_efd_mit_mhd_im_bild():
+    texte = [_EFD_KOPF, "EFD:11.08.2026", "DE", "MHD:11.08.2027", "EV840", "LOT:032633200 L314:48"]
+    assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == "2027-08-11"
+
+
+def test_nur_efd_im_rahmen_ist_kein_treffer():
+    # Rahmen erwischt nur Kopfzeile und EFD-Zeile: weitersuchen statt EFD nehmen.
+    assert mhd_ocr.mhd_finden([_EFD_KOPF, "EFD:11.08.2026"], HEUTE)["datum"] == ""
+    assert mhd_ocr.mhd_finden(["EFD:11.08.2026"], HEUTE)["datum"] == ""
+
+
+def test_efd_als_eigenes_kaestchen():
+    texte = ["EFD", "11.08.2026", "DE", "MHD:1", "11.08.2027", "EV840"]
+    assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == "2027-08-11"
+    assert mhd_ocr.mhd_finden(["EFD", "11.08.2026"], HEUTE)["datum"] == ""
+
+
+def test_herstelldatum_beschriftet_gilt_nie():
+    texte = ["Hergestellt am: 01.10.2026", "verbrauchen bis 30.09.2026"]
+    # Auch wenn das Herstelldatum spaeter laege: die Beschriftung entscheidet.
+    assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == "2026-09-30"
+
+
+def test_kandidaten_zeigen_ausgeschlossene():
+    kand = mhd_ocr.kandidaten([_EFD_KOPF, "EFD:11.08.2026"], HEUTE)
+    assert kand and kand[0]["kein_mhd"] and not kand[0]["hinweis"]
+
+
+def test_datierte_efd_zeile_beschriftet_nicht_das_naechste_datum():
+    assert mhd_ocr.mhd_finden(["EFD:11.08.2026", "11.08.2027"], HEUTE)["datum"] == "2027-08-11"
+
+
+def test_efd_mit_o_statt_null_bleibt_ausgeschlossen():
+    assert mhd_ocr.mhd_finden(["EFD:11.O8.2026"], HEUTE)["datum"] == ""

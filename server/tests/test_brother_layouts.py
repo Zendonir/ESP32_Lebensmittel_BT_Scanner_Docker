@@ -79,3 +79,21 @@ def test_etikett_bild_nutzt_das_eingestellte_layout():
 
 def test_layout_ist_einstellbar():
     assert settings_store.DEFAULTS["brother"]["layout"] == "standard"
+
+
+def test_f_bis_i_tragen_sorte_und_haushalt():
+    item = {**VOLL, "name": "Hähnchenbrust", "subcategory": "Filet", "household": "Grote"}
+    d = brother_layouts.daten(item)
+    assert d["produkt"] == "Hähnchenbrust" and d["sorte"] == "Filet" and d["haushalt"] == "Grote"
+    # Steckt die Sorte schon im Namen, steht sie nicht doppelt da.
+    assert brother_layouts.daten({**item, "name": "Hähnchenbrust Filet"})["sorte"] == ""
+    # Haushalt reist im Brother-Auftrag mit.
+    assert brother.auftrag(item)["item"]["household"] == "Grote"
+
+
+@pytest.mark.parametrize("layout", ["stufen", "kopf", "spalten", "ecke"])
+def test_f_bis_i_zeichnen_den_haushalt(layout):
+    # Der Haushalt kommt tatsaechlich aufs Etikett (bei G weiss im Balken).
+    mit = brother_layouts.zeichnen(layout, {**VOLL, "household": "Grote"}, 382, 157)
+    ohne = brother_layouts.zeichnen(layout, VOLL, 382, 157)
+    assert mit.tobytes() != ohne.tobytes()
