@@ -97,3 +97,16 @@ def test_f_bis_i_zeichnen_den_haushalt(layout):
     mit = brother_layouts.zeichnen(layout, {**VOLL, "household": "Grote"}, 382, 157)
     ohne = brother_layouts.zeichnen(layout, VOLL, 382, 157)
     assert mit.tobytes() != ohne.tobytes()
+
+
+def test_fuellend_vergroessert_auf_hohen_etiketten():
+    E = brother_layouts.Eintrag
+    eintraege = [E("Hähnchen Nuggets", 32, 16, True, 2, True), E("Geflügel", 20, 12),
+                 E("500 g", 24, 12, True),
+                 # stoesst an der Breite an und kann nicht mitwachsen
+                 E("Gefrierschrank · eingel. 24.10.2026", 15, 11)]
+    knapp = brother_layouts._fuellend(eintraege, 260, 140)
+    hoch = brother_layouts._fuellend(eintraege, 260, 190)
+    assert hoch[2][0].size > knapp[2][0].size        # Menge waechst mit
+    assert brother_layouts._hoehe(hoch) <= 190
+    assert len(hoch) == 4

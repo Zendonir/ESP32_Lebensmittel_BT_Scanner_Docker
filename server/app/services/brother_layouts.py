@@ -102,6 +102,34 @@ def _stapel(eintraege: list[Eintrag], breite: int, hoehe: int) -> list[tuple]:
         del eintraege[optional[-1]]
 
 
+def _fuellend(eintraege: list[Eintrag], breite: int, hoehe: int,
+              bis: float = 1.6) -> list[tuple]:
+    """Wie `_stapel`, aber auf hoeheren Etiketten (57x32, 50x30) groesser:
+    alle Schriften gemeinsam bis zum Faktor `bis`, solange alles passt und
+    nichts wegfaellt - sonst bliebe unten Platz frei."""
+    voll = [e for e in eintraege if e.text]
+    faktor = bis
+    while faktor > 1.0:
+        groesser = [Eintrag(e.text, int(e.groesse * faktor), e.klein, e.fett, e.zeilen,
+                            e.pflicht, e.abstand) for e in voll]
+        teile = _stapel(groesser, breite, hoehe)
+        if len(teile) == len(voll) and _hoehe(teile) <= hoehe and all(
+                # Keine Zeile unter ihre Grundgroesse - eine, die schon an der
+                # Breite anstoesst (Ort · eingelagert), darf stehen bleiben.
+                s.size >= e.groesse - 1 for (s, _, _), e in zip(teile, voll)):
+            return teile
+        faktor -= 0.1
+    return _stapel(eintraege, breite, hoehe)
+
+
+def _luftig(teile: list[tuple], hoehe: int, hoechstens: int = 10) -> list[tuple]:
+    """Was unten frei bliebe, gleichmaessig zwischen die Zeilen verteilen."""
+    if len(teile) < 2:
+        return teile
+    luft = min(hoechstens, max(0, hoehe - _hoehe(teile)) // (len(teile) - 1))
+    return [(s, z, a + (luft if i < len(teile) - 1 else 0)) for i, (s, z, a) in enumerate(teile)]
+
+
 def _hoehe(teile) -> int:
     return sum(_zeilenhoehe(s) * len(z) + a for s, z, a in teile)
 
@@ -331,12 +359,15 @@ def kopf(item: dict, breite: int, hoehe: int) -> Image.Image:
     bild = Image.new("L", (breite, hoehe), 255)
     z = ImageDraw.Draw(bild)
     groesste = max(16, min(34, int(hoehe * 0.2)))
-    haus = _stapel([Eintrag(d["haushalt"], max(12, groesste - 8), 11, True)],
-                   int(breite * 0.45), hoehe) if d["haushalt"] else []
-    haus_b = int(haus[0][0].getlength(haus[0][1][0])) + RAND if haus else 0
+    # Erst das MHD in voller Groesse (es ist wichtiger), der Haushalt bekommt
+    # den Rest der Zeile - ein langer Name wird gekuerzt statt das MHD.
+    haus_min = 60 if d["haushalt"] else 0
     mhd = _stapel([Eintrag(_mhd(d), groesste, 14, True, 1, True)],
-                  breite - 2 * RAND - haus_b, hoehe)
+                  breite - 2 * RAND - haus_min, hoehe)
     schrift, zeilen, _ = mhd[0]
+    frei = breite - 3 * RAND - int(schrift.getlength(zeilen[0]))
+    haus = _stapel([Eintrag(d["haushalt"], max(12, groesste - 8), 11, True)],
+                   frei, hoehe) if d["haushalt"] else []
     balken_h = _zeilenhoehe(schrift) + 4
     z.rectangle([0, 0, breite, balken_h], fill=0)
     z.text((RAND, 2), zeilen[0], font=schrift, fill=255)
@@ -348,11 +379,13 @@ def kopf(item: dict, breite: int, hoehe: int) -> Image.Image:
     code = _code(d["label"], int(breite * 0.3), rest, nummer=rest >= 120)
     code_b = code.width if code else 0
     links = breite - 2 * RAND - code_b - (RAND if code else 0)
-    teile = _stapel([Eintrag(d["produkt"], 32, 16, True, 2, True),
-                     Eintrag(d["sorte"], 20, 12, abstand=2),
-                     Eintrag(d["menge"], 18, 11),
-                     Eintrag(_punkte(d["ort"], _ein(d)), 15, 11)], links, rest)
-    _schreiben(z, teile, RAND, balken_h + 3)
+    # Menge fett und eine Stufe groesser als die Sorte - auf der Packung sucht
+    # man sie gleich nach dem Namen. Hoehere Etiketten fuellen nach unten auf.
+    teile = _fuellend([Eintrag(d["produkt"], 32, 16, True, 2, True),
+                       Eintrag(d["sorte"], 20, 12, abstand=2),
+                       Eintrag(d["menge"], 24, 12, True, abstand=2),
+                       Eintrag(_punkte(d["ort"], _ein(d)), 15, 11)], links, rest)
+    _schreiben(z, _luftig(teile, rest), RAND, balken_h + 3)
     if code:
         bild.paste(code, (breite - RAND - code_b, balken_h + 4))
     return bild
