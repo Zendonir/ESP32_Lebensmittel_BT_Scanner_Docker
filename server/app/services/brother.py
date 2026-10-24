@@ -133,6 +133,40 @@ BEISPIEL = {
 }
 
 
+# Musterartikel fuer "Alle Layouts testen": alle Angaben gefuellt, damit man
+# sieht, was jedes Layout zeigt und was es bei Platzmangel weglaesst.
+MUSTER = {
+    "label": "LEB004217",
+    "name": "Hähnchenbrust",
+    "brand": "Wiesenhof",
+    "subcategory": "Filet",
+    "expiry_date": "2027-08-11",
+    "added_date": "2026-10-24",
+    "quantity": 500,
+    "unit": "g",
+    "location": "Gefriertruhe Keller",
+    "household": "Grote",
+}
+
+
+def layouts_zum_testen(cfg: dict) -> list[str]:
+    """Die Layouts, die auf der eingestellten Etikettengroesse verschieden
+    aussehen. Hochkant gelesen zeichnen A-I alle wie E (`brother_layouts.zeichnen`)
+    - dann nur Standard und E statt neunmal dasselbe."""
+    breite, zeilen = masse(profil_aus(cfg), cfg)
+    w, h = (zeilen, breite) if cfg.get("drehung") in ("links", "rechts") else (breite, zeilen)
+    if w <= h * 1.2:
+        return ["standard", "hochkant"]
+    return list(brother_layouts.LAYOUTS)
+
+
+def _muster(layout: str) -> dict:
+    """Musterartikel mit dem Layout im Namen - so weiss man beim Durchsehen,
+    welches Etikett welches ist."""
+    kennung = brother_layouts.LAYOUTS.get(layout, layout).split(" ")[0]
+    return {**MUSTER, "name": f"{kennung}: {MUSTER['name']}"}
+
+
 class BrotherFehler(Exception):
     """Eine Treiberdatei, die sich nicht lesen laesst."""
 
@@ -617,7 +651,12 @@ def rasterdaten(bild: Image.Image, profil: dict, cfg: dict) -> bytes:
 
 def auftrag_bauen(payload: dict, cfg: dict, printer_cfg: dict | None = None) -> bytes:
     profil = profil_aus(cfg)
-    if payload.get("test"):
+    if payload.get("layout"):
+        # Ein Layout-Test (POST /api/brother/test/layouts): Musterartikel im
+        # genannten Layout, unabhaengig vom eingestellten.
+        cfg = {**cfg, "layout": payload["layout"]}
+        bild = etikett_bild(_muster(payload["layout"]), profil, cfg, printer_cfg)
+    elif payload.get("test"):
         bild = etikett_bild(BEISPIEL, profil, cfg, printer_cfg, rahmen=True)
     else:
         bild = etikett_bild(payload.get("item") or {}, profil, cfg, printer_cfg)

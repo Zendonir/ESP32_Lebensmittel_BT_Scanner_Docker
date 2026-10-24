@@ -423,6 +423,14 @@ $('#brother-test').addEventListener('click', async () => {
   }
   catch (e) { toast(e.message, 'error'); }
 });
+$('#brother-test-layouts').addEventListener('click', async () => {
+  try {
+    const r = await post('/api/brother/test/layouts');
+    toast(r.wartet ? 'Ein Satz Layout-Tests wartet schon – er kommt, sobald der Drucker bereit ist'
+      : `${r.anzahl} Musteretiketten an den Brother gesendet – je Layout eins`, 'success');
+  }
+  catch (e) { toast(e.message, 'error'); }
+});
 $('#brother-datei-laden').addEventListener('click', async () => {
   const datei = $('#brother-datei').files[0];
   if (!datei) return toast('Erst eine .prn-Datei wählen', 'warn');
