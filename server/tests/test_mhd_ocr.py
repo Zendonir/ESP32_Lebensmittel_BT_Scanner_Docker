@@ -254,3 +254,11 @@ def test_herstelldatum_beschriftet_gilt_nie():
 def test_kandidaten_zeigen_ausgeschlossene():
     kand = mhd_ocr.kandidaten([_EFD_KOPF, "EFD:11.08.2026"], HEUTE)
     assert kand and kand[0]["kein_mhd"] and not kand[0]["hinweis"]
+
+
+def test_datierte_efd_zeile_beschriftet_nicht_das_naechste_datum():
+    assert mhd_ocr.mhd_finden(["EFD:11.08.2026", "11.08.2027"], HEUTE)["datum"] == "2027-08-11"
+
+
+def test_efd_mit_o_statt_null_bleibt_ausgeschlossen():
+    assert mhd_ocr.mhd_finden(["EFD:11.O8.2026"], HEUTE)["datum"] == ""

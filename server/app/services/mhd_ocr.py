@@ -292,11 +292,11 @@ def _nullen(tag: str, monat: str, jahr: str, heute: date) -> str:
     return treffer.pop() if len(treffer) == 1 else ""
 
 
-def _kandidaten(text: str, heute: date, ohne_jahr: bool) -> list[tuple[str, str]]:
-    """(ISO-Datum, gelesener Ausschnitt) fuer jedes Datum im Text."""
+def _kandidaten(text: str, heute: date, ohne_jahr: bool) -> list[tuple[str, str, int]]:
+    """(ISO-Datum, gelesener Ausschnitt, Anfang im Text) fuer jedes Datum im Text."""
     # Die Erkennung liest Nadeldruck-Nullen manchmal als O.
     sauber = re.sub(r"(?<=\d)[oO]|[oO](?=\d)", "0", text)
-    gefunden: list[tuple[str, str]] = []
+    gefunden: list[tuple[str, str, int]] = []
     belegt: list[tuple[int, int]] = []
     for art, muster in _MUSTER:
         if art == "ohne_jahr" and not ohne_jahr:
@@ -317,7 +317,7 @@ def _kandidaten(text: str, heute: date, ohne_jahr: bool) -> list[tuple[str, str]
                     continue
                 iso = mhd_ohne_jahr(m.group(1), m.group(2), heute)
             if iso:
-                gefunden.append((iso, m.group(0)))
+                gefunden.append((iso, m.group(0), m.start()))
                 belegt.append((m.start(), m.end()))
     return gefunden
 
@@ -332,8 +332,8 @@ def kandidaten(texte: list[str], heute: date | None = None) -> list[dict]:
         # steht - sonst waere jede Angabe wie "22.5" in den Naehrwerten verdaechtig.
         # Auch darunter: "05.10." und darunter "haltbar bis: siehe Aufdruck" (Mascarpone).
         nah = any(_HINWEIS.search(t) for t in texte[max(0, i - _HINWEIS_ZEILEN_OHNE_JAHR):i + 3])
-        for iso, gelesen in _kandidaten(text, heute, ohne_jahr=nah):
-            beschriftung = _beschriftung(texte, i, gelesen)
+        for iso, gelesen, anfang in _kandidaten(text, heute, ohne_jahr=nah):
+            beschriftung = _beschriftung(texte, i, anfang, heute)
             # Fuer die Rangfolge zaehlt nur ein Hinweis davor - sonst gewinnt
             # bei "Hergestellt … / haltbar bis / Datum" das Herstelldatum. Die
             # eigene Beschriftung geht vor: "MHD:" ja, "EFD:" nie.
@@ -348,15 +348,19 @@ def kandidaten(texte: list[str], heute: date | None = None) -> list[dict]:
     return liste
 
 
-def _beschriftung(texte: list[str], i: int, gelesen: str) -> str:
+def _beschriftung(texte: list[str], i: int, anfang: int, heute: date) -> str:
     """Was ein Datum beschriftet: der Text davor in derselben Zeile, sonst eine
-    kurze Zeile direkt darueber (die Erkennung trennt "EFD" und das Datum gern)."""
-    text = texte[i]
-    davor = text[:max(0, text.find(gelesen))]
+    kurze Zeile direkt darueber (die Erkennung trennt "EFD" und das Datum gern)
+    - aber nur, wenn die kein eigenes Datum traegt: "EFD:11.08.2026" ueber
+    "11.08.2027" beschriftet nur sich selbst."""
+    # anfang stammt aus dem bereinigten Text (O -> 0), der ist gleich lang.
+    davor = texte[i][:anfang]
     if re.search(r"[a-zA-ZäöüÄÖÜ]", davor):
         return davor
-    if i and len(texte[i - 1].strip()) <= _BESCHRIFTUNG_ZEICHEN:
-        return texte[i - 1]
+    if i:
+        oben = texte[i - 1]
+        if len(oben.strip()) <= _BESCHRIFTUNG_ZEICHEN and not _kandidaten(oben, heute, ohne_jahr=True):
+            return oben
     return ""
 
 
