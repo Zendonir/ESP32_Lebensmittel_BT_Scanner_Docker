@@ -1795,6 +1795,11 @@ async def _usb_senden(session: AsyncSession, conn, device_id: str, jobs: list[Pr
     if kann is None:            # hello steht noch aus
         return 0
     cfg = await settings_store.get(session, "brother", {}) or {}
+    # Die Etikettensorte, die am USB-Brother dieses Terminals liegt.
+    sorte = (await session.execute(select(Device.brother_etikett).where(
+        Device.device_id == device_id))).scalar_one_or_none()
+    if sorte:
+        cfg = {**cfg, "etikett": sorte}
     printer_cfg = await settings_store.get(session, "printer", {}) or {}
     sent = 0
     for job in jobs:

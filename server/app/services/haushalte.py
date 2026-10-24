@@ -95,10 +95,11 @@ async def umbenennen(session: AsyncSession, alt: str, neu: str) -> None:
     from . import brother, settings_store
 
     cfg = await settings_store.get(session, "brother", {}) or {}
-    liste = brother.haushalte_von(cfg)
-    if alt in liste:
-        await settings_store.merge(session, "brother", {
-            "haushalt": ", ".join(neu if h == alt else h for h in liste)})
+    drucker = brother.drucker_liste(cfg)
+    if any(alt in brother.haushalte_von(d) for d in drucker):
+        await settings_store.merge(session, "brother", {"url": "", "drucker": [
+            {**d, "haushalt": ", ".join(neu if h == alt else h for h in brother.haushalte_von(d))}
+            for d in drucker]})
 
 
 async def fremdentnahmen(session: AsyncSession, haushalt: str, tage: int = 30) -> dict:

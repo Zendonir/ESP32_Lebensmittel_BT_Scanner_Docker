@@ -190,12 +190,75 @@ def gehoert_zu(cfg: dict | None, haushalt: str | None) -> bool:
     return not liste or haushalt in liste
 
 
-def zustaendig(cfg: dict | None, haushalt: str) -> bool:
-    """Darf dieser Haushalt am Brother drucken (aktiv, Adresse, Haushalt)?"""
+# ------------------------------------------------------------- Druckerliste
+# Mehrere Brother an WLAN-Printservern: `brother.drucker` ist eine Liste
+# {id, name, url, haushalt, etikett, aktiv}. Alles andere unter `brother`
+# (Layout, Lesen, Versatz, Treiberdatei, eigene Masse) ist das Etikett selbst
+# und gilt fuer jeden Brother - WLAN wie USB am Terminal.
+DRUCKER_FELDER = ("name", "url", "haushalt", "etikett", "aktiv")
+KEIN_DRUCKER = "Kein Brother-Drucker für diesen Haushalt eingerichtet"
+
+
+def _drucker_sauber(d: dict) -> dict:
+    return {
+        "id": str(d.get("id") or "")[:16],
+        "name": str(d.get("name") or "").strip()[:60],
+        "url": str(d.get("url") or "").strip()[:200],
+        "haushalt": str(d.get("haushalt") or "").strip()[:200],
+        "etikett": str(d.get("etikett") or "").strip()[:60],
+        "aktiv": bool(d.get("aktiv", True)),
+    }
+
+
+def drucker_liste(cfg: dict | None) -> list[dict]:
+    """Die eingerichteten Brother. Aeltere Installationen hatten genau einen
+    direkt in den Einstellungen (url/haushalt/etikett/aktiv) - der erscheint
+    hier als erster Eintrag, bis die Liste zum ersten Mal gespeichert wird."""
     cfg = cfg or {}
-    if not cfg.get("aktiv") or not str(cfg.get("url", "")).strip():
-        return False
-    return gehoert_zu(cfg, haushalt or "")
+    liste = cfg.get("drucker")
+    if isinstance(liste, list) and liste:
+        return [_drucker_sauber(d) for d in liste if isinstance(d, dict) and d.get("id")]
+    if str(cfg.get("url", "") or "").strip():
+        return [_drucker_sauber({"id": "1", "url": cfg.get("url"), "haushalt": cfg.get("haushalt"),
+                                 "etikett": cfg.get("etikett"), "aktiv": cfg.get("aktiv")})]
+    return []
+
+
+def fuer_drucker(cfg: dict | None, drucker: dict) -> dict:
+    """Einstellungen, wie sie fuer diesen einen Drucker gelten: das Etikett von
+    allen, Adresse/Haushalt/Etikettensorte von ihm."""
+    cfg = cfg or {}
+    return {**cfg, "url": drucker.get("url", ""), "haushalt": drucker.get("haushalt", ""),
+            "etikett": drucker.get("etikett") or cfg.get("etikett", ""),
+            "aktiv": bool(drucker.get("aktiv", True)), "drucker_id": drucker.get("id", ""),
+            "name": drucker.get("name", "")}
+
+
+def drucker_nach_id(cfg: dict | None, drucker_id: str) -> dict | None:
+    for d in drucker_liste(cfg):
+        if d["id"] == drucker_id:
+            return fuer_drucker(cfg, d)
+    return None
+
+
+def drucker_fuer(cfg: dict | None, haushalt: str | None) -> dict | None:
+    """Der Brother, an den dieser Haushalt druckt: einer, der ihm ausdruecklich
+    gehoert, sonst einer fuer alle Haushalte. None = keiner eingerichtet."""
+    bereit = [d for d in drucker_liste(cfg) if d["aktiv"] and basis_url(d)]
+    eigen = [d for d in bereit if haushalt and haushalt in haushalte_von(d)]
+    alle = [d for d in bereit if not haushalte_von(d)]
+    wahl = (eigen or alle or [None])[0]
+    return fuer_drucker(cfg, wahl) if wahl else None
+
+
+def sichtbare_drucker(cfg: dict | None, haushalt: str | None) -> list[dict]:
+    """Die Drucker, die diese Ansicht sieht (None = Verwaltung: alle)."""
+    return [fuer_drucker(cfg, d) for d in drucker_liste(cfg) if gehoert_zu(d, haushalt)]
+
+
+def zustaendig(cfg: dict | None, haushalt: str) -> bool:
+    """Darf dieser Haushalt an einem Brother (WLAN) drucken?"""
+    return drucker_fuer(cfg, haushalt or "") is not None
 
 
 def standardziel(cfg: dict | None, haushalt: str) -> str:
@@ -954,11 +1017,69 @@ async def _medium_live(client: httpx.AsyncClient) -> dict | None:
         return None
 
 
+def _drucker_von(cfg: dict, job: PrintJob) -> dict | None:
+    """Welcher Brother einen Auftrag druckt: der beim Senden gemerkte (oder beim
+    Testdruck gewaehlte), sonst der des Haushalts."""
+    gemerkt = (job.payload or {}).get("drucker")
+    if gemerkt:
+        d = drucker_nach_id(cfg, str(gemerkt))
+        if d is not None:
+            return d
+    return drucker_fuer(cfg, job.household or "")
+
+
+async def _durchgang_drucker(cfg: dict, jobs: list[PrintJob],
+                             printer_cfg: dict) -> tuple[bool, str]:
+    """Die Auftraege eines Druckers abgeben und abgleichen."""
+    erreichbar, sperre = True, ""
+    async with _client(cfg) as client:
+        # Erst abgleichen, was schon beim Printserver liegt - das macht
+        # Platz und holt ungedruckt Aufgegebenes zurueck.
+        for job in [j for j in jobs if j.status == "sent"]:
+            erreichbar = await _abgleichen(client, job)
+            if not erreichbar:
+                break
+        wartend = [j for j in jobs if j.status == "queued"]
+        if erreichbar and wartend:
+            status = await printserver_status(cfg)
+            if not status.get("erreichbar"):
+                sperre, erreichbar = status.get("fehler", "Printserver nicht erreichbar"), False
+            elif not status.get("drucker_bereit"):
+                # Drucker aus oder nicht angesteckt: nichts abschicken,
+                # alles wartet hier und geht raus, sobald er wieder da ist.
+                sperre = DRUCKER_AUS
+            else:
+                medium = status.get("medium")
+                cfg = mit_medium(cfg, medium)
+                soll = erwartet(profil_aus(cfg), cfg)
+                sperre = medium_abweichung(soll, medium)
+                schlange = status.get("warteschlange") or {}
+                if sperre and not schlange.get("active_id") and not schlange.get("queued"):
+                    # Der gemerkte Stand kann von vor dem Rollenwechsel sein.
+                    frisch = await _medium_live(client)
+                    if frisch is not None:
+                        sperre = medium_abweichung(soll, frisch)
+        platz = MAX_UNTERWEGS - sum(1 for j in jobs if j.status == "sent")
+        for job in wartend:
+            if sperre:
+                job.error = sperre[:255]
+                continue
+            if platz <= 0:
+                break
+            # Gemerkt, damit der Abgleich spaeter denselben Printserver fragt.
+            job.payload = {**(job.payload or {}), "drucker": cfg.get("drucker_id", "")}
+            erreichbar = await _senden(client, job, cfg, printer_cfg)
+            if not erreichbar:
+                break
+            platz -= job.status == "sent"
+    return erreichbar, sperre
+
+
 async def durchgang() -> bool:
-    """Offene Brother-Auftraege abgeben und abgleichen.
+    """Offene Brother-Auftraege abgeben und abgleichen - je Drucker.
 
     Gibt zurueck, ob danach noch etwas offen ist. Die Reihenfolge bleibt die
-    der Auftraege; ist der Printserver nicht erreichbar, endet der Durchgang
+    der Auftraege; ist ein Printserver nicht erreichbar, endet sein Teil
     sofort (der Fehler steht am Auftrag, damit man ihn in der Liste sieht).
     """
     from ..db import session_scope
@@ -970,60 +1091,31 @@ async def durchgang() -> bool:
             select(PrintJob).where(PrintJob.ziel == ZIEL,
                                    PrintJob.status.in_(("queued", "sent")))
             .order_by(PrintJob.id))).scalars().all()
-        if not jobs or not basis_url(cfg):
+        if not jobs:
             return False
         printer_cfg = await settings_store.get(session, "printer", {}) or {}
         vorher = {j.id: (j.status, j.error) for j in jobs}
-        erreichbar, sperre = True, ""
-        async with _client(cfg) as client:
-            # Erst abgleichen, was schon beim Printserver liegt - das macht
-            # Platz und holt ungedruckt Aufgegebenes zurueck.
-            for job in [j for j in jobs if j.status == "sent"]:
-                erreichbar = await _abgleichen(client, job)
-                if not erreichbar:
-                    break
-            wartend = [j for j in jobs if j.status == "queued"]
-            if erreichbar and wartend:
-                status = await printserver_status(cfg)
-                if not status.get("erreichbar"):
-                    sperre, erreichbar = status.get("fehler", "Printserver nicht erreichbar"), False
-                elif not status.get("drucker_bereit"):
-                    # Drucker aus oder nicht angesteckt: nichts abschicken,
-                    # alles wartet hier und geht raus, sobald er wieder da ist.
-                    sperre = DRUCKER_AUS
-                else:
-                    medium = status.get("medium")
-                    cfg = mit_medium(cfg, medium)
-                    soll = erwartet(profil_aus(cfg), cfg)
-                    sperre = medium_abweichung(soll, medium)
-                    schlange = status.get("warteschlange") or {}
-                    if sperre and not schlange.get("active_id") and not schlange.get("queued"):
-                        # Der gemerkte Stand kann von vor dem Rollenwechsel sein.
-                        frisch = await _medium_live(client)
-                        if frisch is not None:
-                            sperre = medium_abweichung(soll, frisch)
-            platz = MAX_UNTERWEGS - sum(1 for j in jobs if j.status == "sent")
-            for job in wartend:
-                if sperre:
-                    job.error = sperre[:255]
-                    continue
-                if platz <= 0:
-                    break
-                erreichbar = await _senden(client, job, cfg, printer_cfg)
-                if not erreichbar:
-                    break
-                platz -= job.status == "sent"
+        gruppen: dict[str, tuple[dict, list[PrintJob]]] = {}
+        for job in jobs:
+            d = _drucker_von(cfg, job)
+            if d is None:
+                if job.status == "queued":
+                    job.error = KEIN_DRUCKER
+                continue
+            gruppen.setdefault(d["drucker_id"], (d, []))[1].append(job)
+        gestoert = [not erreichbar or bool(sperre) for erreichbar, sperre in
+                    [await _durchgang_drucker(d, g, printer_cfg) for d, g in gruppen.values()]]
         geaendert = any(vorher[j.id] != (j.status, j.error) for j in jobs)
         await session.commit()
         offen = any(j.status in ("queued", "sent") for j in jobs)
     if geaendert:
         from ..device.hub import hub
         await hub.notify_ui("labels")
-    if not erreichbar or sperre:
+    if gestoert and all(gestoert):
         # Heilt nicht in zwei Sekunden (Drucker aus, falsche Rolle,
         # Printserver weg): seltener nachsehen.
         raise ConnectionError
-    return offen
+    return offen and bool(gruppen)
 
 
 # ------------------------------------------------------------------- Dienst

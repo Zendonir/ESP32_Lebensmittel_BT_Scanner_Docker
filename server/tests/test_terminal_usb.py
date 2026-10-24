@@ -166,3 +166,41 @@ def test_drucker_und_usb_scanner_einstellen(client):
     # Rundruf ohne Sitzung: die Felder fehlen, die Firmware behaelt ihren Stand.
     assert "drucker" not in workflow.config_fuer_geraet({"brightness": 80})
     workflow.drop_session(geraet)
+
+
+def test_usb_brother_druckt_auf_der_sorte_des_terminals(client):
+    """Am Terminal steht, welche Etiketten im USB-Brother liegen."""
+    geraet = f"sorte-{uuid.uuid4().hex[:6]}"
+
+    async def anlegen():
+        async with session_scope() as session:
+            session.add(Device(device_id=geraet, name="Keller", drucker="usb"))
+            await session.commit()
+    _run(anlegen())
+    assert client.patch(f"/api/devices/{geraet}", json={"brother_etikett": "gibtsnicht"}).status_code == 422
+    r = client.patch(f"/api/devices/{geraet}", json={"brother_etikett": "eigen-57x32"})
+    assert r.status_code == 200 and r.json()["brother_etikett"] == "eigen-57x32"
+
+    async def drucken():
+        socket = _Socket()
+        conn = await hub.register(geraet, socket)
+        sess = workflow.session_for(geraet)
+        sess.caps, sess.drucker = {proto.USB_DRUCK}, "usb"
+        try:
+            async with session_scope() as session:
+                for job in (await session.execute(select(PrintJob))).scalars().all():
+                    await session.delete(job)
+                session.add(PrintJob(label="TEST", status="queued",
+                                     payload={"testetikett": True, "blocks": []}))
+                await session.commit()
+                await workflow.flush_print_queue(session, geraet)
+            return b"".join(base64.b64decode(m["daten"]) for m in socket.gesendet
+                            if m["t"] == "usbdruck")
+        finally:
+            await hub.unregister(conn)
+            workflow.drop_session(geraet)
+
+    daten = _run(drucken())
+    stelle = daten.find(b"\x1biz")
+    # ESC i z: [gueltig, medium, breite_mm, laenge_mm, ...]
+    assert stelle > 0 and (daten[stelle + 5], daten[stelle + 6]) == (57, 32)

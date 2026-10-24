@@ -124,6 +124,10 @@ DEFAULTS: dict[str, Any] = {
     # Ist er aktiv, druckt er die Etiketten der genannten Haushalte statt
     # des Druckers am Terminal.
     "brother": {
+        # Die Brother an WLAN-Printservern: [{id, name, url, haushalt, etikett,
+        # aktiv}] (services/brother.drucker_liste). Leer und url gesetzt =
+        # Altbestand mit genau einem Drucker in den Feldern darunter.
+        "drucker": [],
         "aktiv": False,
         # Adresse des Printservers, z. B. http://192.168.1.50 - aus dem
         # Container heraus loest "brother-td2020.local" (mDNS) meist nicht auf.
