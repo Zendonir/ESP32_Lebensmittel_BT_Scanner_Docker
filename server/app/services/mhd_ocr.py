@@ -153,6 +153,7 @@ def _lesen_sync(bild: bytes, gruendlich: bool) -> dict:
     durchgaenge = []
     gesehen: list = []
     erste: list = []
+    ausgeschlossen: set[str] = set()
 
     def versuch(name, bildchen):
         zeilen = _lauf(bildchen)
@@ -160,9 +161,13 @@ def _lesen_sync(bild: bytes, gruendlich: bool) -> dict:
             erste.extend(zeilen)
         gesehen.extend(zeilen)
         kand = kandidaten([z[0] for z in zeilen])
-        durchgaenge.append({"name": name, "datum": kand[0]["datum"] if kand else "",
+        # Was ein Durchgang als EFD/Herstelldatum beschriftet sah, bleibt es:
+        # gedreht steht "11.08.2026" gern vor "EFD" und waere sonst ein Treffer.
+        ausgeschlossen.update(k["datum"] for k in kand if k["kein_mhd"])
+        mhd = [k for k in kand if not k["kein_mhd"] and k["datum"] not in ausgeschlossen]
+        durchgaenge.append({"name": name, "datum": mhd[0]["datum"] if mhd else "",
                             "texte": len(zeilen)})
-        return zeilen, kand
+        return zeilen, kand, mhd
 
     plan = [("original", lambda: img), ("punkte", lambda: _punkte(img)),
             ("punkte grob", lambda: _punkte(img, grob=True))]
@@ -170,9 +175,9 @@ def _lesen_sync(bild: bytes, gruendlich: bool) -> dict:
     i = 0
     while i < len(plan) and time.perf_counter() - start < _GRUENDLICH_HOECHSTENS_S:
         name, erzeugen = plan[i]
-        zeilen, kand = versuch(name, erzeugen())
-        if kand:
-            return {"datum": kand[0]["datum"], "gelesen": kand[0]["gelesen"], "kandidaten": kand,
+        zeilen, kand, mhd = versuch(name, erzeugen())
+        if mhd:
+            return {"datum": mhd[0]["datum"], "gelesen": mhd[0]["gelesen"], "kandidaten": kand,
                     "zeilen": zeilen, "durchgaenge": durchgaenge, "groesse": groesse}
         if i == 2:
             # Nach den ersten dreien: Richtungen aus dem, was bisher erkannt
@@ -234,6 +239,16 @@ _MUSTER = [
 ]
 # Worte, die ein MHD ankuendigen.
 _HINWEIS = re.compile(r"mhd|haltbar|verbrauch|best|bis|exp|use by|bbe|ddm", re.I)
+# Beschriftungen von Daten, die nie das MHD sind: Einfrier-, Herstell- und
+# Abpackdatum. "EFD : 11.08.2026" steht bei Tiefkuehlware direkt unter der
+# Zeile "mindestens haltbar bis (MHD):/Eingefroren am (EFD):" - mit nur diesen
+# beiden Zeilen im Rahmen galt es sonst als MHD.
+_KEIN_MHD = re.compile(
+    r"efd|eingefr|einfrier|herge|herst|produ|prod\b|abgepack|verpack|abgef[uü]ll|"
+    r"gefertigt|mfd|mfg|packed|pack ?date|frozen on", re.I)
+# Eine Beschriftung in der Zeile davor zaehlt nur, wenn die Zeile kurz ist
+# ("EFD" als eigenes Kaestchen) - die lange Kopfzeile nennt beide Arten.
+_BESCHRIFTUNG_ZEICHEN = 14
 # Wie weit ein Hinweiswort vor einem Datum ohne Jahr stehen darf. Die
 # Erkennung liefert Zeilen nach Hoehe sortiert; Spalten daneben ("Salz",
 # "Frische Rezepte") schieben sich dazwischen.
@@ -318,19 +333,38 @@ def kandidaten(texte: list[str], heute: date | None = None) -> list[dict]:
         # Auch darunter: "05.10." und darunter "haltbar bis: siehe Aufdruck" (Mascarpone).
         nah = any(_HINWEIS.search(t) for t in texte[max(0, i - _HINWEIS_ZEILEN_OHNE_JAHR):i + 3])
         for iso, gelesen in _kandidaten(text, heute, ohne_jahr=nah):
+            beschriftung = _beschriftung(texte, i, gelesen)
             # Fuer die Rangfolge zaehlt nur ein Hinweis davor - sonst gewinnt
-            # bei "Hergestellt … / haltbar bis / Datum" das Herstelldatum.
-            liste.append({"datum": iso, "gelesen": gelesen.strip(), "zeile": i, "hinweis": hinweis})
+            # bei "Hergestellt … / haltbar bis / Datum" das Herstelldatum. Die
+            # eigene Beschriftung geht vor: "MHD:" ja, "EFD:" nie.
+            kein_mhd = bool(_KEIN_MHD.search(beschriftung)) and not _HINWEIS.search(beschriftung)
+            liste.append({"datum": iso, "gelesen": gelesen.strip(), "zeile": i,
+                          "hinweis": (hinweis or bool(_HINWEIS.search(beschriftung))) and not kein_mhd,
+                          "kein_mhd": kein_mhd})
     # Stehen mehrere Daten da, gewinnt eins mit Hinweiswort davor
     # ("mindestens haltbar bis"), sonst das spaeteste - ein Herstell- oder
-    # Abpackdatum liegt immer vor dem MHD.
-    liste.sort(key=lambda k: (k["hinweis"], k["datum"]), reverse=True)
+    # Abpackdatum liegt immer vor dem MHD. Beschriftete Nicht-MHDs ganz hinten.
+    liste.sort(key=lambda k: (not k["kein_mhd"], k["hinweis"], k["datum"]), reverse=True)
     return liste
+
+
+def _beschriftung(texte: list[str], i: int, gelesen: str) -> str:
+    """Was ein Datum beschriftet: der Text davor in derselben Zeile, sonst eine
+    kurze Zeile direkt darueber (die Erkennung trennt "EFD" und das Datum gern)."""
+    text = texte[i]
+    davor = text[:max(0, text.find(gelesen))]
+    if re.search(r"[a-zA-ZäöüÄÖÜ]", davor):
+        return davor
+    if i and len(texte[i - 1].strip()) <= _BESCHRIFTUNG_ZEICHEN:
+        return texte[i - 1]
+    return ""
 
 
 def mhd_finden(texte: list[str], heute: date | None = None) -> dict:
     """Das MHD unter den erkannten Texten: {"datum": ISO oder "", "gelesen": …}."""
-    liste = kandidaten(texte, heute)
+    # Ein Einfrier- oder Herstelldatum allein ist kein Treffer - die Kamera
+    # sucht weiter, bis die MHD-Zeile im Rahmen ist.
+    liste = [k for k in kandidaten(texte, heute) if not k["kein_mhd"]]
     if not liste:
         return {"datum": "", "gelesen": ""}
     return {"datum": liste[0]["datum"], "gelesen": liste[0]["gelesen"]}

@@ -1565,13 +1565,16 @@ const mhdDatum = (iso) => (iso ? iso.split('-').reverse().join('.') : '–');
 
 function mhdTestKarte(name, url, r) {
   const l = r.lokal || {};
-  const gewaehlt = new Set((l.kandidaten || []).slice(0, 1).map((k) => k.zeile));
+  const gewaehlt = new Set((l.kandidaten || []).slice(0, 1).filter((k) => !k.kein_mhd).map((k) => k.zeile));
   const markiert = new Set((l.kandidaten || []).map((k) => k.zeile));
   const zeilen = (l.texte || []).map((t, i) => `<tr${gewaehlt.has(i) ? ' style="font-weight:600"' : ''}>
       <td class="mono">${esc(t.text)}</td><td class="right muted">${Math.round(t.sicher * 100)} %</td>
       <td>${markiert.has(i) ? (gewaehlt.has(i) ? '✔ gewählt' : 'Datum') : ''}</td></tr>`).join('');
-  const kand = (l.kandidaten || []).map((k, i) => `<li>${i === 0 ? '<b>' : ''}${mhdDatum(k.datum)}${i === 0 ? '</b>' : ''}
-      <span class="muted">aus „${esc(k.gelesen)}“, Zeile ${k.zeile + 1}${k.hinweis ? ', mit Hinweiswort' : ''}</span></li>`).join('');
+  const kand = (l.kandidaten || []).map((k, i) => {
+    const fett = i === 0 && !k.kein_mhd;
+    return `<li>${fett ? '<b>' : ''}${mhdDatum(k.datum)}${fett ? '</b>' : ''}
+      <span class="muted">aus „${esc(k.gelesen)}“, Zeile ${k.zeile + 1}${k.hinweis ? ', mit Hinweiswort' : ''}${k.kein_mhd ? ', kein MHD (Einfrier-/Herstelldatum)' : ''}</span></li>`;
+  }).join('');
   const ki = r.ki ? `<div>KI: <b>${mhdDatum(r.ki.datum)}</b>
       <span class="muted">${r.ki.gelesen ? `„${esc(r.ki.gelesen)}“ · ` : ''}${r.ki.ms} ms${r.ki.fehler ? ` · ${esc(r.ki.fehler)}` : ''}</span></div>` : '';
   const lokalText = l.fehler ? `<span style="color:var(--danger)">${esc(l.fehler)}</span>`
