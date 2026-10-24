@@ -220,6 +220,13 @@ class Device(Base, TimestampMixin):
     # Haushalt, dem alles gehoert, was an diesem Terminal eingelagert wird.
     household: Mapped[str] = mapped_column(String(100), default="")
     has_printer: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Drucker an diesem Terminal - von Hand unter Terminals eingestellt:
+    #   "keiner"   das Terminal ist kein Druckziel
+    #   "seriell"  ESC/POS-Drucker an der UART (wie bisher)
+    #   "usb"      Brother TD am USB-Anschluss (Raster wie beim Printserver)
+    drucker: Mapped[str] = mapped_column(String(16), default="seriell")
+    # Barcodescanner als USB-Tastatur am USB-Anschluss.
+    usb_scanner: Mapped[bool] = mapped_column(Boolean, default=False)
     online: Mapped[bool] = mapped_column(Boolean, default=False)
     last_seen: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

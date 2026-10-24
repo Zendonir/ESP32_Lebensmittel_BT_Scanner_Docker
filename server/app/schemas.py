@@ -239,6 +239,8 @@ class DeviceOut(ORMModel):
     active_location: str
     household: str = ""
     has_printer: bool
+    drucker: str = "seriell"
+    usb_scanner: bool = False
     online: bool
     last_seen: datetime | None
     telemetry: dict
@@ -248,6 +250,8 @@ class DevicePatch(BaseModel):
     name: str | None = None
     active_location: str | None = None
     household: str | None = None
+    drucker: Literal["keiner", "seriell", "usb"] | None = None
+    usb_scanner: bool | None = None
 
 
 class PrintJobOut(ORMModel):

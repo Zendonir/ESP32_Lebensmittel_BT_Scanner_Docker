@@ -81,6 +81,8 @@ _ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("products", "lagerart", "VARCHAR(16) DEFAULT ''"),
     ("products", "lagerart_fest", "BOOLEAN DEFAULT FALSE"),
     ("products", "lagerart_abgefragt", "BOOLEAN DEFAULT FALSE"),
+    ("devices", "drucker", "VARCHAR(16) DEFAULT 'seriell'"),
+    ("devices", "usb_scanner", "BOOLEAN DEFAULT FALSE"),
 )
 
 

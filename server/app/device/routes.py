@@ -259,7 +259,7 @@ async def _store_telemetry(session, device_id: str, sess, msg: dict) -> None:
     telemetry.update(
         {
             k: msg[k]
-            for k in ("heap", "min_heap", "psram", "rssi", "uptime", "wifi")
+            for k in ("heap", "min_heap", "psram", "rssi", "uptime", "wifi", "usb")
             if k in msg
         }
     )

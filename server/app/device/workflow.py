@@ -138,6 +138,9 @@ class DeviceSession:
     # Haushalt des Terminals (Device.household, sonst der erste Haushalt).
     # Was hier eingelagert wird, gehoert ihm; Listen zeigen nur seins.
     household: str = ""
+    # Drucker und USB-Scanner (Device.drucker/usb_scanner), siehe Terminals.
+    drucker: str = "seriell"
+    usb_scanner: bool = False
 
     @property
     def current(self) -> str:
@@ -225,11 +228,22 @@ def _eigener_haushalt(sess: DeviceSession) -> tuple:
     return (InventoryItem.household == sess.household,) if sess.household else ()
 
 
+def druckt(device_id: str) -> bool:
+    """Hat dieses Terminal einen Drucker? Ohne Sitzung: ja (wie bisher)."""
+    sess = _sessions.get(device_id)
+    return sess is None or sess.drucker != "keiner"
+
+
+def drucker_online() -> list[str]:
+    """Verbundene Terminals mit Drucker - fuer die Verwaltung ohne Haushalt."""
+    return [d for d in hub.online_ids() if druckt(d)]
+
+
 def terminals_fuer(haushalt: str | None) -> list[str]:
-    """Verbundene Terminals dieses Haushalts."""
+    """Verbundene Terminals dieses Haushalts, an denen gedruckt werden kann."""
     if not haushalt:
         return []
-    return [d for d in hub.online_ids()
+    return [d for d in drucker_online()
             if (s := _sessions.get(d)) is not None and s.household == haushalt]
 
 
@@ -265,7 +279,8 @@ async def druckziel(session: AsyncSession, haushalt: str,
         return online[0], await geraet_pk(session, online[0])
     if not online and haushalt:
         pk = (await session.execute(
-            select(Device.id).where(Device.household == haushalt).order_by(Device.id)
+            select(Device.id).where(Device.household == haushalt, Device.drucker != "keiner")
+            .order_by(Device.id)
         )).scalars().first()
         return None, pk
     return None, None
@@ -967,18 +982,29 @@ async def check_idle_locations() -> None:
                 await push_screen(session, sess)
 
 
-def config_fuer_geraet(device_cfg: dict) -> dict:
+def config_fuer_geraet(device_cfg: dict, sess: DeviceSession | None = None) -> dict:
     """config-Nachricht: Anzeige-Einstellungen plus, woran das Terminal offline
-    eigene Etiketten erkennt (nur fuer den Text "wird ausgelagert")."""
+    eigene Etiketten erkennt (nur fuer den Text "wird ausgelagert").
+
+    Mit Sitzung auch, was am Terminal haengt (Drucker, USB-Scanner) - davon
+    haengt ab, ob die Firmware den USB-Anschluss als Host betreibt. Ohne
+    (Rundruf nach einer Anzeige-Einstellung) fehlen die Felder, und die
+    Firmware behaelt ihren Stand.
+    """
     from ..config import settings as app_settings
 
-    return {**device_cfg, "label_prefix": app_settings.label_prefix}
+    cfg = {**device_cfg, "label_prefix": app_settings.label_prefix}
+    if sess is not None:
+        cfg.update(drucker=sess.drucker, usb_scanner=sess.usb_scanner)
+    return cfg
 
 
 async def on_connect(session: AsyncSession, sess: DeviceSession, device: Device) -> None:
     from ..services import haushalte
 
     sess.household = device.household or await haushalte.standard(session)
+    sess.drucker = device.drucker or "seriell"
+    sess.usb_scanner = bool(device.usb_scanner)
     sess.location = device.active_location or await inv.default_location(session)
     sess.reset()
     sess.touch()
@@ -990,7 +1016,7 @@ async def on_connect(session: AsyncSession, sess: DeviceSession, device: Device)
     sess.erfasst()
 
     device_cfg = await settings_store.get(session, "device_ui", {})
-    await hub.send_to(sess.device_id, proto.config(config_fuer_geraet(device_cfg)))
+    await hub.send_to(sess.device_id, proto.config(config_fuer_geraet(device_cfg, sess)))
     await push_screen(session, sess)
     # Nach einem Neustart ist die Warteschlange der Firmware leer - was hier
     # noch als "sent" steht, hat das Geraet nie zu Ende gebracht.
@@ -1573,8 +1599,7 @@ async def nachdrucken(session: AsyncSession, item: InventoryItem,
     await session.commit()
 
     if target is None and pk is None:
-        target = terminal_fuer(item.household) or (
-            hub.online_ids()[0] if hub.online_ids() else None)
+        target = terminal_fuer(item.household) or next(iter(drucker_online()), None)
     sent = await flush_print_queue(session, target) if target else 0
     return {"ok": True, "job": job.id, "sent": bool(sent), "label": item.label, "name": item.name}
 
@@ -1614,7 +1639,7 @@ async def flush_print_queue(
     Senden die einzige Rettung fuer das Etikett.
     """
     conn = hub.get(device_id)
-    if conn is None:
+    if conn is None or not druckt(device_id):
         return 0
 
     if resend_in_flight:
@@ -1677,6 +1702,9 @@ async def flush_print_queue(
         )
     ).scalars().all()
 
+    if session_for(device_id).drucker == "usb":
+        return await _usb_senden(session, conn, device_id, jobs)
+
     # Was das Terminal kann, aus seinem hello() in *dieser* Verbindung. Ein
     # Hochformat-Etikett an eine Firmware ohne Bildstreifen zu schicken
     # hiesse: sie wirft leeres Papier aus und meldet Erfolg. Solange das
@@ -1721,6 +1749,81 @@ async def flush_print_queue(
             sent += 1
         else:
             break
+    await session.commit()
+    return sent
+
+
+# Groesse eines Stuecks Brother-Daten je Nachricht. Base64 macht daraus ~11 KB,
+# die Firmware nimmt hoechstens MAX_MESSAGE_BYTES (14 KB) an.
+USB_STUECK = 8192
+
+
+async def _usb_daten(session: AsyncSession, job: PrintJob, cfg: dict,
+                     printer_cfg: dict) -> bytes | str:
+    """Brother-Raster fuer einen Terminal-Auftrag - oder warum es keins gibt.
+
+    Terminal-Auftraege tragen die ESC/POS-Bloecke, nicht den Artikel. Fuer den
+    Brother am USB-Anschluss wird deshalb aus dem Artikel hinter dem Etikett
+    neu gezeichnet, genau wie beim WLAN-Printserver (brother.auftrag_bauen).
+    """
+    import asyncio
+
+    item = (await session.execute(
+        select(InventoryItem).where(InventoryItem.label == job.label))).scalars().first()
+    if item is not None:
+        payload = brother.auftrag({c.name: getattr(item, c.name) for c in InventoryItem.__table__.columns})
+    elif (job.label or "").upper() == "TEST" and (job.payload or {}).get("testetikett"):
+        payload = {"test": True}
+    else:
+        return "Messstreifen und ESC/POS-Tests gehen nur an einen seriellen Drucker"
+    try:
+        return await asyncio.to_thread(brother.auftrag_bauen, payload, cfg, printer_cfg)
+    except Exception as e:    # Zeichnen darf den Druckweg nie anhalten
+        log.exception("Brother-Etikett %s laesst sich nicht zeichnen", job.label)
+        return f"Etikett nicht darstellbar: {e}"
+
+
+async def _usb_senden(session: AsyncSession, conn, device_id: str, jobs: list[PrintJob]) -> int:
+    """Auftraege an ein Terminal mit Brother am USB-Anschluss: Raster in Stuecken.
+
+    Die Firmware schreibt jedes Stueck sofort auf den USB-Anschluss und meldet
+    nach dem letzten ein print_result wie beim seriellen Drucker.
+    """
+    import base64
+
+    kann = session_for(device_id).caps
+    if kann is None:            # hello steht noch aus
+        return 0
+    cfg = await settings_store.get(session, "brother", {}) or {}
+    printer_cfg = await settings_store.get(session, "printer", {}) or {}
+    sent = 0
+    for job in jobs:
+        if job.attempts >= 5:
+            job.status, job.error = "failed", job.error or "zu viele Versuche"
+            continue
+        if proto.USB_DRUCK not in kann:
+            job.status = "failed"
+            job.error = ("Firmware des Terminals kann noch nicht per USB drucken - "
+                         "unter Terminals ein Firmware-Update einspielen")
+            continue
+        daten = await _usb_daten(session, job, cfg, printer_cfg)
+        if isinstance(daten, str):
+            job.status, job.error = "failed", daten[:255]
+            continue
+        stuecke = [daten[i:i + USB_STUECK] for i in range(0, len(daten), USB_STUECK)] or [b""]
+        ok = True
+        for nr, stueck in enumerate(stuecke):
+            nachricht = proto.usb_druck(job.id, nr, nr == len(stuecke) - 1,
+                                        base64.b64encode(stueck).decode("ascii"))
+            if not await conn.send(nachricht):
+                ok = False
+                break
+        if not ok:
+            break                   # Verbindung weg - beim Reconnect neu
+        job.status = "sent"
+        job.attempts += 1
+        job.error = ""
+        sent += 1
     await session.commit()
     return sent
 

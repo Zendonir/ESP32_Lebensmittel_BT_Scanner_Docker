@@ -13,10 +13,15 @@ struct Settings {
     String  token;
     String  deviceName;
     bool    useTls = false;
+    // USB-Host beim Start einschalten (Drucker oder Scanner am USB). Kommt
+    // vom Server (config), steht aber hier, damit ein USB-Scanner auch ohne
+    // Server von Anfang an liest.
+    bool    usbHost = false;
 
     void begin();
     void save();
     void clear();
+    void saveUsbHost(bool on);
 
     // Eindeutige, stabile Geraetekennung aus der MAC-Adresse.
     static String deviceId();

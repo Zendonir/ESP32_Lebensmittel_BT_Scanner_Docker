@@ -1023,12 +1023,48 @@ function deviceCard(d) {
         <select data-dev-loc="${esc(d.device_id)}">
           ${state.locations.map((l) => `<option ${l.name === d.active_location ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
         </select></label>
+      ${usbFelder(d)}
       <div class="row" style="margin-top:10px">
         <button class="sm" data-dev-beep="${esc(d.device_id)}">Ton</button>
         <button class="sm" data-dev-update="${esc(d.device_id)}"${updateHint(d)}>Firmware-Update</button>
         <button class="sm" data-dev-reboot="${esc(d.device_id)}">Neustart</button>
       </div></div>`;
 }
+
+// Was am Terminal haengt: Drucker (keiner / seriell / Brother per USB) und
+// ein USB-Barcodescanner. Beides am USB-Anschluss braucht eine Firmware mit
+// "usb" - sonst ein Hinweis statt stiller Wirkungslosigkeit.
+const DRUCKER = [['seriell', 'Seriell (ESC/POS, wie bisher)'], ['usb', 'Brother per USB'], ['keiner', 'Kein Drucker']];
+function usbFelder(d) {
+  const t = d.telemetry || {};
+  const usb = t.usb || {};
+  const caps = t.caps || [];
+  const braucht = d.drucker === 'usb' || d.usb_scanner;
+  const angeschlossen = usb.geraet
+    ? `${usb.geraet === 'drucker' ? 'Drucker' : usb.geraet === 'scanner' ? 'Scanner' : 'Gerät'}${usb.name ? ` – ${esc(usb.name)}` : ''}`
+    : 'nichts angeschlossen';
+  return `<label class="field" style="margin-top:8px">Drucker
+      <select data-dev-drucker="${esc(d.device_id)}">
+        ${DRUCKER.map(([w, n]) => `<option value="${w}" ${w === (d.drucker || 'seriell') ? 'selected' : ''}>${n}</option>`).join('')}
+      </select></label>
+    <label class="row tight" style="margin-top:8px"><input type="checkbox" data-dev-usbscanner="${esc(d.device_id)}"
+      ${d.usb_scanner ? 'checked' : ''}> Barcodescanner am USB-Anschluss</label>
+    ${braucht ? (caps.includes('usb')
+    ? `<div class="muted" style="margin-top:6px">USB: ${usb.aktiv ? angeschlossen : 'wird eingeschaltet…'}</div>`
+    : '<div class="notice" style="margin-top:8px"><span>Für USB braucht das Terminal eine neuere Firmware – „Firmware-Update“.</span></div>') : ''}
+    ${!braucht && usb.aktiv ? '<div class="muted" style="margin-top:6px">USB ist noch an – aus erst nach einem Neustart des Terminals.</div>' : ''}`;
+}
+
+document.addEventListener('change', async (ev) => {
+  const sel = ev.target.closest('select[data-dev-drucker],input[data-dev-usbscanner]');
+  if (!sel) return;
+  try {
+    const body = sel.dataset.devDrucker ? { drucker: sel.value } : { usb_scanner: sel.checked };
+    await patch(`/api/devices/${sel.dataset.devDrucker || sel.dataset.devUsbscanner}`, body);
+    toast('Gespeichert', 'success');
+    await loadDevices();
+  } catch (e) { toast(e.message, 'error'); }
+});
 
 // Der Brother am WLAN-Printserver als Geraet neben den Terminals - mit
 // demselben Haushalt-Feld. Eingestellt wird er unter Etiketten.

@@ -280,11 +280,15 @@ void Net::sendHello() {
     //   raw:     Block "raw" - rohe Bytes fuer die Testknoepfe
     //   home3:   Startseite mit meta.cols und meta.roll_button (Kachelraster
     //            in drei Spalten, "Neue Rolle" als Kachel statt Knopf)
+    //   usb:     Drucker/Scanner am USB-Anschluss (config: drucker, usb_scanner)
+    //   usbdruck: Brother-Raster als "usbdruck"-Stuecke an den USB-Drucker
     JsonArray caps = doc["caps"].to<JsonArray>();
     caps.add("raster2");
     caps.add("baud");
     caps.add("raw");
     caps.add("home3");
+    caps.add("usb");
+    caps.add("usbdruck");
 
     // Statische Geraetedaten fuers System-Panel - aendern sich nicht waehrend
     // der Verbindung, deshalb hier statt in der periodischen Telemetrie.
