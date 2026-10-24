@@ -205,11 +205,13 @@ class Printserver:
         self.medium = {"media_width_mm": 51}   # gemerkter Stand (cached)
         self.medium_live = None                # Antwort auf eine frische Abfrage
         self.drucker_an = True
+        self.hosts: list[str] = []          # an welchen Printserver gedruckt wurde
         self.einstellungen = {"command_mode": 3, "print_priority": 0, "rotate": 0,
                               "stop_position": 0, "recovery": 0}
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.method == "POST" and request.url.path == "/api/print/raw":
+            self.hosts.append(request.url.host)
             key = request.headers.get("X-Job-Key", "")
             for job in self.jobs.values():
                 if key and job["key"] == key:
@@ -272,7 +274,7 @@ def client(server):
         try:
             yield c
         finally:
-            c.patch("/api/settings/brother", json={"aktiv": False, "url": ""})
+            c.patch("/api/settings/brother", json={"aktiv": False, "url": "", "drucker": []})
             _offene_brother_auftraege_abschliessen()
 
 
@@ -415,7 +417,8 @@ def test_treiberdatei_hochladen_und_zustand(client, server):
     assert r.json()["quelle"] == "treiber" and "kopf" not in r.json()
 
     z = client.get("/api/brother").json()
-    assert z["printserver"]["erreichbar"] and z["printserver"]["job_key"]
+    ps = z["drucker"][0]["printserver"]
+    assert ps["erreichbar"] and ps["job_key"]
     assert z["profil"]["datei"] == "etikett.prn"
     assert z["masse_mm"] == {"breite": 47.8, "laenge": 5.0}    # Druckbereich 382 Pins
     assert z["vorschau"].startswith("data:image/png")
@@ -444,7 +447,7 @@ def test_falsche_rolle_haelt_zurueck_bis_sie_passt(client, server):
         job = _job(label)
         assert job.status == "queued" and "50 × 30" in job.error
         assert not server.jobs
-        assert "50 × 30" in client.get("/api/brother").json()["medium_hinweis"]
+        assert "50 × 30" in client.get("/api/brother").json()["drucker"][0]["medium_hinweis"]
 
         # Rolle gewechselt: der gemerkte Stand ist alt, die frische Abfrage zaehlt.
         server.medium_live = {"media_type": "die_cut_labels", "media_width_mm": 51,
@@ -533,10 +536,11 @@ def test_brother_einem_haushalt_zuweisen(client, server):
         bei_a, bei_b = {"X-Haushalt": str(a)}, {"X-Haushalt": str(b)}
 
         # Geraeteliste: nur der Haushalt, dem er gehoert (Verwaltung sieht ihn immer).
-        assert client.get("/api/brother/geraet", headers=bei_a).json()["sichtbar"]
-        assert client.get("/api/brother/geraet", headers=bei_b).json()["sichtbar"] is False
-        assert client.get("/api/brother/geraet").json()["haushalt"] == f"Oben-{tag}"
-        assert client.get("/api/brother", headers=bei_b).json() == {"sichtbar": False}
+        assert len(client.get("/api/brother/geraet", headers=bei_a).json()["drucker"]) == 1
+        assert client.get("/api/brother/geraet", headers=bei_b).json()["drucker"] == []
+        assert client.get("/api/brother/geraet").json()["drucker"][0]["haushalt"] == f"Oben-{tag}"
+        # Das Etikett selbst sieht jeder (gilt auch fuer USB am Terminal), den Drucker nicht.
+        assert client.get("/api/brother", headers=bei_b).json()["drucker"] == []
 
         # Drucken: nur der eigene Haushalt hat ihn zur Wahl und als Standardziel.
         assert client.get("/api/labels/ziele", headers=bei_a).json()["brother"] is True
@@ -546,7 +550,7 @@ def test_brother_einem_haushalt_zuweisen(client, server):
 
         # Umbenennen zieht die Zuordnung nach.
         assert client.patch(f"/api/households/{a}", json={"name": f"Dach-{tag}"}).status_code == 200
-        assert client.get("/api/brother/geraet").json()["haushalt"] == f"Dach-{tag}"
+        assert client.get("/api/brother/geraet").json()["drucker"][0]["haushalt"] == f"Dach-{tag}"
     finally:
         client.patch("/api/settings/brother", json={"haushalt": ""})
 
@@ -755,3 +759,78 @@ def test_hochkant_gelesen_nur_standard_und_e():
     assert brother.layouts_zum_testen({"etikett": "rd-51x26", "drehung": "links"}) == [
         "standard", "hochkant"]
     assert len(brother.layouts_zum_testen({"etikett": "rd-51x26"})) == 10
+
+
+# ------------------------------------------------------------ mehrere Brother
+def test_mehrere_brother_je_haushalt(client, server):
+    """Zwei Printserver, je einer Haushalt: jedes Etikett geht an seinen."""
+    tag = uuid.uuid4().hex[:6]
+    a = client.post("/api/households", json={"name": f"Ost-{tag}"}).json()["id"]
+    b = client.post("/api/households", json={"name": f"West-{tag}"}).json()["id"]
+    bei_a, bei_b = {"X-Haushalt": str(a)}, {"X-Haushalt": str(b)}
+    # Der Altbestand (ein Drucker in den Feldern) wird beim ersten Anlegen zur Liste.
+    alt = client.get("/api/brother/geraet").json()["drucker"]
+    assert len(alt) == 1 and alt[0]["id"] == "1"
+    client.delete("/api/brother/drucker/1")
+    assert client.get("/api/brother/geraet").json()["drucker"] == []
+
+    ost = client.post("/api/brother/drucker", json={"url": "http://ps-ost", "etikett": "rd-51x26"},
+                      headers=bei_a).json()
+    assert ost["haushalt"] == f"Ost-{tag}"         # in der Haushaltsansicht angelegt
+    west = client.post("/api/brother/drucker", json={
+        "url": "http://ps-west", "haushalt": f"West-{tag}", "etikett": "eigen-57x32"}).json()
+    assert client.post("/api/brother/drucker", json={"url": ""}).status_code == 422
+    assert client.patch(f"/api/brother/drucker/{west['id']}",
+                        json={"etikett": "gibtsnicht"}).status_code == 422
+
+    # Jeder Haushalt sieht nur seinen.
+    assert [d["id"] for d in client.get("/api/brother/geraet", headers=bei_a).json()["drucker"]] == [ost["id"]]
+    assert [d["id"] for d in client.get("/api/brother/geraet", headers=bei_b).json()["drucker"]] == [west["id"]]
+    assert len(client.get("/api/brother/geraet").json()["drucker"]) == 2
+
+    la = client.post("/api/labels", json={"name": "Erbsen"}, headers=bei_a).json()["labels"][0]
+    lb = client.post("/api/labels", json={"name": "Bohnen"}, headers=bei_b).json()["labels"][0]
+    _durchgang()
+    assert _job(la).payload["drucker"] == ost["id"] and _job(lb).payload["drucker"] == west["id"]
+    assert sorted(server.hosts) == ["ps-ost", "ps-west"]
+
+    # Testetikett an einen bestimmten Drucker; fremde Drucker gibt es nicht.
+    assert client.post(f"/api/brother/test?drucker={west['id']}", headers=bei_b).json()["ok"]
+    assert client.post(f"/api/brother/test?drucker={west['id']}", headers=bei_a).status_code == 404
+
+    # Umbenennen zieht den Haushalt am Drucker nach; Entfernen nimmt ihn heraus.
+    client.patch(f"/api/households/{a}", json={"name": f"Nord-{tag}"})
+    assert any(d["haushalt"] == f"Nord-{tag}" for d in client.get("/api/brother/geraet").json()["drucker"])
+    assert client.delete(f"/api/brother/drucker/{ost['id']}").json()["ok"]
+    assert client.get("/api/labels/ziele", headers=bei_a).json()["brother"] is False
+
+
+def test_vorschau_fuer_gewaehlte_sorte(client, server):
+    z = client.get("/api/brother?sorte=eigen-57x32").json()
+    assert z["vorschau_sorte"] == "eigen-57x32" and z["masse_mm"]["breite"] == 54.0
+    assert z["vorschau"].startswith("data:image/png")
+
+
+def test_entfernter_drucker_gibt_abgegebene_auftraege_nicht_weiter(client, server):
+    """Ein schon abgegebener Auftrag gehoert seinem Printserver - nie einem anderen."""
+    erster = client.post("/api/brother/drucker", json={"url": "http://ps-eins"}).json()
+    label = client.post("/api/labels", json={"name": "Reis"}).json()["labels"][0]
+    _durchgang()
+    assert _job(label).status == "sent" and _job(label).payload["drucker"] in (erster["id"], "1")
+    for d in client.get("/api/brother/geraet").json()["drucker"]:
+        if d["id"] == _job(label).payload["drucker"]:
+            client.delete(f"/api/brother/drucker/{d['id']}")
+    client.post("/api/brother/drucker", json={"url": "http://ps-zwei"})
+    vorher = len(server.hosts)
+    _durchgang()
+    job = _job(label)
+    assert job.status == "failed" and "entfernt" in job.error
+    assert len(server.hosts) == vorher          # nicht beim anderen nachgedruckt
+
+
+def test_standardsorte_ist_gespeichert(client, server):
+    client.patch("/api/settings/brother", json={"etikett": "rd-50x30"})
+    try:
+        assert client.get("/api/brother").json()["vorschau_sorte"] == "rd-50x30"
+    finally:
+        client.patch("/api/settings/brother", json={"etikett": ""})

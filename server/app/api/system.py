@@ -34,7 +34,7 @@ from ..schemas import (
 )
 from ..services import importer as importer_service
 from ..services import inventory as inv
-from ..services import deploy, notify, settings_store, updates
+from ..services import brother, deploy, notify, settings_store, updates
 from ..services.dates import to_display
 
 log = logging.getLogger(__name__)
@@ -90,6 +90,10 @@ async def patch_device(
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Terminal unbekannt")
+    if body.brother_etikett:
+        sorten = brother.etikettensorten(await settings_store.get(session, "brother", {}) or {})
+        if body.brother_etikett not in {e["key"] for e in sorten}:
+            raise HTTPException(422, f"Unbekannte Etikettensorte: {body.brother_etikett}")
     for key, value in body.model_dump(exclude_unset=True, exclude_none=True).items():
         setattr(row, key, value)
     await session.commit()

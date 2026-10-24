@@ -227,6 +227,9 @@ class Device(Base, TimestampMixin):
     drucker: Mapped[str] = mapped_column(String(16), default="seriell")
     # Barcodescanner als USB-Tastatur am USB-Anschluss.
     usb_scanner: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Etikettensorte des Brother am USB-Anschluss (Schluessel wie brother.etikett);
+    # leer = die unter Etiketten eingestellte.
+    brother_etikett: Mapped[str] = mapped_column(String(60), default="")
     online: Mapped[bool] = mapped_column(Boolean, default=False)
     last_seen: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

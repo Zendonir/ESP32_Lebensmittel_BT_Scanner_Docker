@@ -297,7 +297,7 @@ async function loadLabels() {
   fillSettings(settings);
   loadLayouts().catch((e) => toast(e.message, 'error'));
   hochformatHinweise().catch(() => {});
-  loadBrother().catch((e) => { $('#brother-status').textContent = e.message; });
+  loadBrother().catch((e) => { $('#brother-drucker-liste').textContent = e.message; });
   loadZiele().catch(() => {});
   $('#roll-state').textContent = roll.size
     ? `${roll.remaining} von ${roll.size} Etiketten übrig (${roll.used} verbraucht)`
@@ -316,38 +316,71 @@ $('#roll-set').addEventListener('click', async () => {
   toast('Rolle zurückgesetzt', 'success');
   await loadLabels();
 });
-// Brother am WLAN-Printserver (services/brother.py). Die Felder speichern sich
-// selbst (data-setting); hier nur Zustand, Testdruck und Treiberdatei.
-// Haushalt des Brother: ein Haushalt oder alle - dieselbe Auswahl wie bei
-// den Terminals (Karte unter Terminals und Feld unter Etiketten).
+// Brother (services/brother.py): das Etikett selbst (Felder mit data-setting,
+// gilt fuer WLAN und USB) und die Liste der Drucker an WLAN-Printservern -
+// je Drucker Adresse, Haushalt und eingelegte Etikettensorte.
+// Haushalt eines Druckers: ein Haushalt oder alle - dieselbe Auswahl wie bei
+// den Terminals.
 function brotherHaushaltOptionen(haushalte, wert) {
   return [['', 'alle Haushalte'], ...haushalte.map((h) => [h.name, h.name])]
     .map(([w, t]) => `<option value="${esc(w)}" ${w === wert ? 'selected' : ''}>${esc(t)}</option>`).join('');
 }
+function brotherSortenOptionen(sorten, wert) {
+  return (sorten || []).map((e) =>
+    `<option value="${esc(e.key)}" ${e.key === wert ? 'selected' : ''}>${esc(e.name)}</option>`).join('');
+}
 
-async function loadBrother() {
-  const [z, haushalte] = await Promise.all([get('/api/brother'), get('/api/households')]);
-  // Gehoert er einem anderen Haushalt, ist er in dieser Ansicht nicht da.
-  $('#brother-setup').hidden = !z.sichtbar;
-  if (!z.sichtbar) return;
-  if ($('#brother-haushalt') !== document.activeElement) {
-    $('#brother-haushalt').innerHTML = brotherHaushaltOptionen(haushalte, z.einstellungen.haushalt || '');
-  }
-  if ($('#brother-etikett') !== document.activeElement) {
-    const wahl = z.etikett_wahl || z.einstellungen.etikett || '';
-    $('#brother-etikett').innerHTML = (z.etikettensorten || []).map((e) =>
-      `<option value="${esc(e.key)}" ${e.key === wahl ? 'selected' : ''}>${esc(e.name)}</option>`).join('');
-  }
-  brotherSorteZeigen($('#brother-etikett').value, z.profil);
-  const ps = z.printserver;
+function printserverText(ps) {
   const medium = ps.medium || {};
-  $('#brother-status').innerHTML = ps.erreichbar
-    ? `<span>Printserver ${esc(ps.ip || '')} · Firmware ${esc(ps.firmware)} ·
+  return ps.erreichbar
+    ? `Printserver ${esc(ps.ip || '')} · Firmware ${esc(ps.firmware)} ·
         Drucker ${ps.drucker_verbunden ? esc(ps.drucker || 'verbunden') : '<b>nicht angeschlossen</b>'}
         ${medium.media_width_mm ? ` · Medium ${medium.media_width_mm}${medium.media_length_mm ? ` × ${medium.media_length_mm}` : ''} mm` : ''}
-        ${ps.job_key ? '' : '<br><b>Printserver-Firmware zu alt</b> – ab 0.4.1 werden wiederholte Aufträge nicht doppelt gedruckt.'}</span>`
-    : `<span>${esc(ps.fehler || 'nicht erreichbar')}</span>`;
-  $('#brother-status').className = `notice ${ps.erreichbar ? '' : 'warn'}`;
+        ${ps.job_key ? '' : '<br><b>Printserver-Firmware zu alt</b> – ab 0.4.1 werden wiederholte Aufträge nicht doppelt gedruckt.'}`
+    : esc(ps.fehler || 'nicht erreichbar');
+}
+
+function brotherDruckerKarte(d, haushalte, sorten) {
+  const ps = d.printserver || {};
+  return `<div class="card" data-drucker="${esc(d.id)}" style="margin-top:10px;box-shadow:none;border:1px solid var(--line, #2a3340)">
+    <div class="row"><b style="flex:1;font-size:1.05em"><span class="dot ${ps.erreichbar ? 'on' : ''}"></span>${esc(d.name || d.url)}</b>
+      ${d.aktiv ? '' : '<span class="pill">nicht aktiv</span>'}</div>
+    <div class="notice ${ps.erreichbar ? '' : 'warn'}" style="display:block;margin-top:8px"><span>${printserverText(ps)}</span></div>
+    ${d.medium_hinweis ? `<div class="notice warn" style="margin-top:8px"><span><b>Rolle passt nicht:</b>
+      ${esc(d.medium_hinweis)} – Etiketten werden so lange zurückgehalten.</span></div>` : ''}
+    <div class="settings-grid" style="margin-top:10px">
+      <label class="field">Name<input data-dr-feld="name" type="text" value="${esc(d.name || '')}" placeholder="z. B. Küche"></label>
+      <label class="field">Adresse<input data-dr-feld="url" type="text" value="${esc(d.url || '')}"></label>
+      <label class="field">Haushalt<select data-dr-feld="haushalt">${brotherHaushaltOptionen(haushalte, d.haushalt || '')}</select></label>
+      <label class="field">Etikettensorte<select data-dr-feld="etikett">${brotherSortenOptionen(sorten, d.etikett)}</select>
+        <span class="hint">was in diesem Drucker liegt</span></label>
+    </div>
+    <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+      <label class="row tight"><input data-dr-feld="aktiv" type="checkbox" ${d.aktiv ? 'checked' : ''}> Etiketten hier drucken</label>
+    </div>
+    <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+      <button class="ghost" data-dr-aktion="pruefen">Verbindung prüfen</button>
+      <button class="primary" data-dr-aktion="test">Testetikett drucken</button>
+      <button data-dr-aktion="layouts" title="Je Layout ein Musteretikett auf der Etikettensorte dieses Druckers">Alle Layouts testen</button>
+      <button class="ghost" data-dr-aktion="geraet">Im Drucker gespeichert …</button>
+      <button class="ghost" data-dr-aktion="weg">Entfernen</button>
+    </div>
+    <div data-dr-geraet class="settings-grid" style="margin-top:10px"></div>
+  </div>`;
+}
+
+let brotherZustand = null;
+async function loadBrother() {
+  const [z, haushalte] = await Promise.all([get('/api/brother'), get('/api/households')]);
+  brotherZustand = { ...z, haushalte };
+  $('#brother-vorschau-sorte').innerHTML = brotherSortenOptionen(z.etikettensorten, z.vorschau_sorte);
+  // Offene Eingaben in einer Druckerkarte nicht ueberschreiben.
+  const liste = $('#brother-drucker-liste');
+  if (!liste.contains(document.activeElement)) {
+    liste.innerHTML = z.drucker.length
+      ? z.drucker.map((d) => brotherDruckerKarte(d, haushalte, z.etikettensorten)).join('')
+      : '<p class="muted">Noch kein Brother am WLAN-Printserver – „+ Drucker hinzufügen“.</p>';
+  }
   const p = z.profil;
   $('#brother-profil').innerHTML = `<span class="muted">${p.quelle === 'treiber'
     ? `Aus ${esc(p.datei || 'Treiberdatei')}: ${esc(p.medium || '')} ${p.breite_mm} × ${p.laenge_mm || '–'} mm,
@@ -355,40 +388,62 @@ async function loadBrother() {
     : p.quelle === 'vorlage'
       ? `Etikettensorte ${esc(p.name)}: Befehle und Medieninformation aus dem Brother-Treiber,
          ${p.zeilen} Zeilen, ${p.druckbreite_pins} Punkte breit ab Punkt ${p.rand_links_pins}.`
-      : 'Ohne Vorlage: Befehle nach der Brother-Rasterreferenz TD-2020.'}
+      : 'Ohne Vorlage: Befehle nach der Brother-Rasterreferenz TD-2020, Maße unter „Eigene Maße“.'}
     Gedruckt wird ${z.masse_mm.breite} × ${z.masse_mm.laenge} mm.
     ${z.sensor ? 'Gestanzte Etiketten: der Drucker setzt jedes Etikett selbst an der Lücke an.'
-      : 'Endlosband: ohne Lückensensor, Länge wie eingestellt.'}</span>
-    ${z.medium_hinweis ? `<div class="notice warn" style="margin-top:8px"><span><b>Rolle passt nicht:</b>
-      ${esc(z.medium_hinweis)} – Etiketten werden so lange zurückgehalten.</span></div>` : ''}`;
+      : 'Endlosband: ohne Lückensensor, Länge wie eingestellt.'}</span>`;
   $('#brother-vorschau').src = z.vorschau || '';
   $('#brother-treiber-fig').hidden = !p.vorschau;
   if (p.vorschau) $('#brother-treiber').src = p.vorschau;
 }
-$('#brother-pruefen').addEventListener('click', () => loadBrother().catch((e) => toast(e.message, 'error')));
+// Die Standardsorte wird gespeichert (brother.etikett) - sie gilt fuer jedes
+// USB-Terminal ohne eigene Wahl und fuer Drucker ohne Etikettensorte.
+$('#brother-vorschau-sorte').addEventListener('change', async (ev) => {
+  try {
+    await patch('/api/settings/brother', { etikett: ev.target.value });
+    await loadBrother();
+  } catch (e) { toast(e.message, 'error'); }
+});
 
-// Mit einer Etikettensorte (oder Treiberdatei) stehen Medium und Masse fest -
-// die Felder dafuer gibt es nur bei "keine Vorlage".
-function brotherSorteZeigen(wahl, profil) {
-  const manuell = !wahl || wahl === 'keine';
-  document.querySelectorAll('.brother-manuell').forEach((el) => { el.hidden = !manuell; });
-  $('#brother-sorte-masse').hidden = manuell;
-  if (!manuell && profil && profil.quelle !== 'standard') {
-    const art = profil.laenge_mm ? 'Etiketten (gestanzt)' : 'Endlosband';
-    $('#brother-sorte-masse-wert').textContent =
-      `${profil.breite_mm} × ${profil.laenge_mm || '–'} mm · ${art}`;
-  }
-}
-$('#brother-etikett').addEventListener('change', (ev) => {
-  // Sofort umschalten; die Masse der neuen Sorte kommen mit dem naechsten Laden.
-  brotherSorteZeigen(ev.target.value, null);
-  $('#brother-sorte-masse-wert').textContent = '…';
+// Neuer Drucker
+$('#brother-drucker-neu').addEventListener('click', () => {
+  const z = brotherZustand || { haushalte: [], etikettensorten: [] };
+  $('#neu-haushalt').innerHTML = brotherHaushaltOptionen(z.haushalte, '');
+  $('#neu-etikett').innerHTML = brotherSortenOptionen(z.etikettensorten, z.vorschau_sorte);
+  $('#brother-drucker-form').hidden = false;
+  $('#neu-url').focus();
+});
+$('#neu-abbrechen').addEventListener('click', () => { $('#brother-drucker-form').hidden = true; });
+$('#neu-anlegen').addEventListener('click', async () => {
+  try {
+    await post('/api/brother/drucker', {
+      name: $('#neu-name').value.trim(), url: $('#neu-url').value.trim(),
+      haushalt: $('#neu-haushalt').value, etikett: $('#neu-etikett').value });
+    $('#brother-drucker-form').hidden = true;
+    $('#neu-name').value = ''; $('#neu-url').value = '';
+    toast('Drucker angelegt', 'success');
+    await loadBrother();
+  } catch (e) { toast(e.message, 'error'); }
+});
+
+// Aenderungen an einem Drucker speichern sich sofort.
+document.addEventListener('change', async (ev) => {
+  const feld = ev.target.closest('[data-dr-feld]');
+  if (!feld) return;
+  const id = feld.closest('[data-drucker]').dataset.drucker;
+  const wert = feld.type === 'checkbox' ? feld.checked : feld.value;
+  try {
+    await patch(`/api/brother/drucker/${id}`, { [feld.dataset.drFeld]: wert });
+    toast('Gespeichert', 'success');
+    feld.blur();
+    await loadBrother();
+  } catch (e) { toast(e.message, 'error'); }
 });
 
 // Geraeteeinstellungen im Drucker (ueber den Printserver). Jede Aenderung geht
 // sofort hinaus - wie die anderen Felder auch.
-function brotherGeraetZeigen(r) {
-  $('#brother-geraet').innerHTML = r.einstellungen.map((e) => {
+function brotherGeraetZeigen(ziel, r) {
+  ziel.innerHTML = r.einstellungen.map((e) => {
     const abweichend = e.empfohlen !== null && e.wert >= 0 && e.wert !== e.empfohlen;
     return `<label class="field">${esc(e.name)}
       <select data-brother-geraet="${esc(e.key)}">
@@ -398,39 +453,55 @@ function brotherGeraetZeigen(r) {
       ${e.warum ? `<span class="hint">${abweichend ? '<b>Empfohlen:</b> ' : ''}${esc(e.warum)}</span>` : ''}</label>`;
   }).join('');
 }
-$('#brother-geraet-lesen').addEventListener('click', async (ev) => {
-  // Nach dem await ist ev.currentTarget null - den Knopf vorher festhalten.
-  const knopf = ev.currentTarget;
-  knopf.disabled = true;
-  try { brotherGeraetZeigen(await get('/api/brother/druckereinstellungen')); }
-  catch (e) { toast(e.message, 'error'); }
-  finally { knopf.disabled = false; }
-});
 document.addEventListener('change', async (ev) => {
   const sel = ev.target.closest('select[data-brother-geraet]');
   if (!sel || sel.value === '') return;
+  const karte = sel.closest('[data-drucker]');
   try {
-    brotherGeraetZeigen(await patch('/api/brother/druckereinstellungen',
+    brotherGeraetZeigen(karte.querySelector('[data-dr-geraet]'), await patch(
+      `/api/brother/druckereinstellungen?drucker=${karte.dataset.drucker}`,
       { [sel.dataset.brotherGeraet]: Number(sel.value) }));
     toast('Im Drucker gespeichert', 'success');
   } catch (e) { toast(e.message, 'error'); }
 });
-$('#brother-test').addEventListener('click', async () => {
+
+document.addEventListener('click', async (ev) => {
+  const knopf = ev.target.closest('button[data-dr-aktion]');
+  if (!knopf) return;
+  const karte = knopf.closest('[data-drucker]');
+  const id = karte.dataset.drucker;
+  knopf.disabled = true;
   try {
-    const r = await post('/api/brother/test');
-    toast(r.wartet ? 'Ein Testetikett wartet schon – es kommt, sobald der Drucker bereit ist'
-      : 'Testetikett an den Brother gesendet', 'success');
-  }
-  catch (e) { toast(e.message, 'error'); }
+    switch (knopf.dataset.drAktion) {
+      case 'pruefen': await loadBrother(); break;
+      case 'test': {
+        const r = await post(`/api/brother/test?drucker=${id}`);
+        toast(r.wartet ? 'Ein Testetikett wartet schon – es kommt, sobald der Drucker bereit ist'
+          : 'Testetikett an den Brother gesendet', 'success');
+        break;
+      }
+      case 'layouts': {
+        const r = await post(`/api/brother/test/layouts?drucker=${id}`);
+        toast(r.wartet ? 'Ein Satz Layout-Tests wartet schon – er kommt, sobald der Drucker bereit ist'
+          : `${r.anzahl} Musteretiketten gesendet – je Layout eins`, 'success');
+        break;
+      }
+      case 'geraet':
+        brotherGeraetZeigen(karte.querySelector('[data-dr-geraet]'),
+          await get(`/api/brother/druckereinstellungen?drucker=${id}`));
+        break;
+      case 'weg':
+        if (!confirm('Diesen Brother entfernen? Seine offenen Etiketten gehen dann an einen anderen Brother des Haushalts.')) break;
+        await del(`/api/brother/drucker/${id}`);
+        toast('Drucker entfernt', 'success');
+        await loadBrother();
+        break;
+      default: break;
+    }
+  } catch (e) { toast(e.message, 'error'); }
+  finally { knopf.disabled = false; }
 });
-$('#brother-test-layouts').addEventListener('click', async () => {
-  try {
-    const r = await post('/api/brother/test/layouts');
-    toast(r.wartet ? 'Ein Satz Layout-Tests wartet schon – er kommt, sobald der Drucker bereit ist'
-      : `${r.anzahl} Musteretiketten an den Brother gesendet – je Layout eins`, 'success');
-  }
-  catch (e) { toast(e.message, 'error'); }
-});
+
 $('#brother-datei-laden').addEventListener('click', async () => {
   const datei = $('#brother-datei').files[0];
   if (!datei) return toast('Erst eine .prn-Datei wählen', 'warn');
@@ -438,7 +509,7 @@ $('#brother-datei-laden').addEventListener('click', async () => {
   form.append('datei', datei);
   try {
     await post('/api/brother/treiberdatei', form);
-    toast('Treiberdatei übernommen', 'success');
+    toast('Treiberdatei übernommen – bei den Druckern als Etikettensorte wählbar', 'success');
     await loadBrother();
   } catch (e) { toast(e.message, 'error'); }
 });
@@ -1055,6 +1126,11 @@ function usbFelder(d) {
       <select data-dev-drucker="${esc(d.device_id)}">
         ${DRUCKER.map(([w, n]) => `<option value="${w}" ${w === (d.drucker || 'seriell') ? 'selected' : ''}>${n}</option>`).join('')}
       </select></label>
+    ${d.drucker === 'usb' ? `<label class="field" style="margin-top:8px">Etikettensorte im USB-Brother
+      <select data-dev-brotheretikett="${esc(d.device_id)}">
+        <option value="" ${d.brother_etikett ? '' : 'selected'}>Standard (Etiketten → Brother-Etikett)</option>
+        ${brotherSortenOptionen(state.brotherSorten, d.brother_etikett)}
+      </select><span class="hint">Aussehen des Etiketts: Etiketten → Brother-Etikett</span></label>` : ''}
     <label class="row tight" style="margin-top:8px"><input type="checkbox" data-dev-usbscanner="${esc(d.device_id)}"
       ${d.usb_scanner ? 'checked' : ''}> Barcodescanner am USB-Anschluss</label>
     ${braucht ? (caps.includes('usb')
@@ -1064,23 +1140,26 @@ function usbFelder(d) {
 }
 
 document.addEventListener('change', async (ev) => {
-  const sel = ev.target.closest('select[data-dev-drucker],input[data-dev-usbscanner]');
+  const sel = ev.target.closest('select[data-dev-drucker],input[data-dev-usbscanner],select[data-dev-brotheretikett]');
   if (!sel) return;
   try {
-    const body = sel.dataset.devDrucker ? { drucker: sel.value } : { usb_scanner: sel.checked };
-    await patch(`/api/devices/${sel.dataset.devDrucker || sel.dataset.devUsbscanner}`, body);
+    const body = sel.dataset.devDrucker ? { drucker: sel.value }
+      : sel.dataset.devBrotheretikett !== undefined ? { brother_etikett: sel.value }
+        : { usb_scanner: sel.checked };
+    const id = sel.dataset.devDrucker || sel.dataset.devUsbscanner || sel.dataset.devBrotheretikett;
+    await patch(`/api/devices/${id}`, body);
     toast('Gespeichert', 'success');
     await loadDevices();
   } catch (e) { toast(e.message, 'error'); }
 });
 
-// Der Brother am WLAN-Printserver als Geraet neben den Terminals - mit
-// demselben Haushalt-Feld. Eingestellt wird er unter Etiketten.
+// Die Brother an WLAN-Printservern als Geraete neben den Terminals - mit
+// demselben Haushalt-Feld. Eingestellt werden sie unter Etiketten.
 function brotherCard(b) {
   const ps = b.printserver || {};
   const m = ps.medium || {};
   return `<div class="card">
-    <div class="row"><h2 style="margin:0;flex:1"><span class="dot ${ps.erreichbar ? 'on' : ''}"></span>Brother-Etikettendrucker</h2>
+    <div class="row"><h2 style="margin:0;flex:1"><span class="dot ${ps.erreichbar ? 'on' : ''}"></span>${esc(b.name || 'Brother-Etikettendrucker')}</h2>
       <span class="pill">WLAN-Printserver</span>${ps.firmware ? `<span class="pill">Firmware ${esc(ps.firmware)}</span>` : ''}</div>
     <div class="muted">${esc(b.url)}${b.aktiv ? '' : ' · <b>nicht aktiv</b>'}</div>
     ${ps.erreichbar ? `<div class="telemetry">
@@ -1089,7 +1168,7 @@ function brotherCard(b) {
         <div><b>${(ps.warteschlange || {}).queued ?? 0}</b><span>wartend</span></div>
       </div>` : `<div class="notice warn" style="margin-top:12px"><span>${esc(ps.fehler || 'nicht erreichbar')}</span></div>`}
     <label class="field" style="margin-top:12px">Haushalt
-      <select data-brother-haus>${brotherHaushaltOptionen(state.haushalte || [], b.haushalt || '')}</select></label>
+      <select data-brother-haus="${esc(b.id)}">${brotherHaushaltOptionen(state.haushalte || [], b.haushalt || '')}</select></label>
     <div class="row" style="margin-top:10px">
       <button class="sm" data-brother-einstellen>Einstellungen</button>
     </div></div>`;
@@ -1097,10 +1176,11 @@ function brotherCard(b) {
 
 async function loadDevices() {
   let brotherGeraet;
-  [state.devices, state.haushalte, brotherGeraet] = await Promise.all([
+  [state.devices, state.haushalte, brotherGeraet, state.brotherSorten] = await Promise.all([
     get('/api/devices'), get('/api/households'),
-    get('/api/brother/geraet').catch(() => ({ sichtbar: false }))]);
-  const brotherHtml = brotherGeraet.sichtbar ? brotherCard(brotherGeraet) : '';
+    get('/api/brother/geraet').catch(() => ({ drucker: [] })),
+    get('/api/brother/sorten').catch(() => [])]);
+  const brotherHtml = (brotherGeraet.drucker || []).map(brotherCard).join('');
   // Die Anleitung bleibt erreichbar, wenn schon Terminals da sind - fuer das
   // zweite oder ein ersetztes Geraet.
   $('#devices-list').innerHTML = brotherHtml + (state.devices.length
@@ -1119,7 +1199,7 @@ document.addEventListener('change', async (ev) => {
   const sel = ev.target.closest('select[data-brother-haus]');
   if (!sel) return;
   try {
-    await patch('/api/settings/brother', { haushalt: sel.value });
+    await patch(`/api/brother/drucker/${sel.dataset.brotherHaus}`, { haushalt: sel.value });
     toast(sel.value ? `Brother gehört jetzt zu ${sel.value}` : 'Brother gehört jetzt allen Haushalten', 'success');
     await loadDevices();
   } catch (e) { toast(e.message, 'error'); }
@@ -1127,7 +1207,7 @@ document.addEventListener('change', async (ev) => {
 document.addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-brother-einstellen]')) {
     showPage('labels');
-    setTimeout(() => $('#brother-setup')?.scrollIntoView({ behavior: 'smooth' }), 150);
+    setTimeout(() => $('#brother-drucker-karte')?.scrollIntoView({ behavior: 'smooth' }), 150);
   }
 });
 
