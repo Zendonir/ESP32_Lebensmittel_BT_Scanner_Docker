@@ -114,7 +114,9 @@ def _fuellend(eintraege: list[Eintrag], breite: int, hoehe: int,
                             e.pflicht, e.abstand) for e in voll]
         teile = _stapel(groesser, breite, hoehe)
         if len(teile) == len(voll) and _hoehe(teile) <= hoehe and all(
-                s.size >= int(e.groesse * faktor) - 1 for (s, _, _), e in zip(teile, groesser)):
+                # Keine Zeile unter ihre Grundgroesse - eine, die schon an der
+                # Breite anstoesst (Ort · eingelagert), darf stehen bleiben.
+                s.size >= e.groesse - 1 for (s, _, _), e in zip(teile, voll)):
             return teile
         faktor -= 0.1
     return _stapel(eintraege, breite, hoehe)
