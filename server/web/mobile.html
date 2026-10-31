@@ -64,6 +64,7 @@
     .gruppe { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
     .gruppe .gkopf { cursor: pointer; }
     #tpl-list { gap: 6px; }
+    .ein-titel { font-size: 13px; font-weight: 600; color: var(--muted); margin: 6px 2px 0; }
     #tpl-list .swipe-inner { padding: 8px 12px; }
     .tpl-zeile { width: 100%; text-align: left; font: inherit; color: inherit; }
     /* Das rote Loeschfeld erst beim Wischen zeigen - sonst schimmert es an
@@ -968,23 +969,49 @@ async function renderEinlagern(kategorie = null) {
     });
     return;
   }
-  const passend = vorlagen.filter((t) => t.category === kategorie);
-  view.innerHTML = `<div class="list">
-    ${passend.map((t) => `<button class="swipe-inner" data-tpl="${t.id}" style="text-align:left;width:100%">
+  const passend = vorlagen.filter((t) => t.category === kategorie)
+    .sort((x, y) => x.name.localeCompare(y.name, 'de'));
+  // Wie oft jede Vorlage zuletzt eingelagert wurde (Tage im letzten halben
+  // Jahr, dieser Haushalt) - die haeufigsten stehen oben.
+  const oft = await get('/api/templates/oft').catch(() => ({}));
+  const haeufig = passend.filter((t) => (oft[t.name] || 0) >= 2)
+    .sort((x, y) => oft[y.name] - oft[x.name]).slice(0, EIN_OFT);
+  view.innerHTML = `
+    <div class="msearch"><input id="ein-q" type="search" placeholder="In ${esc(kategorie)} suchen: Name, Marke, Sorte"
+      autocomplete="off" enterkeyhint="search" aria-label="Vorlage suchen"></div>
+    <div class="list" id="ein-liste"></div>`;
+  const zeile = (t) => `<button class="swipe-inner" data-tpl="${t.id}" style="text-align:left;width:100%">
       <div class="t">${esc(t.name)}</div>
       <div class="s">${haltKurz(t)}${t.use_sorten ? ' · fragt nach Sorte' : ''}${t.unit ? ` · ${esc(t.unit)}` : ''}</div>
-    </button>`).join('')}
-    <button class="swipe-inner" data-tpl="" style="text-align:left;width:100%">
-      <div class="t">Ohne Vorlage</div><div class="s">Name selbst eingeben</div></button>
-    <button class="ghost" id="ein-zurueck" style="margin-top:6px">← Kategorien</button>
-  </div>`;
-  document.getElementById('ein-zurueck').addEventListener('click', () => renderEinlagern());
-  view.querySelectorAll('[data-tpl]').forEach((b) => b.addEventListener('click', () => {
-    const tpl = passend.find((t) => String(t.id) === b.dataset.tpl) || null;
-    einlagernFormular('', { category: kategorie, name: tpl?.name || '' }, tpl,
-      () => renderEinlagern(kategorie));
-  }));
+    </button>`;
+  const fuellen = (q) => {
+    const passt = (t) => !q || [t.name, ...(t.brands || []), ...(t.sorten || [])]
+      .some((x) => String(x || '').toLowerCase().includes(q));
+    const treffer = passend.filter(passt);
+    document.getElementById('ein-liste').innerHTML = `
+      ${!q && haeufig.length ? `<div class="ein-titel">⭐ Oft genutzt</div>${haeufig.map(zeile).join('')}
+        <div class="ein-titel">Alle Vorlagen</div>` : ''}
+      ${treffer.map(zeile).join('') || `<div class="empty">Keine Vorlage zu „${esc(q)}“.</div>`}
+      <button class="swipe-inner" data-tpl="" style="text-align:left;width:100%">
+        <div class="t">Ohne Vorlage</div><div class="s">Name selbst eingeben</div></button>
+      <button class="ghost" id="ein-zurueck" style="margin-top:6px">← Kategorien</button>`;
+    document.getElementById('ein-zurueck').addEventListener('click', () => renderEinlagern());
+    view.querySelectorAll('[data-tpl]').forEach((b) => b.addEventListener('click', () => {
+      const tpl = passend.find((t) => String(t.id) === b.dataset.tpl) || null;
+      // Ohne Vorlage: der Suchbegriff ist meist schon der Name.
+      einlagernFormular('', { category: kategorie, name: tpl?.name || (tpl ? '' : suche.value.trim()) }, tpl,
+        () => renderEinlagern(kategorie));
+    }));
+  };
+  const suche = document.getElementById('ein-q');
+  let timer;
+  suche.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fuellen(suche.value.trim().toLowerCase()), 150);
+  });
+  fuellen('');
 }
+const EIN_OFT = 5;   // so viele Vorlagen stehen unter "Oft genutzt"
 
 // ------------------------------------------------------------------ Vorlagen
 // Dieselben Vorlagen wie in der Verwaltung und am Terminal - hier nur mit

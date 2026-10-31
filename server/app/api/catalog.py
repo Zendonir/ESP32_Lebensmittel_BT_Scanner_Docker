@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -27,7 +27,7 @@ from ..schemas import (
 )
 from ..device import workflow
 from ..services import inventory as inv
-from ..services import haltbarkeit, openfoodfacts, seed, stammdaten
+from ..services import haltbarkeit, haushalte, openfoodfacts, seed, stammdaten
 from ..services.dates import to_iso_date
 
 router = APIRouter(prefix="/api", tags=["stammdaten"])
@@ -178,6 +178,12 @@ async def list_templates(
     if category:
         stmt = stmt.where(Template.category == category)
     return (await session.execute(stmt)).scalars().all()
+
+
+@router.get("/templates/oft")
+async def templates_oft(request: Request, session: AsyncSession = Depends(get_session)):
+    """{Name: Einlagertage im letzten halben Jahr} fuer diesen Haushalt."""
+    return await inv.oft_eingelagert(session, await haushalte.aus_anfrage(request, session))
 
 
 @router.post("/templates", response_model=TemplateOut, status_code=201)
