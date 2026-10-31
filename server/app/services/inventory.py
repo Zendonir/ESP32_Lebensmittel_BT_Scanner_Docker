@@ -324,6 +324,10 @@ def with_days_left(item: InventoryItem) -> dict:
     return data
 
 
+# Filterwert fuer "ohne Lagerort" in GET /api/inventory - leer hiesse "alle".
+OHNE_ORT = "(ohne Ort)"
+
+
 async def stats(session: AsyncSession, household: str | None = None) -> dict:
     ui_cfg = await settings_store.get(session, "ui", {})
     warn_days = int(ui_cfg.get("expiring_days", 7))
@@ -396,7 +400,7 @@ async def stats(session: AsyncSession, household: str | None = None) -> dict:
         )
     ).all()
     orte = sorted(
-        ({"name": ort or "Ohne", "anzahl": by_location.get(ort, 0),
+        ({"name": ort or "Ohne", "leer": not ort, "anzahl": by_location.get(ort, 0),
           "abgelaufen": int(alt or 0), "laeuft_ab": int(bald or 0)} for ort, alt, bald in frist),
         key=lambda o: -o["anzahl"])
 

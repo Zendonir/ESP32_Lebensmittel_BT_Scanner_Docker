@@ -287,7 +287,7 @@ function ortKarten(orte) {
   return orte.map((o) => {
     const ort = state.locations.find((l) => l.name === o.name);
     const icon = ART_ICON[ort?.kind] || '📦';
-    return `<button type="button" class="ort-karte" data-ort="${esc(o.name === 'Ohne' ? '' : o.name)}"
+    return `<button type="button" class="ort-karte" data-ort="${esc(o.leer ? '(ohne Ort)' : o.name)}"
         style="--farbe:${esc(ort?.color || 'var(--primary)')}" title="Im Inventar zeigen">
       <div class="ort-kopf"><span>${icon} ${esc(o.name)}</span><b>${o.anzahl}</b></div>
       <div class="ort-fuell"><i style="width:${Math.round((o.anzahl / max) * 100)}%"></i></div>

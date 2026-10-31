@@ -106,6 +106,7 @@ async def statistik(session: AsyncSession, haushalt: str | None = None,
     weg = nach_mhd = rechtzeitig = 0
     dauer: list[int] = []
     alle: Counter[str] = Counter()
+    verbraucht: Counter[str] = Counter()     # ohne ausdruecklich Weggeworfenes
     verloren: Counter[str] = Counter()
     for item in items:
         raus = _tag(item.removed_at)
@@ -115,24 +116,28 @@ async def statistik(session: AsyncSession, haushalt: str | None = None,
         if item.removed_reason == WEGGEWORFEN:
             weg += 1
             verloren[name] += 1
-        elif mhd and raus and raus > mhd:
-            nach_mhd += 1
-            verloren[name] += 1
         else:
-            rechtzeitig += 1
+            verbraucht[name] += 1
+            if mhd and raus and raus > mhd:
+                nach_mhd += 1
+                verloren[name] += 1
+            else:
+                rechtzeitig += 1
         rein = _iso_tag(item.added_date)
         if rein and raus and raus >= rein:
             dauer.append((raus - rein).days)
 
     # Eingelagert je Monat aus added_date (alle Zustaende), entnommen je Monat
-    # aus removed_at - beides fuer dieselben Monate, damit die Balken passen.
+    # aus removed_at - beide ab demselben Stichtag und fuer jeden Monat, den
+    # der Zeitraum beruehrt (30 Tage am 1. November = Oktober und November).
+    ab = seit.date()
     monate: list[str] = []
     m = date.today().replace(day=1)
-    for _ in range(min(12, max(1, round(tage / 30)))):
+    while m >= ab.replace(day=1):
         monate.insert(0, m.strftime("%Y-%m"))
         m = (m - timedelta(days=1)).replace(day=1)
     rein_stmt = select(InventoryItem.added_date).where(
-        InventoryItem.added_date >= f"{monate[0]}-01")
+        InventoryItem.added_date >= ab.isoformat())
     if haushalt:
         rein_stmt = rein_stmt.where(InventoryItem.household == haushalt)
     rein_je = Counter(d[:7] for d in (await session.execute(rein_stmt)).scalars().all() if d)
@@ -149,7 +154,8 @@ async def statistik(session: AsyncSession, haushalt: str | None = None,
         # der man sieht, ob es besser wird.
         "verlust_prozent": round(100 * (weg + nach_mhd) / gesamt) if gesamt else 0,
         "lagerdauer_tage": round(median(dauer)) if dauer else None,
-        "oft_verbraucht": [{"name": n, "anzahl": a} for n, a in alle.most_common(5)],
+        # Weggeworfenes ist nicht verbraucht - es zaehlt nur unten mit.
+        "oft_verbraucht": [{"name": n, "anzahl": a} for n, a in verbraucht.most_common(5)],
         # Was immer wieder verfaellt: absolut, dazu wie oft es ueberhaupt
         # herauskam ("3 von 4") - einmal von einmal ist kein Muster.
         "oft_verloren": [{"name": n, "anzahl": a, "von": alle[n]}

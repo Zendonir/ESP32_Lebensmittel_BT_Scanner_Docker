@@ -126,10 +126,16 @@ def test_statistik(client):
     assert s["lagerdauer_tage"] == 5                      # Median aus 2, 4, 6, 10
     assert s["oft_verloren"][0] == {"name": "Salat", "anzahl": 2, "von": 2}
     assert {"name": "Milch", "anzahl": 2} in s["oft_verbraucht"]
+    # Weggeworfenes ist nicht verbraucht: Salat einmal (nach dem MHD), nicht zweimal
+    assert {"name": "Salat", "anzahl": 1} in s["oft_verbraucht"]
     monat = heute.strftime("%Y-%m")
     zeile = next(m for m in s["monate"] if m["monat"] == monat)
     assert zeile["entnommen"] == 4 and zeile["eingelagert"] >= 1
-    assert len(s["monate"]) == 3
+    # Jeder Monat, den der Zeitraum beruehrt - vom Stichtag bis heute
+    ab = heute - timedelta(days=90)
+    erwartet = (heute.year - ab.year) * 12 + heute.month - ab.month + 1
+    assert len(s["monate"]) == erwartet
+    assert s["monate"][0]["monat"] == ab.strftime("%Y-%m")
     assert client.get("/api/inventory/verbrauch?tage=1").status_code == 422
 
 
@@ -146,5 +152,22 @@ def test_stats_orte(client):
     _run(anlegen())
 
     orte = client.get("/api/inventory/stats", headers=kopf).json()["orte"]
-    assert orte[0] == {"name": "Keller", "anzahl": 3, "abgelaufen": 1, "laeuft_ab": 1}
-    assert orte[1] == {"name": "Schrank", "anzahl": 1, "abgelaufen": 0, "laeuft_ab": 0}
+    assert orte[0] == {"name": "Keller", "leer": False, "anzahl": 3, "abgelaufen": 1, "laeuft_ab": 1}
+    assert orte[1] == {"name": "Schrank", "leer": False, "anzahl": 1, "abgelaufen": 0, "laeuft_ab": 0}
+
+
+def test_filter_ohne_ort(client):
+    hof, kopf = _haushalt(client)
+
+    async def anlegen():
+        async with session_scope() as session:
+            session.add_all([_artikel(hof, "Irgendwo", 5, location=""),
+                             _artikel(hof, "Keller", 5, location="Keller")])
+            await session.commit()
+    _run(anlegen())
+
+    ohne = next(o for o in client.get("/api/inventory/stats", headers=kopf).json()["orte"] if o["leer"])
+    assert ohne["name"] == "Ohne" and ohne["anzahl"] == 1
+    namen = [i["name"] for i in client.get(
+        "/api/inventory", params={"location": "(ohne Ort)"}, headers=kopf).json()]
+    assert namen == ["Irgendwo"]

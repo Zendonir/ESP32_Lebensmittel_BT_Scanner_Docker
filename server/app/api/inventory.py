@@ -65,7 +65,7 @@ async def list_inventory(
     if category:
         stmt = stmt.where(InventoryItem.category == category)
     if location:
-        stmt = stmt.where(InventoryItem.location == location)
+        stmt = stmt.where(InventoryItem.location == ("" if location == inv.OHNE_ORT else location))
     if expiring:
         ui_cfg = await settings_store.get(session, "ui", {})
         horizon = (
