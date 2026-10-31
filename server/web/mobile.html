@@ -66,6 +66,9 @@
     #tpl-list { gap: 6px; }
     #tpl-list .swipe-inner { padding: 8px 12px; }
     .tpl-zeile { width: 100%; text-align: left; font: inherit; color: inherit; }
+    /* Das rote Loeschfeld erst beim Wischen zeigen - sonst schimmert es an
+       den runden Ecken jeder Zeile durch. */
+    .swipe[data-tpl]:not(.wischt) .swipe-action { visibility: hidden; }
     .tpl-zeile .s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .gruppe .gkopf .t::before { content: '▸ '; color: var(--muted); }
     .gruppe .gkopf[aria-expanded="true"] .t::before { content: '▾ '; }
@@ -996,7 +999,7 @@ function haltKurz(t) {
 }
 
 // Vorlagen nach Kategorie, aufklappbar, mit Suche. Eine Zeile je Vorlage;
-// Antippen oeffnet sie zum Aendern (dort steht auch Loeschen).
+// Antippen oeffnet sie zum Aendern, nach links wischen loescht sie.
 let tplSuche = '';
 let tplOffen = null; // Set der offenen Kategorien; null = noch nicht entschieden
 
@@ -1043,9 +1046,10 @@ function fillTemplates(rows) {
   const zeile = (t) => {
     const unter = [(t.brands || []).join(', '),
       (t.sorten || []).length ? `${t.sorten.length} ${t.sorten.length === 1 ? 'Sorte' : 'Sorten'}` : '', haltKompakt(t)].filter(Boolean);
-    return `<button type="button" class="swipe-inner tpl-zeile" data-edit="${t.id}">
+    return `<div class="swipe" data-tpl="${t.id}"><div class="swipe-action">löschen</div>
+      <button type="button" class="swipe-inner tpl-zeile" data-edit="${t.id}">
       <div class="kopf"><div class="t">${esc(t.name)}</div>${t.unit ? `<span class="muted">${esc(t.unit)}</span>` : ''}</div>
-      ${unter.length ? `<div class="s">${unter.map(esc).join(' · ')}</div>` : ''}</button>`;
+      ${unter.length ? `<div class="s">${unter.map(esc).join(' · ')}</div>` : ''}</button></div>`;
   };
   box.innerHTML = `<button class="primary" id="tpl-new">+ Neue Vorlage</button>
     ${[...kategorien.entries()].sort(([a], [b]) => a.localeCompare(b, 'de')).map(([k, liste]) => {
@@ -1065,8 +1069,69 @@ function fillTemplates(rows) {
     kopf.setAttribute('aria-expanded', String(!liste.hidden));
     if (liste.hidden) tplOffen.delete(g.dataset.kat); else tplOffen.add(g.dataset.kat);
   }));
-  box.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click',
-    () => templateForm(rows.find((t) => t.id === +b.dataset.edit))));
+  box.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => {
+    const card = b.closest('.swipe');
+    if (card._swiped) { card._swiped = false; return; }   // war ein Wischer
+    templateForm(rows.find((t) => t.id === +b.dataset.edit));
+  }));
+  // Nach links wischen loescht - mit "Rueckgaengig" in der Meldung, wie beim
+  // Auslagern im Inventar.
+  box.querySelectorAll('.swipe[data-tpl]').forEach((card) => wischen(card, async () => {
+    const t = rows.find((x) => x.id === +card.dataset.tpl);
+    await vorlageLoeschen(t);
+  }));
+}
+
+// Vorlage loeschen; "Rueckgaengig" legt sie mit allen Angaben neu an (die
+// Nummer ist dann eine neue - nichts verweist dauerhaft darauf).
+async function vorlageLoeschen(t) {
+  await del(`/api/templates/${t.id}`);
+  toast(`Vorlage „${t.name}“ gelöscht`, 'success', {
+    label: 'Rückgängig',
+    run: async () => {
+      try {
+        const { id, ...daten } = t;
+        await post('/api/templates', daten);
+        toast('Wiederhergestellt', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+      await renderTemplates();
+    },
+  });
+  await renderTemplates();
+}
+
+// Wischgeste fuer eine .swipe-Karte: nur horizontal, ab 90 px nach links
+// loest `aktion` aus. Vertikales Scrollen bleibt dem Browser (touch-action: pan-y).
+function wischen(card, aktion) {
+  const inner = card.querySelector('.swipe-inner');
+  let startX = 0, startY = 0, dx = 0, locked = null;
+  inner.addEventListener('touchstart', (e) => {
+    startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+    dx = 0; locked = null; inner.style.transition = 'none';
+  }, { passive: true });
+  inner.addEventListener('touchmove', (e) => {
+    const cx = e.touches[0].clientX - startX;
+    const cy = e.touches[0].clientY - startY;
+    if (locked === null) locked = Math.abs(cx) > Math.abs(cy) ? 'x' : 'y';
+    if (locked !== 'x') return;
+    dx = Math.min(0, cx);
+    card.classList.toggle('wischt', dx < 0);
+    inner.style.transform = `translateX(${dx}px)`;
+  }, { passive: true });
+  inner.addEventListener('touchend', async () => {
+    inner.style.transition = '';
+    card._swiped = Math.abs(dx) > 10;
+    const zurueck = () => {
+      inner.style.transform = '';
+      setTimeout(() => card.classList.remove('wischt'), 180);   // nach der Rueckfahrt
+    };
+    if (dx < -90) {
+      inner.style.transform = 'translateX(-100%)';
+      try { await aktion(); } catch (e) { toast(e.message, 'error'); zurueck(); }
+    } else {
+      zurueck();
+    }
+  });
 }
 
 async function templateForm(tpl) {
@@ -1138,10 +1203,8 @@ async function templateForm(tpl) {
   document.getElementById('tpl-del')?.addEventListener('click', async () => {
     if (!confirm(`Vorlage „${tpl.name}“ wirklich löschen?`)) return;
     try {
-      await del(`/api/templates/${tpl.id}`);
-      toast('Gelöscht');
       title.textContent = TITLES.tpl;
-      renderTemplates();
+      await vorlageLoeschen(tpl);
     } catch (e) { toast(e.message, 'error'); }
   });
 
