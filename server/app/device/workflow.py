@@ -77,7 +77,13 @@ def _after_product(sess: "DeviceSession") -> str:
         return ENTER_QTY
     if cat.subcategories_for(sess.draft.category) and not sess.draft.subcategory:
         return SUBCATEGORY
-    return ENTER_DATE
+    return _mhd_schritt(sess)
+
+
+def _mhd_schritt(sess: "DeviceSession") -> str:
+    """MHD fragen - ausser es stand schon im gescannten Code (GS1, PDF417 an
+    Frischfleisch). Dann geht es gleich zur Anzahl."""
+    return ENTER_QTY if sess.draft.mhd_aus_code else ENTER_DATE
 
 
 # Sortiermodi der Inventarliste, zyklisch per Tap auf den Spaltenkopf -
@@ -99,6 +105,8 @@ class Draft:
     unit: str = ""
     count: int = 1
     template_id: int | None = None
+    # MHD stammt aus dem Code (GS1) - die Datumsabfrage entfaellt.
+    mhd_aus_code: bool = False
 
 
 @dataclass
@@ -1093,7 +1101,7 @@ async def _tap_subcategory(session, sess, item) -> None:
         return
     sess.draft.subcategory = item[4:]
     sess.pop()                       # Auswahl ist erledigt
-    sess.push(ENTER_DATE)
+    sess.push(_mhd_schritt(sess))
 
 
 async def _tap_inventory(session, sess, item) -> None:
@@ -1210,7 +1218,7 @@ async def _tap_unknown_name(session, sess, item) -> None:
         await hub.send_to(sess.device_id, proto.toast("Name fehlt", "warn"))
         return
     sess.draft.name = sess.draft.name.strip()
-    sess.stack = [HOME, ENTER_DATE]
+    sess.stack = [HOME, _mhd_schritt(sess)]
 
 
 async def _tap_date(session, sess, item) -> None:
@@ -1531,8 +1539,14 @@ async def _scan_barcode(session, sess, code) -> None:
         if gs["mhd"]:
             # Steht auf der Packung - im Gefrierschrank wie ein eingetipptes
             # Datum verlaengert (ausser die Ware ist schon gefroren gekauft).
+            # Gefragt wird es dann nicht mehr.
             draft.expiry_date = gs["mhd"]
+            draft.mhd_aus_code = True
+            await hub.send_to(sess.device_id, proto.toast(
+                f"MHD {to_display(gs['mhd'])} aus dem Code", "success"))
             await _einfrieren(session, sess)
+            if sess.stack[-1] != UNKNOWN:
+                sess.stack = [HOME, _after_product(sess)]
 
 
 # ---------------------------------------------------------------------------

@@ -963,13 +963,43 @@ async function renderEinlagern(kategorie = null) {
   title.textContent = kategorie || TITLES.ein;
   const [kategorien, vorlagen] = await Promise.all([get('/api/categories'), get('/api/templates')]);
   if (!kategorie) {
-    view.innerHTML = `<button class="ghost" id="nachdruck" style="width:100%;margin-bottom:10px">🖨️ Letztes Etikett nachdrucken</button>
-      <div class="kacheln">${kategorien.map((k) => {
+    const kacheln = `<div class="kacheln">${kategorien.map((k) => {
       const n = vorlagen.filter((t) => t.category === k.name).length;
       return `<button class="kachel" data-kat="${esc(k.name)}" style="--farbe:${esc(k.color)}">
         <b>${esc(k.name)}</b><span>${n ? `${n} Vorlage${n === 1 ? '' : 'n'}` : 'frei eingeben'}</span></button>`;
     }).join('')}</div>`;
-    view.querySelectorAll('[data-kat]').forEach((b) => b.addEventListener('click', () => renderEinlagern(b.dataset.kat)));
+    view.innerHTML = `<button class="ghost" id="nachdruck" style="width:100%;margin-bottom:10px">🖨️ Letztes Etikett nachdrucken</button>
+      <div class="msearch"><input id="ein-alle-q" type="search" placeholder="In allen Kategorien suchen: Name, Marke, Sorte"
+        autocomplete="off" enterkeyhint="search" aria-label="Vorlage suchen"></div>
+      <div id="ein-uebersicht">${kacheln}</div>`;
+    // Suche ueber alle Kategorien: statt der Kacheln die passenden Vorlagen,
+    // je mit ihrer Kategorie. Leeres Feld zeigt wieder die Kacheln.
+    const box = document.getElementById('ein-uebersicht');
+    const verbinden = () => {
+      box.querySelectorAll('[data-kat]').forEach((b) => b.addEventListener('click', () => renderEinlagern(b.dataset.kat)));
+      box.querySelectorAll('[data-tpl]').forEach((b) => b.addEventListener('click', () => {
+        const tpl = vorlagen.find((t) => String(t.id) === b.dataset.tpl);
+        einlagernFormular('', { category: tpl.category, name: tpl.name }, tpl, () => renderEinlagern());
+      }));
+    };
+    const alleSuche = document.getElementById('ein-alle-q');
+    let suchTimer;
+    alleSuche.addEventListener('input', () => {
+      clearTimeout(suchTimer);
+      suchTimer = setTimeout(() => {
+        const q = alleSuche.value.trim().toLowerCase();
+        if (!q) { box.innerHTML = kacheln; verbinden(); return; }
+        const treffer = vorlagen.filter((t) => [t.name, t.category, ...(t.brands || []), ...(t.sorten || [])]
+          .some((x) => String(x || '').toLowerCase().includes(q)))
+          .sort((x, y) => x.name.localeCompare(y.name, 'de'));
+        box.innerHTML = `<div class="list">${treffer.map((t) => `<button class="swipe-inner" data-tpl="${t.id}" style="text-align:left;width:100%">
+            <div class="t">${esc(t.name)}</div>
+            <div class="s">${esc(t.category || 'Ohne Kategorie')} · ${haltKurz(t)}${t.unit ? ` · ${esc(t.unit)}` : ''}</div>
+          </button>`).join('') || `<div class="empty">Keine Vorlage zu „${esc(alleSuche.value.trim())}“ – Kategorie wählen und „Ohne Vorlage“.</div>`}</div>`;
+        verbinden();
+      }, 150);
+    });
+    verbinden();
     document.getElementById('nachdruck').addEventListener('click', async (ev) => {
       ev.currentTarget.disabled = true;
       try {
