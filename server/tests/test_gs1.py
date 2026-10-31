@@ -113,9 +113,17 @@ def test_terminal_scan_liest_gs1(schale, monkeypatch):
         sess.erfasst()
         async with session_scope() as session:
             await workflow.on_scan(session, sess, code)
-        return sess.draft
+            stapel = list(sess.stack)
+            if sess.current == workflow.SUBCATEGORY:
+                await workflow.on_tap(session, sess, "sub:Schwein")
+                stapel += list(sess.stack)
+        assert sess.current == workflow.ENTER_QTY
+        return sess.draft, stapel
 
-    draft = _run(scannen())
+    draft, stapel = _run(scannen())
     assert draft.barcode == ean and draft.name == "Schweinenacken"
     assert draft.expiry_date == "2027-12-31"          # Kuehlschrank: wie gedruckt
     assert (draft.quantity, draft.unit) == (500, "g")
+    # Das MHD wird nicht noch einmal gefragt: nach der Sorte (Fleisch hat
+    # Unterkategorien) gleich die Anzahl.
+    assert workflow.ENTER_DATE not in stapel
