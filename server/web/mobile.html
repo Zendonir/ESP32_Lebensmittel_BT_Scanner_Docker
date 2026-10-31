@@ -64,8 +64,12 @@
     .gruppe { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
     .gruppe .gkopf { cursor: pointer; }
     #tpl-list { gap: 6px; }
+    .ein-titel { font-size: 13px; font-weight: 600; color: var(--muted); margin: 6px 2px 0; }
     #tpl-list .swipe-inner { padding: 8px 12px; }
     .tpl-zeile { width: 100%; text-align: left; font: inherit; color: inherit; }
+    /* Das rote Loeschfeld erst beim Wischen zeigen - sonst schimmert es an
+       den runden Ecken jeder Zeile durch. */
+    .swipe[data-tpl]:not(.wischt) .swipe-action { visibility: hidden; }
     .tpl-zeile .s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .gruppe .gkopf .t::before { content: '▸ '; color: var(--muted); }
     .gruppe .gkopf[aria-expanded="true"] .t::before { content: '▾ '; }
@@ -479,8 +483,13 @@ async function startCamera() {
   cam.play?.().catch(() => {});
 
   if ('BarcodeDetector' in window) {
+    // PDF417 und DataMatrix: GS1-Codes an Frischfleisch (MHD und Gewicht
+    // stehen darin). Nur was das Geraet kann - sonst wirft der Konstruktor.
+    const gewuenscht = ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code',
+      'pdf417', 'data_matrix'];
+    const kann = await BarcodeDetector.getSupportedFormats?.().catch(() => null);
     const detector = new BarcodeDetector({
-      formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code'],
+      formats: kann ? gewuenscht.filter((f) => kann.includes(f)) : gewuenscht.slice(0, 7),
     });
     detectTimer = setInterval(async () => {
       try {
@@ -508,7 +517,7 @@ async function startCamera() {
     ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
     ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
     ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
-    ZXing.BarcodeFormat.QR_CODE,
+    ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.PDF_417, ZXing.BarcodeFormat.DATA_MATRIX,
   ]);
   zxingReader = new ZXing.BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 250 });
   // Eine Kopie des Stroms: reset() beendet die Spuren, die der Decoder bekam -
@@ -553,7 +562,7 @@ async function sendScan(code) {
       toast(`Etikett ${res.label} ist nicht im Bestand`, 'warn');
     } else if (res.action === 'product') {
       // Einlagern macht das Handy selbst - wie am Terminal, nur hier.
-      await einlagernFormular(res.code || code, res.product);
+      await einlagernFormular(res.code || code, res.product, null, null, res.gs1);
     } else if (res.routed_to) {
       toast(`${code} an ${res.routed_to} gesendet`, 'success');
     }
@@ -630,7 +639,8 @@ function vorlageKopf(vorlage, p, vorlageSorten) {
 // `vorlage`: Einlagern ohne Barcode ueber eine Vorlage (Marken, Sorten,
 // Einheit, Haltbarkeit von dort). `danach`: wohin es nach dem Speichern oder
 // Abbrechen geht - Standard ist zurueck zum Scannen.
-async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
+// `gs1`: Inhalt eines GS1-Codes (PDF417/DataMatrix) - MHD und Menge daraus.
+async function einlagernFormular(code, produkt, vorlage = null, danach = null, gs1 = null) {
   const zurueck = danach || (() => renderScan());
   stopCamera();
   const [kategorien, orte, ziele, kiStatus, mhdWege] = await Promise.all([
@@ -644,7 +654,8 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
   let ort = '';
   try { ort = localStorage.getItem(ORT_KEY) || ''; } catch { /* privat */ }
   if (!orte.some((o) => o.name === ort)) ort = (orte.find((o) => o.is_default) || orte[0] || {}).name || '';
-  const p = produkt || {};
+  const p = { ...(produkt || {}) };
+  if (gs1?.menge) { p.menge = gs1.menge; p.einheit = gs1.einheit; }
   const opt = (liste, wert) => liste.map((n) => `<option ${n === wert ? 'selected' : ''}>${esc(n)}</option>`).join('');
   // Sorten der Vorlage, sonst die der Kategorie (Fleisch: Schwein, ...).
   const vorlageSorten = vorlage ? ((vorlage.sorten || []).length ? vorlage.sorten
@@ -824,7 +835,14 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
   // nur nach einem Barcode, die Maske steht schon dahinter. "Ueberspringen"
   // laesst den Vorschlag aus Ort/Kategorie stehen; ein erkanntes Datum
   // landet im Feld und bleibt dort aenderbar wie jedes andere.
-  if (code && mhdWege.nach_scan && fotoKnopf && kameraMoeglich()) {
+  // MHD aus dem GS1-Code: steht so auf der Packung, im Gefrierschrank wie
+  // ein eingetipptes verlaengert. Dann braucht es auch keine MHD-Kamera.
+  if (gs1?.mhd) {
+    mhdVonHand = true;
+    aufgedruckt = gs1.mhd;
+    einfrierText = `aus dem Code: ${anzeigen(gs1.mhd)}${gs1.charge ? ` · Charge ${gs1.charge}` : ''}`;
+    einfrieren(einfrierText);
+  } else if (code && mhdWege.nach_scan && fotoKnopf && kameraMoeglich()) {
     mhdKamera({ kiErlaubt: mhdWege.ki, endeText: 'Überspringen' })
       .then((r) => { if (r) mhdUebernehmen(r); })
       .catch((e) => toast(e.message, 'warn'));
@@ -965,23 +983,49 @@ async function renderEinlagern(kategorie = null) {
     });
     return;
   }
-  const passend = vorlagen.filter((t) => t.category === kategorie);
-  view.innerHTML = `<div class="list">
-    ${passend.map((t) => `<button class="swipe-inner" data-tpl="${t.id}" style="text-align:left;width:100%">
+  const passend = vorlagen.filter((t) => t.category === kategorie)
+    .sort((x, y) => x.name.localeCompare(y.name, 'de'));
+  // Wie oft jede Vorlage zuletzt eingelagert wurde (Tage im letzten halben
+  // Jahr, dieser Haushalt) - die haeufigsten stehen oben.
+  const oft = await get('/api/templates/oft').catch(() => ({}));
+  const haeufig = passend.filter((t) => (oft[t.name] || 0) >= 2)
+    .sort((x, y) => oft[y.name] - oft[x.name]).slice(0, EIN_OFT);
+  view.innerHTML = `
+    <div class="msearch"><input id="ein-q" type="search" placeholder="In ${esc(kategorie)} suchen: Name, Marke, Sorte"
+      autocomplete="off" enterkeyhint="search" aria-label="Vorlage suchen"></div>
+    <div class="list" id="ein-liste"></div>`;
+  const zeile = (t) => `<button class="swipe-inner" data-tpl="${t.id}" style="text-align:left;width:100%">
       <div class="t">${esc(t.name)}</div>
       <div class="s">${haltKurz(t)}${t.use_sorten ? ' · fragt nach Sorte' : ''}${t.unit ? ` · ${esc(t.unit)}` : ''}</div>
-    </button>`).join('')}
-    <button class="swipe-inner" data-tpl="" style="text-align:left;width:100%">
-      <div class="t">Ohne Vorlage</div><div class="s">Name selbst eingeben</div></button>
-    <button class="ghost" id="ein-zurueck" style="margin-top:6px">← Kategorien</button>
-  </div>`;
-  document.getElementById('ein-zurueck').addEventListener('click', () => renderEinlagern());
-  view.querySelectorAll('[data-tpl]').forEach((b) => b.addEventListener('click', () => {
-    const tpl = passend.find((t) => String(t.id) === b.dataset.tpl) || null;
-    einlagernFormular('', { category: kategorie, name: tpl?.name || '' }, tpl,
-      () => renderEinlagern(kategorie));
-  }));
+    </button>`;
+  const fuellen = (q) => {
+    const passt = (t) => !q || [t.name, ...(t.brands || []), ...(t.sorten || [])]
+      .some((x) => String(x || '').toLowerCase().includes(q));
+    const treffer = passend.filter(passt);
+    document.getElementById('ein-liste').innerHTML = `
+      ${!q && haeufig.length ? `<div class="ein-titel">⭐ Oft genutzt</div>${haeufig.map(zeile).join('')}
+        <div class="ein-titel">Alle Vorlagen</div>` : ''}
+      ${treffer.map(zeile).join('') || `<div class="empty">Keine Vorlage zu „${esc(q)}“.</div>`}
+      <button class="swipe-inner" data-tpl="" style="text-align:left;width:100%">
+        <div class="t">Ohne Vorlage</div><div class="s">Name selbst eingeben</div></button>
+      <button class="ghost" id="ein-zurueck" style="margin-top:6px">← Kategorien</button>`;
+    document.getElementById('ein-zurueck').addEventListener('click', () => renderEinlagern());
+    view.querySelectorAll('[data-tpl]').forEach((b) => b.addEventListener('click', () => {
+      const tpl = passend.find((t) => String(t.id) === b.dataset.tpl) || null;
+      // Ohne Vorlage: der Suchbegriff ist meist schon der Name.
+      einlagernFormular('', { category: kategorie, name: tpl?.name || (tpl ? '' : suche.value.trim()) }, tpl,
+        () => renderEinlagern(kategorie));
+    }));
+  };
+  const suche = document.getElementById('ein-q');
+  let timer;
+  suche.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fuellen(suche.value.trim().toLowerCase()), 150);
+  });
+  fuellen('');
 }
+const EIN_OFT = 5;   // so viele Vorlagen stehen unter "Oft genutzt"
 
 // ------------------------------------------------------------------ Vorlagen
 // Dieselben Vorlagen wie in der Verwaltung und am Terminal - hier nur mit
@@ -996,7 +1040,7 @@ function haltKurz(t) {
 }
 
 // Vorlagen nach Kategorie, aufklappbar, mit Suche. Eine Zeile je Vorlage;
-// Antippen oeffnet sie zum Aendern (dort steht auch Loeschen).
+// Antippen oeffnet sie zum Aendern, nach links wischen loescht sie.
 let tplSuche = '';
 let tplOffen = null; // Set der offenen Kategorien; null = noch nicht entschieden
 
@@ -1043,9 +1087,10 @@ function fillTemplates(rows) {
   const zeile = (t) => {
     const unter = [(t.brands || []).join(', '),
       (t.sorten || []).length ? `${t.sorten.length} ${t.sorten.length === 1 ? 'Sorte' : 'Sorten'}` : '', haltKompakt(t)].filter(Boolean);
-    return `<button type="button" class="swipe-inner tpl-zeile" data-edit="${t.id}">
+    return `<div class="swipe" data-tpl="${t.id}"><div class="swipe-action">löschen</div>
+      <button type="button" class="swipe-inner tpl-zeile" data-edit="${t.id}">
       <div class="kopf"><div class="t">${esc(t.name)}</div>${t.unit ? `<span class="muted">${esc(t.unit)}</span>` : ''}</div>
-      ${unter.length ? `<div class="s">${unter.map(esc).join(' · ')}</div>` : ''}</button>`;
+      ${unter.length ? `<div class="s">${unter.map(esc).join(' · ')}</div>` : ''}</button></div>`;
   };
   box.innerHTML = `<button class="primary" id="tpl-new">+ Neue Vorlage</button>
     ${[...kategorien.entries()].sort(([a], [b]) => a.localeCompare(b, 'de')).map(([k, liste]) => {
@@ -1065,8 +1110,71 @@ function fillTemplates(rows) {
     kopf.setAttribute('aria-expanded', String(!liste.hidden));
     if (liste.hidden) tplOffen.delete(g.dataset.kat); else tplOffen.add(g.dataset.kat);
   }));
-  box.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click',
-    () => templateForm(rows.find((t) => t.id === +b.dataset.edit))));
+  box.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => {
+    const card = b.closest('.swipe');
+    if (card._swiped) { card._swiped = false; return; }   // war ein Wischer
+    templateForm(rows.find((t) => t.id === +b.dataset.edit));
+  }));
+  // Nach links wischen loescht - mit "Rueckgaengig" in der Meldung, wie beim
+  // Auslagern im Inventar.
+  box.querySelectorAll('.swipe[data-tpl]').forEach((card) => wischen(card, async () => {
+    const t = rows.find((x) => x.id === +card.dataset.tpl);
+    await vorlageLoeschen(t);
+  }));
+}
+
+// Vorlage loeschen; "Rueckgaengig" legt sie mit allen Angaben neu an (die
+// Nummer ist dann eine neue - nichts verweist dauerhaft darauf).
+async function vorlageLoeschen(t) {
+  await del(`/api/templates/${t.id}`);
+  toast(`Vorlage „${t.name}“ gelöscht`, 'success', {
+    label: 'Rückgängig',
+    run: async () => {
+      try {
+        const { id, ...daten } = t;
+        await post('/api/templates', daten);
+        toast('Wiederhergestellt', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+      // Nur neu zeichnen, wenn die Liste noch zu sehen ist - sonst risse
+      // "Rueckgaengig" ein offenes Formular oder einen anderen Reiter weg.
+      if (document.getElementById('tpl-list')) await renderTemplates();
+    },
+  });
+  await renderTemplates();
+}
+
+// Wischgeste fuer eine .swipe-Karte: nur horizontal, ab 90 px nach links
+// loest `aktion` aus. Vertikales Scrollen bleibt dem Browser (touch-action: pan-y).
+function wischen(card, aktion) {
+  const inner = card.querySelector('.swipe-inner');
+  let startX = 0, startY = 0, dx = 0, locked = null;
+  inner.addEventListener('touchstart', (e) => {
+    startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+    dx = 0; locked = null; inner.style.transition = 'none';
+  }, { passive: true });
+  inner.addEventListener('touchmove', (e) => {
+    const cx = e.touches[0].clientX - startX;
+    const cy = e.touches[0].clientY - startY;
+    if (locked === null) locked = Math.abs(cx) > Math.abs(cy) ? 'x' : 'y';
+    if (locked !== 'x') return;
+    dx = Math.min(0, cx);
+    card.classList.toggle('wischt', dx < 0);
+    inner.style.transform = `translateX(${dx}px)`;
+  }, { passive: true });
+  inner.addEventListener('touchend', async () => {
+    inner.style.transition = '';
+    card._swiped = Math.abs(dx) > 10;
+    const zurueck = () => {
+      inner.style.transform = '';
+      setTimeout(() => card.classList.remove('wischt'), 180);   // nach der Rueckfahrt
+    };
+    if (dx < -90) {
+      inner.style.transform = 'translateX(-100%)';
+      try { await aktion(); } catch (e) { toast(e.message, 'error'); zurueck(); }
+    } else {
+      zurueck();
+    }
+  });
 }
 
 async function templateForm(tpl) {
@@ -1138,10 +1246,8 @@ async function templateForm(tpl) {
   document.getElementById('tpl-del')?.addEventListener('click', async () => {
     if (!confirm(`Vorlage „${tpl.name}“ wirklich löschen?`)) return;
     try {
-      await del(`/api/templates/${tpl.id}`);
-      toast('Gelöscht');
       title.textContent = TITLES.tpl;
-      renderTemplates();
+      await vorlageLoeschen(tpl);
     } catch (e) { toast(e.message, 'error'); }
   });
 

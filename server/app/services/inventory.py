@@ -436,3 +436,20 @@ async def produkt_merken(session: AsyncSession, *, barcode: str, name: str, bran
         row.source = "manual"
     await session.flush()
     return row
+
+
+async def oft_eingelagert(session: AsyncSession, haushalt: str | None,
+                          tage: int = 180) -> dict[str, int]:
+    """Wie oft ein Name in letzter Zeit eingelagert wurde - fuer "Oft genutzt"
+    in der Vorlagenauswahl am Handy. Gezaehlt werden Tage, nicht Etiketten:
+    zehn Packungen auf einmal sind ein Einkauf, nicht zehn."""
+    seit = utcnow() - timedelta(days=tage)
+    bedingung = [Event.type == "add", Event.ts >= seit]
+    if haushalt:
+        bedingung.append(Event.household == haushalt)
+    zeilen = (await session.execute(select(Event.name, Event.ts).where(*bedingung))).all()
+    tage_je_name: dict[str, set] = {}
+    for name, ts in zeilen:
+        if name:
+            tage_je_name.setdefault(name, set()).add(ts.date())
+    return {name: len(t) for name, t in tage_je_name.items()}
