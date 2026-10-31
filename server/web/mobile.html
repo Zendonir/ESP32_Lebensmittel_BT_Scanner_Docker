@@ -1121,7 +1121,9 @@ async function vorlageLoeschen(t) {
         await post('/api/templates', daten);
         toast('Wiederhergestellt', 'success');
       } catch (e) { toast(e.message, 'error'); }
-      await renderTemplates();
+      // Nur neu zeichnen, wenn die Liste noch zu sehen ist - sonst risse
+      // "Rueckgaengig" ein offenes Formular oder einen anderen Reiter weg.
+      if (document.getElementById('tpl-list')) await renderTemplates();
     },
   });
   await renderTemplates();
