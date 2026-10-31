@@ -285,5 +285,6 @@ class Stats(BaseModel):
     expired: int
     by_category: dict[str, int]
     by_location: dict[str, int]
+    orte: list[dict] = []
     added_30d: int
     removed_30d: int

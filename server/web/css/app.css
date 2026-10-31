@@ -394,3 +394,116 @@ tr.inv-kind td { background: color-mix(in srgb, var(--surface-2) 45%, transparen
 .kamera-info { padding: 12px 16px; background: #111; color: #fff; text-align: center; }
 /* Knoepfe auf dem dunklen Kamerastreifen - im hellen Design sonst dunkel auf dunkel. */
 .kamera-info button.ghost { color: #fff; border-color: rgba(255, 255, 255, .45); background: transparent; }
+
+/* ---------------------------------------------------------- Uebersicht */
+/* Kacheln sind Knoepfe (springen ins gefilterte Inventar). */
+button.stat { text-align: left; font: inherit; color: inherit; width: 100%; cursor: pointer;
+  transition: border-color .15s, transform .15s; }
+button.stat:hover { border-color: var(--primary); filter: none; }
+/* .danger an einem Knopf heisst sonst "roter Knopf" (button.danger). */
+button.stat.danger { background: var(--surface); border-color: var(--border); color: inherit; }
+button.stat.danger:hover { border-color: var(--primary); }
+
+/* Duenner Balken: wie viel der Haltbarkeit schon vorbei ist. */
+.mhd-balken { height: 4px; border-radius: 2px; background: var(--surface-2); margin-top: 4px;
+  overflow: hidden; min-width: 60px; }
+.mhd-balken i { display: block; height: 100%; border-radius: 2px; }
+.mhd-balken i.ok, .verbrauch-anteil i.ok { background: var(--success); }
+.mhd-balken i.warn, .verbrauch-anteil i.warn { background: var(--warn); }
+.mhd-balken i.danger, .verbrauch-anteil i.danger { background: var(--danger); }
+
+/* Was muss weg? */
+.plan { display: grid; gap: 4px; max-height: 520px; overflow-y: auto; }
+.plan-tag h3 { margin: 10px 0 4px; }
+.plan-tag:first-child h3 { margin-top: 0; }
+.plan-tag.danger h3 { color: var(--danger); }
+.plan-tag.warn h3 { color: var(--warn); }
+.plan-zeile { display: flex; gap: 10px; align-items: center; padding: 6px 0;
+  border-bottom: 1px solid var(--border); }
+.plan-zeile:last-child { border-bottom: 0; }
+.plan-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.plan-name .muted { font-size: 12px; }
+.plan-knopf { display: flex; gap: 6px; flex: none; }
+
+/* Lagerorte als Karten */
+.orte-karten { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.ort-karte { text-align: left; font: inherit; color: inherit; display: flex; flex-direction: column; gap: 6px;
+  padding: 12px; border-radius: var(--radius); border: 1px solid var(--border);
+  border-left: 5px solid var(--farbe); background: var(--surface); cursor: pointer; }
+.ort-karte:hover { border-color: var(--primary); border-left-color: var(--farbe); filter: none; }
+.ort-kopf { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
+.ort-kopf b { font-size: 20px; line-height: 1; }
+.ort-fuell { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.ort-fuell i { display: block; height: 100%; background: var(--farbe); }
+.ort-frist { display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; min-height: 20px; }
+
+/* Verbrauch */
+.verbrauch-zahlen { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.verbrauch-zahlen div { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; }
+.verbrauch-zahlen b { display: block; font-size: 22px; line-height: 1.1; }
+.verbrauch-zahlen span { font-size: 12px; color: var(--muted); }
+.verbrauch-zahlen .ok b { color: var(--success); }
+.verbrauch-zahlen .warn b { color: var(--warn); }
+.verbrauch-zahlen .danger b { color: var(--danger); }
+.verbrauch-anteil { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--surface-2); }
+.verbrauch-anteil i { display: block; height: 100%; }
+.monate { display: flex; gap: 6px; align-items: flex-end; height: 110px; }
+.monat { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; }
+.monat .saeulen { flex: 1; width: 100%; display: flex; gap: 2px; align-items: flex-end; justify-content: center; }
+.monat .saeulen i { display: block; width: 40%; max-width: 18px; min-height: 2px; border-radius: 3px 3px 0 0; }
+.monat span { font-size: 11px; color: var(--muted); }
+.saeulen .rein, .legende.rein { background: var(--primary); }
+.saeulen .raus, .legende.raus { background: var(--success); }
+.legende { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-left: 6px; }
+.verbrauch-liste { margin: 0; padding-left: 20px; font-size: 14px; }
+.verbrauch-liste li { margin: 2px 0; }
+
+/* ------------------------------------------------------------- Chips */
+.chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.chip { padding: 4px 11px; border-radius: 999px; font-size: 13px; background: var(--surface); }
+.chip.aktiv { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+/* Inventar auf schmalen Bildschirmen: jede Zeile eine Karte. Die Spalte
+   steht als data-th vor dem Wert (loadInventory). */
+@media (max-width: 760px) {
+  table:has(> tbody.karten-schmal) thead { display: none; }
+  tbody.karten-schmal tr { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px;
+    padding: 10px 4px; border-bottom: 1px solid var(--border); }
+  tbody.karten-schmal tr[hidden] { display: none; }
+  tbody.karten-schmal td { border: 0; padding: 2px 4px; white-space: normal; }
+  tbody.karten-schmal td.name { grid-column: 1 / -1; order: -1; min-width: 0; }
+  tbody.karten-schmal td.right { grid-column: 1 / -1; text-align: left; display: flex; gap: 6px; flex-wrap: wrap; }
+  tbody.karten-schmal td.leer { display: none; }
+  tbody.karten-schmal td[data-th]::before { content: attr(data-th); display: block; font-size: 11px;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  tbody.karten-schmal tr.inv-gruppe td:first-child { grid-column: 1 / -1; }
+}
+
+/* ------------------------------------------------- Seitennavigation */
+.page.mit-nav.active { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 18px; align-items: start; }
+nav.seitennav { position: sticky; top: 74px; display: flex; flex-direction: column; gap: 2px;
+  max-height: calc(100vh - 90px); overflow-y: auto; font-size: 14px; }
+nav.seitennav a { color: var(--muted); text-decoration: none; padding: 6px 10px; border-radius: 8px; line-height: 1.3; }
+nav.seitennav a:hover { background: var(--surface-2); color: var(--text); }
+nav.seitennav:empty { display: none; }
+@media (max-width: 1100px) {
+  .page.mit-nav.active { display: block; }
+  nav.seitennav { flex-direction: row; overflow-x: auto; max-height: none; top: 54px; z-index: 20;
+    margin: -6px 0 12px; padding: 6px 0; background: var(--bg); scrollbar-width: none; }
+  nav.seitennav::-webkit-scrollbar { display: none; }
+  nav.seitennav a { flex: none; white-space: nowrap; border: 1px solid var(--border); background: var(--surface); border-radius: 999px; }
+}
+.aufblitzen { animation: aufblitzen 1.6s ease-out; }
+@keyframes aufblitzen { 0%, 30% { box-shadow: 0 0 0 3px var(--primary); } 100% { box-shadow: 0 0 0 3px transparent; } }
+
+/* ---------------------------------------------- Einstellungen suchen */
+.einst-suche { position: relative; }
+.einst-suche input { width: 220px; padding: 6px 10px; font-size: 14px; }
+.einst-treffer { position: absolute; right: 0; top: calc(100% + 6px); width: min(420px, 92vw); z-index: 50;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .18); max-height: 60vh; overflow-y: auto; padding: 4px; }
+.einst-treffer button { display: flex; flex-direction: column; align-items: flex-start; width: 100%;
+  border: 0; background: none; text-align: left; padding: 7px 10px; gap: 1px; }
+.einst-treffer button:hover, .einst-treffer button:focus { background: var(--surface-2); filter: none; }
+.einst-treffer .muted { font-size: 12px; }
+@media (max-width: 720px) { .einst-suche, .einst-suche input { width: 100%; } .einst-suche { order: 5; flex: 1 1 100%; } }

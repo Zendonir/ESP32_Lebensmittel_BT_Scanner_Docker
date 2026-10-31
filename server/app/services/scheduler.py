@@ -25,6 +25,11 @@ log = logging.getLogger(__name__)
 _task: asyncio.Task | None = None
 
 
+def _wann(iso: str) -> str:
+    tage = (date.fromisoformat(iso) - date.today()).days
+    return {0: "heute", 1: "morgen"}.get(tage, to_display(iso))
+
+
 async def check_expiring(force: bool = False) -> dict:
     """Ablaufende und abgelaufene Artikel melden - hoechstens einmal taeglich."""
     async with session_scope() as session:
@@ -57,6 +62,11 @@ async def check_expiring(force: bool = False) -> dict:
             return {"expired": 0, "soon": 0, "notified": False}
 
         lines = []
+        # Ganz oben die drei, die zuerst dran sind - wer die Meldung nur
+        # auf dem Sperrbildschirm sieht, liest nicht weiter.
+        if soon:
+            lines.append("Zuerst weg: " + ", ".join(
+                f"{r.name} ({_wann(r.expiry_date)})" for r in soon[:3]))
         if expired:
             lines.append(f"Abgelaufen ({len(expired)}):")
             lines += [

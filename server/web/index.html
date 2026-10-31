@@ -41,6 +41,11 @@
     <button data-page="system">System</button>
   </nav>
   <span class="spacer"></span>
+  <div class="einst-suche">
+    <input type="search" id="einst-q" placeholder="Einstellung suchen …" autocomplete="off"
+      aria-label="Einstellung suchen" title="Taste /">
+    <div class="einst-treffer" id="einst-treffer" hidden></div>
+  </div>
   <span class="muted" id="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">verbinde…</span></span>
   <button class="sm ghost" id="theme-toggle" title="Design wechseln">◐</button>
   <a href="/mobile"><button class="sm ghost">Mobil</button></a>
@@ -55,11 +60,9 @@
 
     <div class="grid cols2" style="margin-top:14px">
       <div class="card">
-        <h2>Läuft bald ab</h2>
-        <div class="table-wrap"><table>
-          <thead><tr><th>Artikel</th><th>MHD</th><th>Ort</th><th></th></tr></thead>
-          <tbody id="dash-expiring"></tbody>
-        </table></div>
+        <div class="row"><h2 style="margin:0;flex:1">Was muss weg?</h2>
+          <span class="muted" style="font-size:13px">bis Ende nächster Woche</span></div>
+        <div id="dash-plan" class="plan"></div>
       </div>
       <div class="card">
         <h2>Letzte Ereignisse</h2>
@@ -70,9 +73,21 @@
       </div>
     </div>
 
+    <div class="card" style="margin-top:14px">
+      <h2>Lagerorte</h2>
+      <div class="orte-karten" id="dash-orte"></div>
+    </div>
+
     <div class="grid cols2" style="margin-top:14px">
       <div class="card"><h2>Nach Kategorie</h2><div id="dash-cat"></div></div>
-      <div class="card"><h2>Nach Lagerort</h2><div id="dash-loc"></div></div>
+      <div class="card">
+        <div class="row"><h2 style="margin:0;flex:1">Verbrauch</h2>
+          <select id="dash-verbrauch-tage" class="sm" aria-label="Zeitraum">
+            <option value="30">30 Tage</option><option value="90">3 Monate</option>
+            <option value="180" selected>6 Monate</option><option value="365">1 Jahr</option>
+          </select></div>
+        <div id="dash-verbrauch"></div>
+      </div>
     </div>
   </section>
 
@@ -97,6 +112,11 @@
         <button id="inv-reload">Aktualisieren</button>
         <a href="/api/export/csv" download><button class="ghost">CSV</button></a>
       </div>
+      <div class="chips" id="inv-chips" style="margin-top:10px">
+        <button type="button" class="chip" data-frist="bald">⏰ Läuft ab</button>
+        <button type="button" class="chip" data-frist="abgelaufen">⚠️ Abgelaufen</button>
+        <span id="inv-aktiv" class="chips"></span>
+      </div>
     </div>
 
     <div class="card" style="margin-top:14px">
@@ -105,7 +125,7 @@
           <th>Etikett</th><th>Artikel</th><th>Kategorie</th><th>MHD</th>
           <th>Rest</th><th>Menge</th><th>Ort</th><th class="right">Aktion</th>
         </tr></thead>
-        <tbody id="inv-body"></tbody>
+        <tbody id="inv-body" class="karten-schmal"></tbody>
       </table></div>
       <div class="empty" id="inv-empty" hidden>Nichts gefunden.</div>
     </div>

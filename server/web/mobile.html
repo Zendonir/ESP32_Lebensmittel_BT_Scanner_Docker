@@ -130,6 +130,30 @@
     }
     nav.bottom button .ico { font-size: 19px; line-height: 1; }
     nav.bottom button.active { color: var(--primary); }
+    /* Scannen ist das Haeufigste - ein grosser runder Knopf in der Mitte,
+       genau unter dem Daumen, der ueber die Leiste hinausragt. */
+    nav.bottom button[data-view="scan"] { position: relative; color: var(--text); }
+    nav.bottom button[data-view="scan"] .ico {
+      display: grid; place-items: center; width: 58px; height: 58px; margin-top: -26px;
+      border-radius: 50%; background: var(--primary); color: #fff; font-size: 26px;
+      box-shadow: 0 4px 14px rgba(30, 136, 229, .45); border: 4px solid var(--surface); }
+    nav.bottom button[data-view="scan"].active .ico { background: var(--success); box-shadow: 0 4px 14px rgba(67, 160, 71, .45); }
+
+    /* Wochenplan in "Ablaufend": Ueberschrift je Tag. */
+    .plan-titel { font-size: 13px; font-weight: 700; margin: 8px 2px 0; text-transform: uppercase; letter-spacing: .04em; }
+    .plan-titel.abgelaufen { color: var(--danger); }
+    .plan-titel.heute { color: var(--warn); }
+    .swipe-inner .mhd-balken { margin-top: 6px; }
+
+    /* Ziehen zum Aktualisieren */
+    .ptr { position: fixed; left: 50%; top: 58px; z-index: 30; width: 36px; height: 36px; margin-top: -40px;
+      display: grid; place-items: center; border-radius: 50%; background: var(--surface); color: var(--muted);
+      box-shadow: var(--shadow); border: 1px solid var(--border); font-size: 18px;
+      opacity: 0; transform: translate(-50%, 0); pointer-events: none; transition: opacity .15s; }
+    .ptr.sichtbar { opacity: 1; }
+    .ptr.bereit { color: var(--primary); }
+    .ptr.laedt { animation: ptr-dreh .8s linear infinite; transform: translate(-50%, 50px) !important; }
+    @keyframes ptr-dreh { to { rotate: 360deg; } }
 
     /* Suche oben in der Liste - am Telefon ist "Hab ich noch Hackfleisch?"
        die haeufigste Frage, und bei hundert Artikeln hilft Scrollen nicht. */
@@ -176,7 +200,7 @@
 
 <div id="toasts"></div>
 <script type="module">
-import { get, post, del, put, toast, blitz, auslagern, fmtDate, daysPill, esc, gruppieren, mengeText, EINHEITEN, liveConnect, tagEditor, HAUSHALT, fremdHinweis, zielOptionen, zielAuswerten, zielVorauswahl } from '/static/js/api.js';
+import { get, post, del, put, toast, blitz, auslagern, fmtDate, daysPill, mhdBalken, esc, gruppieren, mengeText, EINHEITEN, liveConnect, tagEditor, HAUSHALT, fremdHinweis, zielOptionen, zielAuswerten, zielVorauswahl } from '/static/js/api.js';
 import { mhdKamera, jpegAus } from '/static/js/mhdkamera.js';
 import { kameraHolen, kameraFreigeben } from '/static/js/kamera.js';
 
@@ -204,7 +228,7 @@ async function render() {
   stopCamera();
   try {
     if (current === 'inv') await renderList('/api/inventory?limit=300&sort=expiry');
-    else if (current === 'exp') await renderList('/api/inventory?expiring=true&limit=200');
+    else if (current === 'exp') await renderList('wochenplan');
     else if (current === 'scan') renderScan();
     else if (current === 'tpl') await renderTemplates();
     else await renderEinlagern();
@@ -246,8 +270,19 @@ async function renderList(url) {
 async function fillList() {
   const box = document.getElementById('m-list');
   if (!box) return;
-  const rows = await get(listUrl + (suche ? `&q=${encodeURIComponent(suche)}` : '')
-    + (ueberall && suche ? '&alle=true' : ''));
+  // "Ablaufend" ist der Wochenplan: je Tag eine Ueberschrift (Abgelaufen,
+  // Heute, Morgen, die Wochentage, Naechste Woche). Gesucht wird darin hier.
+  let plan = null;
+  if (listUrl === 'wochenplan') {
+    const nadel = suche.toLowerCase();
+    const passt = (i) => !nadel || [i.display_name, i.name, i.brand, i.label, i.location]
+      .some((t) => (t || '').toLowerCase().includes(nadel));
+    plan = (await get('/api/inventory/wochenplan'))
+      .map((g) => ({ ...g, items: g.items.filter(passt) })).filter((g) => g.items.length);
+  }
+  const rows = plan ? plan.flatMap((g) => g.items)
+    : await get(listUrl + (suche ? `&q=${encodeURIComponent(suche)}` : '')
+      + (ueberall && suche ? '&alle=true' : ''));
   count.textContent = rows.length;
   const leer = suche ? `Nichts gefunden für „${esc(suche)}“.` : 'Nichts vorhanden.';
   const fremd = (i) => (HAUSHALT && i.household !== HAUSHALT.name
@@ -258,9 +293,11 @@ async function fillList() {
       <div class="swipe-inner" role="button" tabindex="0" aria-expanded="false">
         <div class="kopf"><div class="t">${titel}</div>${daysPill(i.days_left)}</div>
         ${zeile ? `<div class="s">${zeile}</div>` : ''}
+        ${mhdBalken(i)}
         <div class="acts" hidden>
           <button class="primary" data-act="remove">Auslagern</button>
-          <button data-act="reprint">Etikett nachdrucken</button>
+          <button data-act="weg" title="Auslagern als weggeworfen – zählt in der Verbrauchsstatistik">🗑 Weg</button>
+          <button data-act="reprint">Nachdruck</button>
         </div>
       </div>
     </div>`;
@@ -290,14 +327,16 @@ async function fillList() {
         <div class="s">${[e.brand, mengeText(g.menge, e.unit),
           g.orte.length > 1 ? `${g.orte.length} Orte` : g.orte[0],
           e.expiry_date ? `ab ${fmtDate(e.expiry_date)}` : ''].filter(Boolean).map(esc).join(' · ')}</div>
+        ${mhdBalken(e)}
       </div>
       <div class="gliste"${offen ? '' : ' hidden'}>${nachOrt(g.items)}</div>
     </div>`;
   };
-  box.innerHTML = rows.length ? `
-    <div class="hint">Antippen für Aktionen · nach links wischen lagert aus</div>
-    ${gruppieren(rows).map((g) => (g.items.length > 1 ? gruppe(g) : einzeln(g.items[0]))).join('')}`
-    : `<div class="empty">${leer}</div>`;
+  const hinweis = '<div class="hint">Antippen für Aktionen · nach links wischen lagert aus · nach unten ziehen lädt neu</div>';
+  box.innerHTML = !rows.length ? `<div class="empty">${plan && !suche ? 'Bis Ende nächster Woche läuft nichts ab. 🎉' : leer}</div>`
+    : plan ? hinweis + plan.map((g) => `<div class="plan-titel ${g.key}">${esc(g.titel)}
+        <span class="muted">· ${g.items.length}</span></div>${g.items.map(einzeln).join('')}`).join('')
+    : hinweis + gruppieren(rows).map((g) => (g.items.length > 1 ? gruppe(g) : einzeln(g.items[0]))).join('');
   box.querySelectorAll('.gkopf').forEach((kopf) => kopf.addEventListener('click', () => {
     const g = kopf.closest('.gruppe'), liste = g.querySelector('.gliste');
     liste.hidden = !liste.hidden;
@@ -326,8 +365,8 @@ function attachTap() {
       }
       btn.disabled = true;
       try {
-        if (btn.dataset.act === 'remove') {
-          await auslagern(card.dataset.label, 'mobile', fillList);
+        if (btn.dataset.act === 'remove' || btn.dataset.act === 'weg') {
+          await auslagern(card.dataset.label, btn.dataset.act === 'weg' ? 'weggeworfen' : 'mobile', fillList);
           await fillList(); // Gruppe zaehlt neu
         } else {
           const r = await post(`/api/labels/reprint/${encodeURIComponent(card.dataset.label)}`);
@@ -1314,6 +1353,49 @@ liveConnect((msg) => {
   // naehme dem Suchfeld mitten im Tippen den Fokus.
   if (msg.event === 'inventory' && (current === 'inv' || current === 'exp')) fillList().catch(() => {});
 }, () => {});
+
+// Nach unten ziehen laedt neu - in den Listen (Inventar, Ablaufend,
+// Vorlagen, Einlagern), nicht beim Scannen. Erst ab ganz oben und nur, wenn
+// der Finger klar senkrecht zieht; sonst ist es Scrollen oder Wischen.
+(() => {
+  const zeiger = document.createElement('div');
+  zeiger.className = 'ptr';
+  zeiger.textContent = '↓';
+  document.body.append(zeiger);
+  let y0 = null, x0 = 0, weit = 0;
+  const SCHWELLE = 70;
+  window.addEventListener('touchstart', (e) => {
+    // Nie in einem Formular - Neuladen naehme die Eingaben mit.
+    y0 = window.scrollY <= 0 && current !== 'scan' && !view.querySelector('form, .kamera')
+      && !e.target.closest('input, select, textarea, dialog')
+      ? e.touches[0].clientY : null;
+    x0 = e.touches[0].clientX; weit = 0;
+  }, { passive: true });
+  window.addEventListener('touchmove', (e) => {
+    if (y0 === null) return;
+    const dy = e.touches[0].clientY - y0, dx = Math.abs(e.touches[0].clientX - x0);
+    if (dy <= 0 || dx > dy || window.scrollY > 0) { weit = 0; zeiger.classList.remove('sichtbar'); return; }
+    weit = Math.min(dy, 120);
+    zeiger.classList.add('sichtbar');
+    zeiger.classList.toggle('bereit', weit >= SCHWELLE);
+    zeiger.style.transform = `translate(-50%, ${weit * 0.6}px) rotate(${Math.min(weit / SCHWELLE, 1) * 180}deg)`;
+  }, { passive: true });
+  window.addEventListener('touchend', async () => {
+    const los = y0 !== null && weit >= SCHWELLE;
+    y0 = null; weit = 0;
+    zeiger.classList.remove('bereit');
+    if (!los) { zeiger.classList.remove('sichtbar'); zeiger.style.transform = ''; return; }
+    zeiger.classList.add('laedt');
+    zeiger.textContent = '⟳';
+    try {
+      if (current === 'inv' || current === 'exp') await fillList(); else await render();
+    } finally {
+      zeiger.classList.remove('sichtbar', 'laedt');
+      zeiger.style.transform = '';
+      zeiger.textContent = '↓';
+    }
+  });
+})();
 
 render();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
