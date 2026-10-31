@@ -88,7 +88,7 @@ export function toast(text, level = 'info', aktion = null) {
 // desselben Etiketts zurueck - hier uebernimmt das der Knopf in der Meldung.
 export async function auslagern(label, reason, nachher = () => {}) {
   const item = await post('/api/inventory/remove', { label, reason });
-  toast(`„${item.display_name || item.name}“ ausgelagert`, 'success', {
+  toast(`„${item.display_name || item.name}“ ${reason === 'weggeworfen' ? 'als weggeworfen ' : ''}ausgelagert`, 'success', {
     label: 'Rückgängig',
     run: async () => {
       try {
@@ -133,6 +133,25 @@ export function daysPill(days) {
   const cls = days === null || days === undefined ? ''
     : days <= 0 ? 'danger' : days <= 3 ? 'warn' : 'ok';
   return `<span class="pill ${cls}">${daysText(days)}</span>`;
+}
+
+// Wie viel der Haltbarkeit schon verbraucht ist, als duenner Balken:
+// vom Einlagern bis zum MHD. Ohne Einlagerdatum oder MHD kein Balken.
+export function mhdAnteil(item) {
+  if (!item.expiry_date || !item.added_date) return null;
+  const tag = (iso) => Date.parse(`${iso}T00:00:00`);
+  const gesamt = tag(item.expiry_date) - tag(item.added_date);
+  if (!(gesamt > 0)) return item.days_left !== null && item.days_left <= 0 ? 1 : null;
+  const heute = new Date(); heute.setHours(0, 0, 0, 0);
+  return Math.min(1, Math.max(0, (heute - tag(item.added_date)) / gesamt));
+}
+
+export function mhdBalken(item) {
+  const anteil = mhdAnteil(item);
+  if (anteil === null) return '';
+  const d = item.days_left;
+  const cls = d !== null && d <= 0 ? 'danger' : d !== null && d <= 3 ? 'warn' : 'ok';
+  return `<div class="mhd-balken" title="${Math.round(anteil * 100)}% der Haltbarkeit vorbei"><i class="${cls}" style="width:${Math.max(4, Math.round(anteil * 100))}%"></i></div>`;
 }
 
 // ------------------------------------------------------- Gleiches gruppieren
@@ -193,7 +212,7 @@ export function eventName(type) {
 
 const REASONS = {
   scan: 'per Scan', web: 'im Web', mobile: 'am Handy', manual: 'von Hand',
-  expired: 'abgelaufen', import: 'beim Import',
+  expired: 'abgelaufen', import: 'beim Import', weggeworfen: 'weggeworfen',
 };
 
 const FIELD_NAMES = {

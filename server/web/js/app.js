@@ -1,7 +1,7 @@
 // Admin-Oberflaeche. Bewusst ohne Framework und ohne Build-Schritt: das Image
 // bleibt klein und die Dateien sind das, was ausgeliefert wird.
 
-import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, eventName, eventDetails, esc, gruppieren, mengeText, EINHEITEN, liveConnect, tagEditor, HAUSHALT, fremdHinweis, zielOptionen, zielAuswerten, zielVorauswahl } from './api.js';
+import { get, post, patch, put, del, toast, auslagern, fmtDate, fmtTime, daysPill, mhdBalken, eventName, eventDetails, esc, gruppieren, mengeText, EINHEITEN, liveConnect, tagEditor, HAUSHALT, fremdHinweis, zielOptionen, zielAuswerten, zielVorauswahl } from './api.js';
 import { mhdKamera } from './mhdkamera.js';
 import { zipBlob, base64ZuBytes } from './zip.js';
 
@@ -18,17 +18,164 @@ const state = {
 };
 
 // ------------------------------------------------------------------- Navigation
-function showPage(name) {
+// Ein Ziel kann Filter tragen: "inventory?frist=bald&location=Keller". Die
+// stehen dann auch in der Adresse - Neuladen und Lesezeichen behalten sie.
+function showPage(ziel) {
+  const [name, query] = String(ziel).split('?');
+  if (!document.getElementById(`page-${name}`)) return showPage('dashboard');
   $$('.page').forEach((p) => p.classList.toggle('active', p.id === `page-${name}`));
   $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.page === name));
-  location.hash = name;
+  // Nur ein Ziel mit "?" setzt die Filter (Kacheln, Lesezeichen) - der
+  // Reiter "Inventar" laesst die zuletzt gewaehlten stehen.
+  if (name === 'inventory' && query !== undefined) invFilterSetzen(new URLSearchParams(query));
+  history.replaceState(null, '', `#${name}`);
+  seitenNavBauen(name);
   const loader = PAGE_LOADERS[name];
-  if (loader) loader().catch((e) => toast(e.message, 'error'));
+  // Danach noch einmal: Terminals und Drucker erscheinen erst mit den Daten.
+  if (loader) loader().then(() => seitenNavBauen(name)).catch((e) => toast(e.message, 'error'));
 }
 
 $('#tabs').addEventListener('click', (ev) => {
   const btn = ev.target.closest('button[data-page]');
   if (btn) showPage(btn.dataset.page);
+});
+
+// ------------------------------------------------------ Seitennavigation
+// Lange Seiten (Etiketten, Stammdaten, Terminals, System) bekommen links ein
+// Inhaltsverzeichnis ihrer Karten - auf schmalen Bildschirmen als Leiste
+// oben. Gebaut aus den Ueberschriften, die gerade auf der Seite stehen: neue
+// Karten erscheinen von selbst, nichts ist doppelt gepflegt.
+const NAV_SEITEN = ['labels', 'catalog', 'devices', 'system'];
+
+function abschnitte(page) {
+  return [...page.querySelectorAll('.seiten-inhalt > .card, .seiten-inhalt > .grid > .card, .seiten-inhalt > details.card, .seiten-inhalt > div > .card[id]')]
+    .filter((c, i, alle) => alle.indexOf(c) === i && !c.hidden)
+    .map((card) => {
+      const h = card.querySelector(':scope > h2, :scope > summary h2, :scope > .row > h2, :scope > summary');
+      return { card, titel: (h?.textContent || '').replace(/\s+/g, ' ').trim() };
+    })
+    .filter((a) => a.titel);
+}
+
+function seitenNavBauen(name) {
+  if (!NAV_SEITEN.includes(name)) return;
+  const page = $(`#page-${name}`);
+  let inhalt = page.querySelector(':scope > .seiten-inhalt');
+  if (!inhalt) {
+    inhalt = document.createElement('div');
+    inhalt.className = 'seiten-inhalt';
+    inhalt.append(...page.childNodes);
+    const nav = document.createElement('nav');
+    nav.className = 'seitennav';
+    nav.setAttribute('aria-label', 'Abschnitte');
+    page.append(nav, inhalt);
+    page.classList.add('mit-nav');
+    nav.addEventListener('click', (ev) => {
+      const a = ev.target.closest('a[data-abschnitt]');
+      if (!a) return;
+      ev.preventDefault();
+      const ziel = abschnitte(page)[+a.dataset.abschnitt]?.card;
+      if (ziel) hinspringen(ziel);
+    });
+  }
+  const nav = page.querySelector(':scope > nav.seitennav');
+  nav.innerHTML = abschnitte(page).map((a, i) => `<a href="#" data-abschnitt="${i}">${esc(a.titel.split(' – ')[0].replace(/\s*\(.*\)$/, ''))}</a>`).join('');
+}
+
+// Zu einem Element springen: umgebende <details> oeffnen, mittig zeigen,
+// kurz hervorheben.
+function hinspringen(el) {
+  for (let d = el.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true;
+  if (el.tagName === 'DETAILS') el.open = true;
+  el.scrollIntoView({ behavior: 'smooth', block: el.classList.contains('card') ? 'start' : 'center' });
+  el.classList.remove('aufblitzen');
+  void el.offsetWidth;
+  el.classList.add('aufblitzen');
+  setTimeout(() => el.classList.remove('aufblitzen'), 1800);
+}
+
+// ------------------------------------------------------- Einstellungen suchen
+// Sucht ueber alle Seiten: Felder (Beschriftung und Hinweis), Abschnitte und
+// Knoepfe in Einstellungsbereichen. Ein Treffer oeffnet die Seite, klappt auf
+// und springt hin.
+const SEITEN_NAMEN = Object.fromEntries($$('#tabs button').map((b) => [b.dataset.page, b.textContent.trim()]));
+
+function suchIndex() {
+  const eintraege = [];
+  for (const page of $$('.page')) {
+    const seite = page.id.replace('page-', '');
+    if (seite === 'dashboard' || seite === 'inventory') continue;
+    const bereich = (el) => {
+      const card = el.closest('.card');
+      const h = card?.querySelector(':scope > h2, :scope > summary h2, :scope > .row > h2');
+      return (h?.textContent || '').replace(/\s+/g, ' ').trim();
+    };
+    page.querySelectorAll('label.field, .card h2, .card h3, details > summary').forEach((el) => {
+      let titel, text;
+      if (el.matches('label.field')) {
+        const kopf = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' ').trim()
+          || el.querySelector('.row')?.textContent || el.textContent;
+        titel = kopf.replace(/\s+/g, ' ').trim().replace(/\*$/, '');
+        // Der Schluessel hilft beim Finden ("drehung" -> "Lesen").
+        text = `${el.textContent} ${[...el.querySelectorAll('[data-setting]')].map((f) => f.dataset.setting.replace(/[._]/g, ' ')).join(' ')}`;
+      } else {
+        titel = el.textContent.replace(/\s+/g, ' ').trim().split(' – ')[0];
+        text = el.textContent;
+      }
+      if (!titel || titel.length > 90) return;
+      eintraege.push({ el, seite, titel, ort: bereich(el), text: text.replace(/\s+/g, ' ').toLowerCase() });
+    });
+  }
+  return eintraege;
+}
+
+const einstQ = $('#einst-q'), einstTreffer = $('#einst-treffer');
+let einstListe = [];
+function einstSuchen() {
+  const q = einstQ.value.trim().toLowerCase();
+  if (q.length < 2) { einstTreffer.hidden = true; return; }
+  const woerter = q.split(/\s+/);
+  einstListe = suchIndex()
+    .filter((e) => woerter.every((w) => e.text.includes(w) || e.ort.toLowerCase().includes(w)))
+    // Treffer im Namen vor Treffern im Hinweistext
+    .sort((a, b) => (+!a.titel.toLowerCase().includes(woerter[0])) - (+!b.titel.toLowerCase().includes(woerter[0])))
+    .slice(0, 12);
+  einstTreffer.innerHTML = einstListe.length
+    ? einstListe.map((e, i) => `<button type="button" data-i="${i}"><b>${esc(e.titel)}</b>
+        <span class="muted">${esc([SEITEN_NAMEN[e.seite], e.ort !== e.titel ? e.ort : ''].filter(Boolean).join(' › '))}</span></button>`).join('')
+    : '<p class="muted" style="margin:8px 12px">Keine Einstellung gefunden.</p>';
+  einstTreffer.hidden = false;
+}
+einstQ.addEventListener('input', debounce(einstSuchen, 120));
+einstQ.addEventListener('focus', einstSuchen);
+einstQ.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') { einstQ.value = ''; einstTreffer.hidden = true; einstQ.blur(); }
+  if (ev.key === 'Enter' && einstListe.length) { ev.preventDefault(); einstWaehlen(0); }
+});
+einstTreffer.addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-i]');
+  if (b) einstWaehlen(+b.dataset.i);
+});
+document.addEventListener('click', (ev) => {
+  if (!ev.target.closest('.einst-suche')) einstTreffer.hidden = true;
+});
+function einstWaehlen(i) {
+  const e = einstListe[i];
+  if (!e) return;
+  einstTreffer.hidden = true;
+  if (activePage() !== e.seite) showPage(e.seite);
+  // Die Seite laedt ihre Daten nach - erst danach steht alles an seinem Platz.
+  setTimeout(() => {
+    hinspringen(e.el.matches('summary') ? e.el.parentElement : e.el);
+    e.el.querySelector?.('input:not([type="hidden"]), select, textarea')?.focus({ preventScroll: true });
+  }, 250);
+}
+// "/" springt in die Suche (nicht in Eingabefeldern).
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== '/' || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (ev.target.closest('input, textarea, select, [contenteditable]')) return;
+  ev.preventDefault();
+  (activePage() === 'inventory' ? $('#inv-q') : einstQ).focus();
 });
 
 // ----------------------------------------------------------------------- Design
@@ -67,9 +214,9 @@ function fillSelect(el, values, placeholder) {
 
 // ------------------------------------------------------------------- Übersicht
 async function loadDashboard() {
-  const [stats, expiring, events] = await Promise.all([
+  const [stats, plan, events] = await Promise.all([
     get('/api/inventory/stats'),
-    get('/api/inventory?expiring=true&limit=12'),
+    get('/api/inventory/wochenplan'),
     get('/api/events?limit=12'),
   ]);
 
@@ -81,24 +228,19 @@ async function loadDashboard() {
   }
   fremdHinweis(fremdBox).catch(() => {});
 
+  // Jede Kachel springt ins passend gefilterte Inventar.
   $('#stats').innerHTML = [
-    ['Im Bestand', stats.total, 'ok'],
-    ['Läuft ab', stats.expiring, 'warn'],
-    ['Abgelaufen', stats.expired, 'danger'],
-    ['Eingelagert (30 Tage)', stats.added_30d, ''],
-    ['Ausgelagert (30 Tage)', stats.removed_30d, ''],
-  ].map(([label, value, cls]) =>
-    `<div class="card stat ${cls}"><div class="value">${value}</div><div class="label">${label}</div></div>`
+    ['Im Bestand', stats.total, 'ok', 'inventory?'],
+    ['Läuft ab', stats.expiring, 'warn', 'inventory?frist=bald'],
+    ['Abgelaufen', stats.expired, 'danger', 'inventory?frist=abgelaufen'],
+    ['Eingelagert (30 Tage)', stats.added_30d, '', 'inventory?sort=added'],
+    ['Ausgelagert (30 Tage)', stats.removed_30d, '', 'inventory?status=removed&sort=added'],
+  ].map(([label, value, cls, ziel]) =>
+    `<button type="button" class="card stat ${cls}" data-ziel="${ziel}" title="Im Inventar zeigen">
+      <div class="value">${value}</div><div class="label">${label}</div></button>`
   ).join('');
 
-  $('#dash-expiring').innerHTML = expiring.length
-    ? expiring.map((i) => `<tr>
-        <td class="name">${esc(i.display_name || i.name)}</td>
-        <td>${fmtDate(i.expiry_date)} ${daysPill(i.days_left)}</td>
-        <td>${ortMitFarbe(i.location)}</td>
-        <td class="right"><button class="sm" data-remove="${esc(i.label)}">Auslagern</button></td>
-      </tr>`).join('')
-    : '<tr><td colspan="4" class="muted">Nichts läuft demnächst ab.</td></tr>';
+  $('#dash-plan').innerHTML = planHtml(plan);
 
   $('#dash-events').innerHTML = events.map((e) => `<tr>
       <td class="muted">${fmtTime(e.ts)}</td><td>${esc(eventName(e.type))}${e.payload?.fremd
@@ -107,7 +249,90 @@ async function loadDashboard() {
     || '<tr><td colspan="3" class="muted">Noch nichts passiert.</td></tr>';
 
   $('#dash-cat').innerHTML = barList(stats.by_category, state.categories);
-  $('#dash-loc').innerHTML = barList(stats.by_location, []);
+  $('#dash-orte').innerHTML = ortKarten(stats.orte || []);
+  loadVerbrauch().catch((e) => toast(e.message, 'error'));
+}
+
+$('#stats').addEventListener('click', (ev) => {
+  const k = ev.target.closest('[data-ziel]');
+  if (k) showPage(k.dataset.ziel);
+});
+$('#dash-orte').addEventListener('click', (ev) => {
+  const k = ev.target.closest('[data-ort]');
+  if (k) showPage(`inventory?location=${encodeURIComponent(k.dataset.ort)}`);
+});
+$('#dash-verbrauch-tage').addEventListener('change', () => loadVerbrauch().catch((e) => toast(e.message, 'error')));
+
+// "Was muss weg?": je Tag eine Ueberschrift, je Artikel Verbraucht / Weg.
+// "Weg" lagert mit Grund "weggeworfen" aus - daraus rechnet die Statistik.
+function planHtml(plan) {
+  if (!plan.length) return '<p class="muted">Nichts läuft bis Ende nächster Woche ab. 🎉</p>';
+  return plan.map((g) => `<div class="plan-tag ${g.key === 'abgelaufen' ? 'danger' : g.key === 'heute' ? 'warn' : ''}">
+      <h3>${esc(g.titel)} <span class="muted">· ${g.items.length}</span></h3>
+      ${g.items.map((i) => `<div class="plan-zeile">
+        <div class="plan-name"><b>${esc(i.display_name || i.name)}</b>
+          <span class="muted">${[mengeText(+i.quantity, i.unit), i.location].filter(Boolean).map(esc).join(' · ')}</span>
+          ${mhdBalken(i)}</div>
+        <span class="plan-knopf">
+          <button class="sm" data-remove="${esc(i.label)}" title="Verbraucht – auslagern">✓ Verbraucht</button>
+          <button class="sm ghost" data-remove="${esc(i.label)}" data-grund="weggeworfen" title="Weggeworfen – zählt in der Statistik">🗑</button>
+        </span></div>`).join('')}
+    </div>`).join('');
+}
+
+// Lagerorte als Karten: Anzahl, darunter wie viel davon bald / schon abläuft.
+function ortKarten(orte) {
+  if (!orte.length) return '<p class="muted">Noch nichts eingelagert.</p>';
+  const max = Math.max(...orte.map((o) => o.anzahl), 1);
+  return orte.map((o) => {
+    const ort = state.locations.find((l) => l.name === o.name);
+    const icon = ART_ICON[ort?.kind] || '📦';
+    return `<button type="button" class="ort-karte" data-ort="${esc(o.leer ? '(ohne Ort)' : o.name)}"
+        style="--farbe:${esc(ort?.color || 'var(--primary)')}" title="Im Inventar zeigen">
+      <div class="ort-kopf"><span>${icon} ${esc(o.name)}</span><b>${o.anzahl}</b></div>
+      <div class="ort-fuell"><i style="width:${Math.round((o.anzahl / max) * 100)}%"></i></div>
+      <div class="ort-frist">${o.abgelaufen ? `<span class="pill danger">${o.abgelaufen} abgelaufen</span>` : ''}
+        ${o.laeuft_ab ? `<span class="pill warn">${o.laeuft_ab} laufen ab</span>` : ''}
+        ${!o.abgelaufen && !o.laeuft_ab ? '<span class="muted">alles frisch</span>' : ''}</div>
+    </button>`;
+  }).join('');
+}
+
+async function loadVerbrauch() {
+  const tage = $('#dash-verbrauch-tage').value;
+  const v = await get(`/api/inventory/verbrauch?tage=${tage}`);
+  const box = $('#dash-verbrauch');
+  if (!v.entnommen) {
+    box.innerHTML = '<p class="muted">In diesem Zeitraum wurde nichts ausgelagert.</p>';
+    return;
+  }
+  const anteil = (n) => `${Math.round((100 * n) / v.entnommen)}%`;
+  const max = Math.max(1, ...v.monate.map((m) => Math.max(m.eingelagert, m.entnommen)));
+  const monat = (m) => new Date(`${m}-01T12:00`).toLocaleDateString('de-DE', { month: 'short' });
+  const liste = (eintraege, text) => (eintraege.length
+    ? `<ol class="verbrauch-liste">${eintraege.map((e) => `<li>${esc(e.name)} <span class="muted">${text(e)}</span></li>`).join('')}</ol>`
+    : '<p class="muted">–</p>');
+  box.innerHTML = `
+    <div class="verbrauch-zahlen">
+      <div><b>${v.entnommen}</b><span>ausgelagert</span></div>
+      <div class="${v.verlust_prozent >= 20 ? 'danger' : v.verlust_prozent >= 10 ? 'warn' : 'ok'}">
+        <b>${v.verlust_prozent}%</b><span>nicht rechtzeitig</span></div>
+      <div><b>${v.lagerdauer_tage ?? '–'}</b><span>Tage gelagert (Median)</span></div>
+    </div>
+    <div class="verbrauch-anteil" title="rechtzeitig · nach dem MHD · weggeworfen">
+      <i class="ok" style="width:${anteil(v.rechtzeitig)}"></i><i class="warn" style="width:${anteil(v.nach_mhd)}"></i><i class="danger" style="width:${anteil(v.weggeworfen)}"></i>
+    </div>
+    <p class="hint" style="margin:4px 0 10px">✓ ${v.rechtzeitig} rechtzeitig · ⏰ ${v.nach_mhd} nach dem MHD · 🗑 ${v.weggeworfen} weggeworfen</p>
+    <div class="monate" aria-label="eingelagert und ausgelagert je Monat">
+      ${v.monate.map((m) => `<div class="monat" title="${m.eingelagert} eingelagert, ${m.entnommen} ausgelagert">
+        <div class="saeulen"><i class="rein" style="height:${(m.eingelagert / max) * 100}%"></i><i class="raus" style="height:${(m.entnommen / max) * 100}%"></i></div>
+        <span>${monat(m.monat)}</span></div>`).join('')}
+    </div>
+    <p class="hint" style="margin:2px 0 10px"><span class="legende rein"></span> eingelagert <span class="legende raus"></span> ausgelagert</p>
+    <div class="grid cols2">
+      <div><h3>Oft verbraucht</h3>${liste(v.oft_verbraucht, (e) => `${e.anzahl}×`)}</div>
+      <div><h3>Läuft oft ab</h3>${liste(v.oft_verloren, (e) => `${e.anzahl} von ${e.von}`)}</div>
+    </div>`;
 }
 
 // Lagerort mit seinem Farbpunkt (Stammdaten -> Lagerorte).
@@ -132,6 +357,53 @@ function barList(map, categories) {
 }
 
 // --------------------------------------------------------------------- Inventar
+// Filter des Inventars: die Felder oben sind die Wahrheit, die Adresse
+// (#inventory?…) und die Chips folgen ihnen.
+const INV_FELDER = { q: '#inv-q', category: '#inv-category', location: '#inv-location', status: '#inv-status', sort: '#inv-sort' };
+const INV_STANDARD = { status: 'active', sort: 'expiry' };
+let invFrist = '';
+
+function invFilterSetzen(params) {
+  for (const [k, sel] of Object.entries(INV_FELDER)) {
+    const el = $(sel), wert = params.get(k) ?? INV_STANDARD[k] ?? '';
+    if (el.tagName === 'SELECT' && wert && ![...el.options].some((o) => o.value === wert)) {
+      el.add(new Option(wert, wert));     // Ort/Kategorie, die (noch) nicht geladen ist
+    }
+    el.value = wert;
+  }
+  invFrist = ['bald', 'abgelaufen'].includes(params.get('frist')) ? params.get('frist') : '';
+}
+
+function invFilterQuery() {
+  const p = new URLSearchParams();
+  for (const [k, sel] of Object.entries(INV_FELDER)) {
+    const wert = $(sel).value.trim();
+    if (wert && wert !== INV_STANDARD[k]) p.set(k, wert);
+  }
+  if (invFrist) p.set('frist', invFrist);
+  return p.toString();
+}
+
+const INV_NAMEN = {
+  category: (v) => `🏷 ${v}`, location: (v) => `📍 ${v}`, q: (v) => `🔍 „${v}“`,
+  status: (v) => ({ removed: 'Ausgelagert', all: 'Alle Zustände' }[v] || v),
+};
+function invChipsZeigen() {
+  $$('#inv-chips [data-frist]').forEach((b) => b.classList.toggle('aktiv', b.dataset.frist === invFrist));
+  $('#inv-aktiv').innerHTML = Object.keys(INV_NAMEN)
+    .filter((k) => $(INV_FELDER[k]).value.trim() && $(INV_FELDER[k]).value !== INV_STANDARD[k])
+    .map((k) => `<button type="button" class="chip aktiv" data-weg="${k}" title="Filter entfernen">${esc(INV_NAMEN[k]($(INV_FELDER[k]).value.trim()))} ×</button>`)
+    .join('');
+}
+
+$('#inv-chips').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button');
+  if (!b) return;
+  if (b.dataset.frist) invFrist = invFrist === b.dataset.frist ? '' : b.dataset.frist;
+  if (b.dataset.weg) $(INV_FELDER[b.dataset.weg]).value = INV_STANDARD[b.dataset.weg] || '';
+  loadInventory().catch((e) => toast(e.message, 'error'));
+});
+
 async function loadInventory() {
   const params = new URLSearchParams({
     status: $('#inv-status').value,
@@ -142,20 +414,26 @@ async function loadInventory() {
   if ($('#inv-category').value) params.set('category', $('#inv-category').value);
   if ($('#inv-location').value) params.set('location', $('#inv-location').value);
   if ($('#inv-alle')?.checked) params.set('alle', 'true');
+  if (invFrist) params.set('frist', invFrist);
+  const q = invFilterQuery();
+  if (activePage() === 'inventory') history.replaceState(null, '', `#inventory${q ? `?${q}` : ''}`);
+  invChipsZeigen();
 
   const rows = await get(`/api/inventory?${params}`);
   $('#inv-empty').hidden = rows.length > 0;
   const fremd = (i) => (HAUSHALT && i.household !== HAUSHALT.name
     ? ` <span class="pill warn" title="gehört einem anderen Haushalt – Auslagern ist eine Fremdentnahme">🏠 ${esc(i.household)}</span>` : '');
   const menge = (q, unit) => esc(mengeText(q, unit) || String(q));
+  // data-th: Spaltenname, den die Kartenansicht auf schmalen Bildschirmen
+  // vor den Wert schreibt (app.css, .karten-schmal).
   const zeile = (i, gruppe = '') => `<tr${gruppe ? ` class="inv-kind" data-gruppe="${esc(gruppe)}"${offeneGruppen.has(gruppe) ? '' : ' hidden'}` : ''}>
-    <td class="mono">${esc(i.label)}</td>
+    <td class="mono" data-th="Etikett">${esc(i.label)}</td>
     <td class="name">${gruppe ? '<span class="muted">└</span>' : `<b>${esc(i.display_name || i.name)}</b>${fremd(i)}${i.brand ? `<br><span class="muted">${esc(i.brand)}</span>` : ''}`}</td>
-    <td>${gruppe ? '' : esc(i.category)}</td>
-    <td>${fmtDate(i.expiry_date)}</td>
-    <td>${daysPill(i.days_left)}</td>
-    <td>${menge(i.quantity, i.unit)}</td>
-    <td>${ortMitFarbe(i.location)}</td>
+    <td data-th="Kategorie"${gruppe || !i.category ? ' class="leer"' : ''}>${gruppe ? '' : esc(i.category)}</td>
+    <td data-th="MHD">${fmtDate(i.expiry_date)}${mhdBalken(i)}</td>
+    <td data-th="Rest">${daysPill(i.days_left)}</td>
+    <td data-th="Menge">${menge(i.quantity, i.unit)}</td>
+    <td data-th="Ort">${ortMitFarbe(i.location)}</td>
     <td class="right">
       <button class="sm" data-edit="${esc(i.label)}">Ändern</button>
       <button class="sm" data-reprint="${esc(i.label)}">Druck</button>
@@ -169,11 +447,11 @@ async function loadInventory() {
     return `<tr class="inv-gruppe" data-gruppe="${esc(g.key)}" aria-expanded="${offen}">
     <td class="mono muted">${offen ? '▾' : '▸'} ${g.items.length}×</td>
     <td class="name"><b>${esc(e.display_name || e.name)}</b>${fremd(e)}${e.brand ? `<br><span class="muted">${esc(e.brand)}</span>` : ''}</td>
-    <td>${esc(e.category)}</td>
-    <td>${e.expiry_date ? `ab ${fmtDate(e.expiry_date)}` : ''}</td>
-    <td>${daysPill(e.days_left)}</td>
-    <td>${menge(g.menge, e.unit)}</td>
-    <td>${g.orte.map(ortMitFarbe).join('<br>')}</td>
+    <td data-th="Kategorie"${e.category ? '' : ' class="leer"'}>${esc(e.category)}</td>
+    <td data-th="MHD">${e.expiry_date ? `ab ${fmtDate(e.expiry_date)}` : ''}${mhdBalken(e)}</td>
+    <td data-th="Rest">${daysPill(e.days_left)}</td>
+    <td data-th="Menge">${menge(g.menge, e.unit)}</td>
+    <td data-th="Ort">${g.orte.map(ortMitFarbe).join('<br>')}</td>
     <td class="right muted">${offen ? 'zuklappen' : 'aufklappen'}</td></tr>`;
   };
   $('#inv-body').innerHTML = gruppieren(rows).map((g) => (g.items.length > 1
@@ -222,7 +500,7 @@ document.addEventListener('click', async (ev) => {
   try {
     if (btn.dataset.remove) {
       btn.disabled = true;
-      await auslagern(btn.dataset.remove, 'web', refreshActive);
+      await auslagern(btn.dataset.remove, btn.dataset.grund || 'web', refreshActive);
     } else if (btn.dataset.restore) {
       await post('/api/inventory/restore', { label: btn.dataset.restore });
       toast('Zurückgebucht', 'success');
@@ -1903,3 +2181,6 @@ liveConnect(
   }
   showPage((location.hash || '#dashboard').slice(1));
 })();
+// Lesezeichen oder eine von Hand geaenderte Adresse; eigene Wechsel gehen
+// ueber replaceState und loesen das nicht aus.
+window.addEventListener('hashchange', () => showPage((location.hash || '#dashboard').slice(1)));

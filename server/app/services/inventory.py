@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from sqlalchemy import and_, func, select, true
+from sqlalchemy import Integer, and_, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -324,6 +324,10 @@ def with_days_left(item: InventoryItem) -> dict:
     return data
 
 
+# Filterwert fuer "ohne Lagerort" in GET /api/inventory - leer hiesse "alle".
+OHNE_ORT = "(ohne Ort)"
+
+
 async def stats(session: AsyncSession, household: str | None = None) -> dict:
     ui_cfg = await settings_store.get(session, "ui", {})
     warn_days = int(ui_cfg.get("expiring_days", 7))
@@ -380,6 +384,26 @@ async def stats(session: AsyncSession, household: str | None = None) -> dict:
         ).all()
     )
 
+    # Je Lagerort auch, was dort bald ablaeuft - die Uebersicht zeigt die
+    # Orte als Karten mit "3 laufen ab" statt nur als Zahl.
+    frist = (
+        await session.execute(
+            select(
+                InventoryItem.location,
+                func.sum(and_(InventoryItem.expiry_date != "",
+                              InventoryItem.expiry_date < today).cast(Integer)),
+                func.sum(and_(InventoryItem.expiry_date >= today,
+                              InventoryItem.expiry_date <= horizon).cast(Integer)),
+            )
+            .where(active)
+            .group_by(InventoryItem.location)
+        )
+    ).all()
+    orte = sorted(
+        ({"name": ort or "Ohne", "leer": not ort, "anzahl": by_location.get(ort, 0),
+          "abgelaufen": int(alt or 0), "laeuft_ab": int(bald or 0)} for ort, alt, bald in frist),
+        key=lambda o: -o["anzahl"])
+
     since = utcnow() - timedelta(days=30)
     added_30d = (
         await session.execute(
@@ -402,6 +426,7 @@ async def stats(session: AsyncSession, household: str | None = None) -> dict:
         "expired": expired,
         "by_category": {k or "Ohne": v for k, v in by_category.items()},
         "by_location": {k or "Ohne": v for k, v in by_location.items()},
+        "orte": orte,
         "added_30d": added_30d,
         "removed_30d": removed_30d,
     }

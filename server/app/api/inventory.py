@@ -19,7 +19,7 @@ from ..schemas import (
     Stats,
 )
 from ..services import inventory as inv
-from ..services import gs1, haltbarkeit, haushalte, mengen, openfoodfacts, settings_store
+from ..services import gs1, haltbarkeit, haushalte, mengen, openfoodfacts, settings_store, verbrauch
 from ..services.dates import shift_iso, today_iso
 
 router = APIRouter(prefix="/api/inventory", tags=["inventar"])
@@ -34,6 +34,9 @@ async def list_inventory(
     category: str = "",
     location: str = "",
     expiring: bool = False,
+    # Nur die bald ablaufenden (ohne die abgelaufenen) bzw. nur die
+    # abgelaufenen - die Kacheln der Uebersicht springen hierher.
+    frist: str = Query("", pattern="^(|bald|abgelaufen)$"),
     sort: str = Query("expiry", pattern="^(expiry|name|added|location)$"),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
@@ -62,7 +65,7 @@ async def list_inventory(
     if category:
         stmt = stmt.where(InventoryItem.category == category)
     if location:
-        stmt = stmt.where(InventoryItem.location == location)
+        stmt = stmt.where(InventoryItem.location == ("" if location == inv.OHNE_ORT else location))
     if expiring:
         ui_cfg = await settings_store.get(session, "ui", {})
         horizon = (
@@ -71,6 +74,18 @@ async def list_inventory(
         stmt = stmt.where(
             InventoryItem.expiry_date != "", InventoryItem.expiry_date <= horizon
         )
+
+    if frist:
+        heute = today_iso()
+        if frist == "abgelaufen":
+            stmt = stmt.where(InventoryItem.expiry_date != "", InventoryItem.expiry_date < heute)
+        else:
+            ui_cfg = await settings_store.get(session, "ui", {})
+            horizon = (
+                date.today() + timedelta(days=int(ui_cfg.get("expiring_days", 7)))
+            ).isoformat()
+            stmt = stmt.where(InventoryItem.expiry_date >= heute,
+                              InventoryItem.expiry_date <= horizon)
 
     order = {
         "expiry": (InventoryItem.expiry_date == "", InventoryItem.expiry_date.asc()),
@@ -87,6 +102,22 @@ async def list_inventory(
 @router.get("/stats", response_model=Stats)
 async def get_stats(request: Request, session: AsyncSession = Depends(get_session)):
     return await inv.stats(session, await haushalte.aus_anfrage(request, session))
+
+
+@router.get("/wochenplan")
+async def get_wochenplan(request: Request, session: AsyncSession = Depends(get_session)):
+    """Was muss weg? Aktive Artikel bis Ende naechster Woche, nach Tagen."""
+    return await verbrauch.wochenplan(session, await haushalte.aus_anfrage(request, session))
+
+
+@router.get("/verbrauch")
+async def get_verbrauch(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    tage: int = Query(180, ge=7, le=366),
+):
+    """Verbrauchsstatistik aus den ausgelagerten Artikeln."""
+    return await verbrauch.statistik(session, await haushalte.aus_anfrage(request, session), tage)
 
 
 @router.get("/{label}", response_model=InventoryOut)
