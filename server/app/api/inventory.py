@@ -19,7 +19,7 @@ from ..schemas import (
     Stats,
 )
 from ..services import inventory as inv
-from ..services import haltbarkeit, haushalte, mengen, openfoodfacts, settings_store
+from ..services import gs1, haltbarkeit, haushalte, mengen, openfoodfacts, settings_store
 from ..services.dates import shift_iso, today_iso
 
 router = APIRouter(prefix="/api/inventory", tags=["inventar"])
@@ -230,12 +230,18 @@ async def scan(req: ScanRequest, request: Request,
         return {"ok": False, "routed_to": None, "action": "unknown_label",
                 "label": code}
 
+    # GS1-Code (PDF417/DataMatrix): nachgeschlagen wird die EAN aus der GTIN,
+    # MHD und Gewicht gehen als "gs1" an die Maske.
+    gs = gs1.lesen(code)
+    if gs:
+        code = gs["ean"]
     product = await openfoodfacts.lookup(session, code)
     await session.commit()
     return {
         "ok": True,
         "routed_to": None,
         "code": code,
+        "gs1": {k: v for k, v in gs.items() if k != "roh"} if gs else None,
         "action": "product",
         "product": None
         if product is None

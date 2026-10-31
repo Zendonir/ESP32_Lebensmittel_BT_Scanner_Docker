@@ -29,7 +29,7 @@ from ..models import (
 )
 from ..services import inventory as inv
 from ..services import categories as cat
-from ..services import brother, firmware, haltbarkeit, ki, labels, mengen, openfoodfacts, settings_store
+from ..services import brother, firmware, gs1, haltbarkeit, ki, labels, mengen, openfoodfacts, settings_store
 from ..services import scanner as scanner_info
 from ..services.dates import days_left, shift_iso, to_display, to_iso_date
 from . import protocol as proto
@@ -1492,6 +1492,11 @@ async def _scan_label(session, sess, code) -> None:
 async def _scan_barcode(session, sess, code) -> None:
     """Ein Produkt-Barcode wurde gescannt."""
     await hub.send_to(sess.device_id, proto.beep("scan"))
+    # GS1-Code (PDF417/DataMatrix an Frischfleisch): Produkt ueber die GTIN,
+    # MHD und Gewicht direkt aus dem Code.
+    gs = gs1.lesen(code)
+    if gs:
+        code = gs["ean"]
     product = await openfoodfacts.lookup(session, code)
     await session.commit()
 
@@ -1520,6 +1525,14 @@ async def _scan_barcode(session, sess, code) -> None:
         await session.commit()
         sess.draft = draft
         sess.stack = [HOME, UNKNOWN]
+    if gs:
+        if gs["menge"]:
+            draft.quantity, draft.unit = gs["menge"], gs["einheit"]
+        if gs["mhd"]:
+            # Steht auf der Packung - im Gefrierschrank wie ein eingetipptes
+            # Datum verlaengert (ausser die Ware ist schon gefroren gekauft).
+            draft.expiry_date = gs["mhd"]
+            await _einfrieren(session, sess)
 
 
 # ---------------------------------------------------------------------------

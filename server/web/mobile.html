@@ -483,8 +483,13 @@ async function startCamera() {
   cam.play?.().catch(() => {});
 
   if ('BarcodeDetector' in window) {
+    // PDF417 und DataMatrix: GS1-Codes an Frischfleisch (MHD und Gewicht
+    // stehen darin). Nur was das Geraet kann - sonst wirft der Konstruktor.
+    const gewuenscht = ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code',
+      'pdf417', 'data_matrix'];
+    const kann = await BarcodeDetector.getSupportedFormats?.().catch(() => null);
     const detector = new BarcodeDetector({
-      formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code'],
+      formats: kann ? gewuenscht.filter((f) => kann.includes(f)) : gewuenscht.slice(0, 7),
     });
     detectTimer = setInterval(async () => {
       try {
@@ -512,7 +517,7 @@ async function startCamera() {
     ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
     ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
     ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
-    ZXing.BarcodeFormat.QR_CODE,
+    ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.PDF_417, ZXing.BarcodeFormat.DATA_MATRIX,
   ]);
   zxingReader = new ZXing.BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 250 });
   // Eine Kopie des Stroms: reset() beendet die Spuren, die der Decoder bekam -
@@ -557,7 +562,7 @@ async function sendScan(code) {
       toast(`Etikett ${res.label} ist nicht im Bestand`, 'warn');
     } else if (res.action === 'product') {
       // Einlagern macht das Handy selbst - wie am Terminal, nur hier.
-      await einlagernFormular(res.code || code, res.product);
+      await einlagernFormular(res.code || code, res.product, null, null, res.gs1);
     } else if (res.routed_to) {
       toast(`${code} an ${res.routed_to} gesendet`, 'success');
     }
@@ -634,7 +639,8 @@ function vorlageKopf(vorlage, p, vorlageSorten) {
 // `vorlage`: Einlagern ohne Barcode ueber eine Vorlage (Marken, Sorten,
 // Einheit, Haltbarkeit von dort). `danach`: wohin es nach dem Speichern oder
 // Abbrechen geht - Standard ist zurueck zum Scannen.
-async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
+// `gs1`: Inhalt eines GS1-Codes (PDF417/DataMatrix) - MHD und Menge daraus.
+async function einlagernFormular(code, produkt, vorlage = null, danach = null, gs1 = null) {
   const zurueck = danach || (() => renderScan());
   stopCamera();
   const [kategorien, orte, ziele, kiStatus, mhdWege] = await Promise.all([
@@ -648,7 +654,8 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
   let ort = '';
   try { ort = localStorage.getItem(ORT_KEY) || ''; } catch { /* privat */ }
   if (!orte.some((o) => o.name === ort)) ort = (orte.find((o) => o.is_default) || orte[0] || {}).name || '';
-  const p = produkt || {};
+  const p = { ...(produkt || {}) };
+  if (gs1?.menge) { p.menge = gs1.menge; p.einheit = gs1.einheit; }
   const opt = (liste, wert) => liste.map((n) => `<option ${n === wert ? 'selected' : ''}>${esc(n)}</option>`).join('');
   // Sorten der Vorlage, sonst die der Kategorie (Fleisch: Schwein, ...).
   const vorlageSorten = vorlage ? ((vorlage.sorten || []).length ? vorlage.sorten
@@ -828,7 +835,14 @@ async function einlagernFormular(code, produkt, vorlage = null, danach = null) {
   // nur nach einem Barcode, die Maske steht schon dahinter. "Ueberspringen"
   // laesst den Vorschlag aus Ort/Kategorie stehen; ein erkanntes Datum
   // landet im Feld und bleibt dort aenderbar wie jedes andere.
-  if (code && mhdWege.nach_scan && fotoKnopf && kameraMoeglich()) {
+  // MHD aus dem GS1-Code: steht so auf der Packung, im Gefrierschrank wie
+  // ein eingetipptes verlaengert. Dann braucht es auch keine MHD-Kamera.
+  if (gs1?.mhd) {
+    mhdVonHand = true;
+    aufgedruckt = gs1.mhd;
+    einfrierText = `aus dem Code: ${anzeigen(gs1.mhd)}${gs1.charge ? ` · Charge ${gs1.charge}` : ''}`;
+    einfrieren(einfrierText);
+  } else if (code && mhdWege.nach_scan && fotoKnopf && kameraMoeglich()) {
     mhdKamera({ kiErlaubt: mhdWege.ki, endeText: 'Überspringen' })
       .then((r) => { if (r) mhdUebernehmen(r); })
       .catch((e) => toast(e.message, 'warn'));
