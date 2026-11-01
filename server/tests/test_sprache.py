@@ -76,6 +76,8 @@ def test_etikett_gefuehrt(client):
     assert "2 Etiketten" in r["antwort"] and "800 g" in r["antwort"] and "ohne MHD" in r["antwort"]
     werte = r["werte"]
     assert werte["ort"] == "Gefrierschrank" and werte["mhd"] == "kein"
+    # Menge reist mit Einheit - auch ohne eigenes Feld "einheit" (Home Assistant)
+    assert werte["menge"] == "800 g" and "einheit" not in werte
 
     r = client.post("/api/sprache/etikett", json={**werte, "bestaetigt": True}).json()
     assert r["status"] == "erledigt" and len(r["labels"]) == 2
@@ -153,3 +155,15 @@ def test_token(client):
                            headers={"Authorization": "Bearer geheim"}).status_code == 200
     finally:
         object.__setattr__(settings, "sprache_token", "")
+
+
+def test_unbekannter_haushalt_fragt_statt_alle(client):
+    name = _name("Quark")
+    client.post("/api/sprache/etikett", json={
+        "name": name, "ort": "Keller", "mhd": "kein", "drucken": False, "bestaetigt": True})
+    for pfad, daten in (("auslagern", {"name": name}), ("bestand", {"name": name}),
+                        ("ablauf", {}), ("etikett", {"name": name})):
+        r = client.post(f"/api/sprache/{pfad}", json={**daten, "haushalt": "Nirgendwo"}).json()
+        assert r["status"] == "frage" and r["fehlt"] == "haushalt", pfad
+    # nichts ausgelagert
+    assert len(client.get("/api/inventory", params={"q": name}).json()) == 1

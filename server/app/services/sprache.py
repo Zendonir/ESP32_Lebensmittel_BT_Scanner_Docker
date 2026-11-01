@@ -139,8 +139,37 @@ def _aufzaehlen(teile: list[str]) -> str:
     return ", ".join(teile[:-1]) + " und " + teile[-1]
 
 
+class _Unbekannt(Exception):
+    """Genannter Haushalt existiert nicht - nie stillschweigend "alle" nehmen."""
+
+    def __init__(self, antwort: dict):
+        self.antwort = antwort
+
+
 async def _haushalt(session: AsyncSession, haushalt: str | None) -> str | None:
-    return await haushalte.aufloesen(session, haushalt) if haushalt else None
+    """Name/Nummer -> Haushalt; leer -> None (alle). Unbekannt -> _Unbekannt,
+    sonst wuerde ein verhoerter Name in *allen* Haushalten suchen oder auslagern."""
+    if not haushalt:
+        return None
+    hh = await haushalte.aufloesen(session, haushalt)
+    if hh is None:
+        namen = [h.name for h in await haushalte.alle(session)]
+        raise _Unbekannt(antwort("frage", f"Den Haushalt „{haushalt}“ gibt es nicht. Es gibt "
+                                 f"{_aufzaehlen(namen)}.", fehlt="haushalt", optionen=namen))
+    return hh
+
+
+def _mit_haushaltspruefung(fn):
+    """Unbekannter Haushalt -> Rueckfrage statt Ausnahme."""
+    import functools
+
+    @functools.wraps(fn)
+    async def huelle(*args, **kwargs):
+        try:
+            return await fn(*args, **kwargs)
+        except _Unbekannt as fehler:
+            return fehler.antwort
+    return huelle
 
 
 async def _orte(session: AsyncSession) -> list[Location]:
@@ -191,6 +220,7 @@ async def _ort_finden(session: AsyncSession, ort: str) -> tuple[str | None, list
     return (treffer[0] if len(treffer) == 1 else None), namen
 
 
+@_mit_haushaltspruefung
 async def bestand(session: AsyncSession, *, name: str = "", ort: str = "",
                   haushalt: str | None = None) -> dict:
     """"Haben wir noch Milch?" / "Was ist im Gefrierschrank?" """
@@ -233,6 +263,7 @@ async def bestand(session: AsyncSession, *, name: str = "", ort: str = "",
     return antwort("info", text, anzahl=len(items), sorten=len(gruppen))
 
 
+@_mit_haushaltspruefung
 async def ablauf(session: AsyncSession, *, haushalt: str | None = None) -> dict:
     """"Was muss weg?" - der Wochenplan als Satz."""
     plan = await wochenplan(session, await _haushalt(session, haushalt))
@@ -249,6 +280,7 @@ async def ablauf(session: AsyncSession, *, haushalt: str | None = None) -> dict:
 
 
 # -------------------------------------------------------------- Auslagern
+@_mit_haushaltspruefung
 async def auslagern(session: AsyncSession, *, name: str, ort: str = "",
                     weggeworfen: bool = False, haushalt: str | None = None) -> dict:
     """Die Packung mit dem fruehesten MHD auslagern."""
@@ -294,6 +326,7 @@ async def _vorlage(session: AsyncSession, name: str) -> Template | None:
     return next(v for v in vorlagen if v.name == treffer[0])
 
 
+@_mit_haushaltspruefung
 async def etikett(session: AsyncSession, *, name: str = "", menge=None, einheit: str = "",
                   mhd: str | None = None, ort: str = "", anzahl: int | None = None,
                   haushalt: str | None = None, terminal: str = "",
@@ -307,10 +340,6 @@ async def etikett(session: AsyncSession, *, name: str = "", menge=None, einheit:
     if not name:
         return antwort("frage", "Was möchtest du einlagern?", fehlt="name")
     hh = await _haushalt(session, haushalt)
-    if haushalt and not hh:
-        namen = [h.name for h in await haushalte.alle(session)]
-        return antwort("frage", f"Den Haushalt „{haushalt}“ gibt es nicht. Es gibt "
-                       f"{_aufzaehlen(namen)}.", fehlt="haushalt", optionen=namen)
 
     vorlage = await _vorlage(session, name)
     if vorlage is not None:
@@ -367,8 +396,12 @@ async def etikett(session: AsyncSession, *, name: str = "", menge=None, einheit:
         q, unit = 1.0, (vorlage.unit if vorlage else "")
     anzahl = max(1, min(20, int(anzahl or 1)))
 
-    werte = {"name": name, "ort": ort_name, "mhd": mhd_iso or "kein", "menge": q,
-             "einheit": unit, "anzahl": anzahl, "haushalt": hh or "", "drucken": drucken}
+    # Menge als Text mit Einheit ("500 g", "3 St."): so liest sie der zweite
+    # Aufruf genauso, auch wenn der Aufrufer `einheit` nicht mitschickt -
+    # eine nackte 500 waeren sonst 500 Stueck.
+    werte = {"name": name, "ort": ort_name, "mhd": mhd_iso or "kein",
+             "menge": mengen.text(q, unit) if gelesen_menge else "",
+             "anzahl": anzahl, "haushalt": hh or "", "drucken": drucken}
     mengentext = _menge_text(q, unit) if gelesen_menge or unit not in ("", "St.") else ""
     beschreibung = ", ".join(t for t in (
         f"{anzahl} Etiketten" if anzahl > 1 else "",
