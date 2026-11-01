@@ -49,6 +49,10 @@ class Settings:
     ui_password: str = field(default_factory=lambda: os.getenv("UI_PASSWORD", ""))
     # Optionaler Benutzername dazu ("" = nur das Passwort zaehlt).
     ui_user: str = field(default_factory=lambda: os.getenv("UI_USER", ""))
+    # Schluessel fuer die Sprachsteuerung (Home Assistant, /api/sprache):
+    # "Authorization: Bearer <SPRACHE_TOKEN>". Leer = es gilt die normale
+    # Anmeldung (ohne UI_PASSWORD also offen im LAN wie die Oberflaeche).
+    sprache_token: str = field(default_factory=lambda: os.getenv("SPRACHE_TOKEN", ""))
 
     # --- Haushalt / Etiketten ------------------------------------------
     household: str = field(

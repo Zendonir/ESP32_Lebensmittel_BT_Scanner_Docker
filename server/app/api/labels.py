@@ -112,7 +112,15 @@ async def druck_terminals(request: Request, session: AsyncSession = Depends(get_
 async def create_labels(body: LabelCreate, request: Request,
                         session: AsyncSession = Depends(get_session)):
     """Derselbe Weg wie der Geraete-Workflow - eine Implementierung, zwei Aufrufer."""
-    haushalt = await haushalte.aus_anfrage(request, session)
+    return await etiketten_anlegen(session, body, await haushalte.aus_anfrage(request, session))
+
+
+async def etiketten_anlegen(session: AsyncSession, body: LabelCreate,
+                            haushalt: str | None) -> LabelCreateResult:
+    """Anlegen und drucken - fuer Web, Handy und Sprachsteuerung derselbe Weg.
+
+    409 mit {"frage": "terminal", ...}, wenn mehrere Terminals in Frage kommen.
+    """
     # Gedruckt wird am Terminal des Haushalts. Sind mehrere verbunden und
     # keines gewaehlt, wird gefragt - vor dem Anlegen, damit nichts doppelt
     # entsteht, wenn die Oberflaeche danach mit der Wahl wiederkommt.
