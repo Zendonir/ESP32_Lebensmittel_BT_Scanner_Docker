@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .api import brother as brother_api
 from .api import catalog, firmware, haushalte as haushalte_api, inventory, labels, system
+from .api import sprache as sprache_api
 from .config import settings
 from .db import init_db, session_scope
 from .device import routes as device_routes
@@ -355,6 +356,8 @@ app.include_router(brother_api.router, dependencies=_guard)
 app.include_router(system.router, dependencies=_guard)
 app.include_router(firmware.router, dependencies=_guard)
 app.include_router(haushalte_api.router, dependencies=_guard)
+# Eigene Anmeldung (SPRACHE_TOKEN oder wie die Oberflaeche).
+app.include_router(sprache_api.router)
 # Beide ohne _guard - sie melden sich ueber DEVICE_TOKEN an, nicht ueber
 # das Web-Passwort, das die Terminals gar nicht kennen.
 app.include_router(firmware.public_router)

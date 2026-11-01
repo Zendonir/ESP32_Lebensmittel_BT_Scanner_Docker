@@ -57,6 +57,9 @@ services:
       # Jahr angemeldet). Leer = im LAN frei zugaenglich. Ueber einen Reverse
       # Proxy veroeffentlicht unbedingt setzen. UI_USER ist optional.
       UI_PASSWORD: ""
+      # Sprachsteuerung ueber Home Assistant (deploy/homeassistant/):
+      # eigener Schluessel, leer = wie die Oberflaeche.
+      SPRACHE_TOKEN: ""
       UI_USER: ""
 
       # Optional: KI-Vorschlaege fuer neue Produkte (Claude API). Leer = aus.

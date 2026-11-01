@@ -1,0 +1,208 @@
+# Lebensmittel-Lager im Home Assistant Assist (Sprachassistent)
+#
+# Vier Skripte, die ein Sprachmodell-Assistent (OpenAI, Anthropic, Google, …)
+# als Werkzeuge benutzt: Bestand abfragen, "Was muss weg?", Auslagern und
+# gefuehrt ein Etikett drucken. Die Gespraechsfuehrung kommt vom Server
+# (/api/sprache, services/sprache.py): er fragt nach Lagerort und MHD,
+# schlaegt ein MHD vor und druckt erst nach einem "Ja".
+#
+# Einrichten
+#   1. Im Lebensmittel-Server SPRACHE_TOKEN setzen (.env bzw. Compose) und den
+#      Container neu starten.
+#   2. In secrets.yaml:
+#        lebensmittel_sprache_auth: "Bearer <SPRACHE_TOKEN>"
+#   3. Diese Datei als Paket einbinden (configuration.yaml):
+#        homeassistant:
+#          packages:
+#            lebensmittel: !include lebensmittel_lager.yaml
+#      und unten bei `url` die Adresse des Servers eintragen.
+#   4. Konfiguration pruefen, neu starten (Pakete laden erst beim Start).
+#   5. Einstellungen -> Sprachassistenten -> Entitäten freigeben: die vier
+#      Skripte "Lager: …" fuer Assist freigeben. Der Assistent braucht als
+#      Gesprächsagent ein Sprachmodell mit Zugriff auf "Assist".
+#
+# Ohne Sprachmodell (nur der eingebaute Agent) gibt es keine Rueckfragen -
+# dann helfen die Skripte nur mit festen Saetzen (custom_sentences).
+
+rest_command:
+  lebensmittel_sprache:
+    # Adresse des Servers anpassen (wie im Browser, ohne / am Ende).
+    url: "http://lebensmittel.local:8080/api/sprache/{{ pfad }}"
+    method: post
+    content_type: "application/json; charset=utf-8"
+    headers:
+      Authorization: !secret lebensmittel_sprache_auth
+    payload: "{{ daten | tojson }}"
+    timeout: 20
+
+script:
+  lager_bestand:
+    alias: "Lager: Bestand abfragen"
+    icon: mdi:fridge-outline
+    description: >-
+      Sagt, was im Lebensmittel-Lager ist: zu einem Produkt ("Haben wir noch
+      Milch?", "Wie viel Hackfleisch ist da?") oder für einen Lagerort ("Was ist
+      im Gefrierschrank?"). Ohne Angaben eine Übersicht. Lies dem Nutzer das Feld
+      "antwort" vor.
+    mode: parallel
+    fields:
+      name:
+        description: Produkt oder Teil des Namens, z. B. "Milch". Leer für alles.
+        example: Milch
+        selector:
+          text:
+      ort:
+        description: Lagerort, z. B. "Gefrierschrank", "Kühlschrank", "Keller". Leer für alle.
+        example: Gefrierschrank
+        selector:
+          text:
+    sequence:
+      - action: rest_command.lebensmittel_sprache
+        data:
+          pfad: bestand
+          daten:
+            name: "{{ name | default('') }}"
+            ort: "{{ ort | default('') }}"
+        response_variable: http
+      - variables:
+          ergebnis: >-
+            {{ http.content if http.status == 200 and http.content is mapping
+               else {'status': 'fehler', 'antwort': 'Das Lager ist gerade nicht erreichbar.'} }}
+      - stop: ""
+        response_variable: ergebnis
+
+  lager_ablauf:
+    alias: "Lager: Was muss weg?"
+    icon: mdi:calendar-alert
+    description: >-
+      Sagt, welche Lebensmittel abgelaufen sind oder bis Ende nächster Woche
+      ablaufen ("Was muss weg?", "Was läuft bald ab?"). Lies "antwort" vor.
+    mode: parallel
+    sequence:
+      - action: rest_command.lebensmittel_sprache
+        data:
+          pfad: ablauf
+          daten: {}
+        response_variable: http
+      - variables:
+          ergebnis: >-
+            {{ http.content if http.status == 200 and http.content is mapping
+               else {'status': 'fehler', 'antwort': 'Das Lager ist gerade nicht erreichbar.'} }}
+      - stop: ""
+        response_variable: ergebnis
+
+  lager_auslagern:
+    alias: "Lager: Auslagern"
+    icon: mdi:package-variant-remove
+    description: >-
+      Nimmt eine Packung aus dem Lebensmittel-Lager (die mit dem frühesten MHD),
+      z. B. "Ich habe die Milch aufgebraucht", "Nimm ein Hackfleisch aus dem
+      Gefrierschrank". Mit weggeworfen=true, wenn der Nutzer es wegwirft. Ist
+      status "frage", stelle die Frage aus "antwort" und rufe erneut auf. Lies
+      sonst "antwort" vor.
+    mode: queued
+    fields:
+      name:
+        description: Produkt, z. B. "Milch".
+        required: true
+        example: Milch
+        selector:
+          text:
+      ort:
+        description: Lagerort, nur wenn der Nutzer ihn nennt.
+        selector:
+          text:
+      weggeworfen:
+        description: true, wenn das Lebensmittel weggeworfen wird statt verbraucht.
+        default: false
+        selector:
+          boolean:
+    sequence:
+      - action: rest_command.lebensmittel_sprache
+        data:
+          pfad: auslagern
+          daten:
+            name: "{{ name | default('') }}"
+            ort: "{{ ort | default('') }}"
+            weggeworfen: "{{ weggeworfen | default(false) | bool }}"
+        response_variable: http
+      - variables:
+          ergebnis: >-
+            {{ http.content if http.status == 200 and http.content is mapping
+               else {'status': 'fehler', 'antwort': 'Das Lager ist gerade nicht erreichbar.'} }}
+      - stop: ""
+        response_variable: ergebnis
+
+  lager_etikett:
+    alias: "Lager: Einlagern und Etikett drucken"
+    icon: mdi:label-outline
+    description: >-
+      Lagert ein Lebensmittel ein und druckt das Etikett, Schritt für Schritt.
+      Rufe es mit allem auf, was der Nutzer schon gesagt hat. Antwortet es mit
+      status "frage", stelle dem Nutzer genau die Frage aus "antwort" und rufe
+      danach erneut auf - mit allen bisherigen Angaben plus der neuen. Bei
+      status "bestaetigen" lies "antwort" vor; sagt der Nutzer ja, rufe mit den
+      Werten aus "werte" und bestaetigt=true auf, sonst ändere, was er
+      korrigiert. Erfinde nie ein MHD und setze bestaetigt nie ohne sein Ja.
+    mode: queued
+    fields:
+      name:
+        description: Was eingelagert wird, z. B. "Hackfleisch".
+        example: Hackfleisch
+        selector:
+          text:
+      ort:
+        description: Lagerort, z. B. "Gefrierschrank".
+        selector:
+          text:
+      mhd:
+        description: >-
+          Mindesthaltbarkeitsdatum wie gesagt ("8. November", "in 5 Tagen",
+          "morgen") oder "kein". Leer lassen, wenn der Nutzer keins nennt - dann
+          kommt ein Vorschlag.
+        selector:
+          text:
+      menge:
+        description: Menge je Packung, z. B. "500 g", "1 Liter", "3 Stück".
+        selector:
+          text:
+      anzahl:
+        description: Zahl der Packungen = Zahl der Etiketten (Standard 1).
+        selector:
+          number:
+            min: 1
+            max: 20
+      terminal:
+        description: Name des Terminals zum Drucken, nur wenn danach gefragt wurde.
+        selector:
+          text:
+      drucken:
+        description: false, wenn nur eingelagert und nichts gedruckt werden soll.
+        default: true
+        selector:
+          boolean:
+      bestaetigt:
+        description: Erst true, nachdem der Nutzer die Zusammenfassung bestätigt hat.
+        default: false
+        selector:
+          boolean:
+    sequence:
+      - action: rest_command.lebensmittel_sprache
+        data:
+          pfad: etikett
+          daten:
+            name: "{{ name | default('') }}"
+            ort: "{{ ort | default('') }}"
+            mhd: "{{ mhd | default('') }}"
+            menge: "{{ menge | default('') }}"
+            anzahl: "{{ anzahl | default(1) | int(1) }}"
+            terminal: "{{ terminal | default('') }}"
+            drucken: "{{ drucken | default(true) | bool }}"
+            bestaetigt: "{{ bestaetigt | default(false) | bool }}"
+        response_variable: http
+      - variables:
+          ergebnis: >-
+            {{ http.content if http.status == 200 and http.content is mapping
+               else {'status': 'fehler', 'antwort': 'Das Lager ist gerade nicht erreichbar.'} }}
+      - stop: ""
+        response_variable: ergebnis

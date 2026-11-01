@@ -23,7 +23,7 @@ server/app/
   services/      inventory · labels · calibration · categories · openfoodfacts ·
                  notify · scheduler · dates · mengen · settings_store · seed · importer ·
                  firmware · updates · deploy · zeichen · hochformat · haushalte ·
-                 druckertest · mhd_ocr (MHD vom Foto, lokal) ·
+                 druckertest · mhd_ocr (MHD vom Foto, lokal) · sprache (Assist) ·
                  brother (TD-2020A am WLAN-Printserver) · brother_layouts
   fonts/         DejaVu Sans fuer das Hochformat-Bild (im Repo, damit Test und
                  Container gleich umbrechen)
@@ -242,6 +242,7 @@ cd firmware && pio run --target upload # flashen
 | Übersicht-Kachel führt ins falsche Inventar / Filter weg nach Neuladen | Ziele mit Filter heißen `inventory?frist=bald&location=…` (`showPage`). Nur ein Ziel **mit** „?“ setzt die Filter, der Reiter lässt sie stehen; `loadInventory()` schreibt sie per `replaceState` in die Adresse, `hashchange` liest Lesezeichen. `frist` (`bald`/`abgelaufen`) filtert serverseitig in `GET /api/inventory` |
 | Seitennavigation / Einstellung finden | `seitenNavBauen()` baut auf Etiketten, Stammdaten, Terminals, System links (schmal: Leiste oben) ein Verzeichnis aus den `h2` der Karten – neue Karten erscheinen von selbst. Die Suche oben (`#einst-q`, Taste `/`) durchsucht `label.field` (Text, Hinweis, `data-setting`-Schlüssel), Überschriften und `summary` aller Seiten; `hinspringen()` öffnet umgebende `<details>` |
 | Haltbarkeitsbalken | `mhdBalken()`/`mhdAnteil()` in `api.js`: Anteil von Einlagerdatum bis MHD, der schon vorbei ist – Inventar, Übersicht, Handy |
+| Sprachassistent (Home Assistant) | `POST /api/sprache/{bestand,ablauf,auslagern,etikett}` (`services/sprache.py`, Anmeldung `Authorization: Bearer <SPRACHE_TOKEN>` oder wie die Oberfläche). Jede Antwort hat `antwort` (zum Vorlesen) und `status` `info`/`frage`/`bestaetigen`/`erledigt`. Geführt wird vom Server, der Zustand reist mit dem Aufrufer: bei `frage` stehen `fehlt`/`optionen`, bei `bestaetigen` die `werte`, die mit `bestaetigt: true` zurückkommen – erst dann wird angelegt (über `api.labels.etiketten_anlegen`, derselbe Weg wie im Web). MHD gesprochen: `mhd_lesen()` („morgen“, „in 5 Tagen“, „8. November“, „kein“), leer = Vorschlag aus Vorlage/Kategorie, im Gefrierschrank verlängert wie am Terminal. Auslagern nimmt das früheste MHD, Grund `sprache` bzw. `weggeworfen`. HA-Seite: `deploy/homeassistant/lebensmittel_lager.yaml` (ein `rest_command`, vier Skripte für ein LLM-Assist) |
 | Brother-Dienst | `brother.start()` in der Lifespan, Takt 2 s solange offen, sonst schlaeft er bis `brother.anstossen()` (nach dem **commit** aufrufen) oder 60 s. Printserver nicht erreichbar: Fehler steht am Auftrag, Versuche zaehlen nicht. Tests stellen den Printserver per `brother._transport` (httpx-MockTransport) nach |
 
 ## Entwicklungsregeln

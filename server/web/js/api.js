@@ -212,7 +212,7 @@ export function eventName(type) {
 
 const REASONS = {
   scan: 'per Scan', web: 'im Web', mobile: 'am Handy', manual: 'von Hand',
-  expired: 'abgelaufen', import: 'beim Import', weggeworfen: 'weggeworfen',
+  expired: 'abgelaufen', import: 'beim Import', weggeworfen: 'weggeworfen', sprache: 'per Sprache',
 };
 
 const FIELD_NAMES = {
