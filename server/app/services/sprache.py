@@ -364,10 +364,12 @@ async def etikett(session: AsyncSession, *, name: str = "", menge=None, einheit:
                        fehlt="ort", optionen=namen, werte={"name": name})
 
     # MHD: eigenes Datum, "kein", oder der Vorschlag aus Vorlage/Kategorie.
-    vorschlag = await haltbarkeit.vorschlag(
-        session, ort=ort_name, kategorie=kategorie,
-        eigene_tage=vorlage.shelf_days if vorlage else 0,
-        vorlage=vorlage.haltbarkeit if vorlage else None, herkunft="Vorlage")
+    # Wie GET /api/haltbarkeit/eingefroren: die Vorlage zaehlt fuer Vorschlag
+    # *und* Verlaengerung - sonst rechnete der Gefrierschrank mit der Kategorie.
+    nach_vorlage = ({"eigene_tage": 0 if vorlage.haltbarkeit else vorlage.shelf_days,
+                     "vorlage": vorlage.haltbarkeit, "herkunft": "Vorlage"} if vorlage else {})
+    vorschlag = await haltbarkeit.vorschlag(session, ort=ort_name, kategorie=kategorie,
+                                            **nach_vorlage)
     if mhd is None or _norm(mhd) in _VORSCHLAG or _norm(mhd) == "":
         if vorschlag["datum"]:
             mhd_iso = vorschlag["datum"]          # in der Bestaetigung genannt
@@ -384,7 +386,8 @@ async def etikett(session: AsyncSession, *, name: str = "", menge=None, einheit:
     # Gefrierschrank: ein aufgedrucktes MHD wird verlaengert (wie am Terminal).
     hinweis = ""
     if mhd_iso and mhd_iso != vorschlag["datum"]:
-        neu = await haltbarkeit.eingefroren(session, mhd=mhd_iso, ort=ort_name, kategorie=kategorie)
+        neu = await haltbarkeit.eingefroren(session, mhd=mhd_iso, ort=ort_name, kategorie=kategorie,
+                                            **nach_vorlage)
         if neu.get("verlaengert"):
             hinweis = f" Aufgedruckt war {to_display(mhd_iso)}, im Gefrierschrank verlängert."
             mhd_iso = neu["datum"]

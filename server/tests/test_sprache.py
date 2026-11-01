@@ -167,3 +167,15 @@ def test_unbekannter_haushalt_fragt_statt_alle(client):
         assert r["status"] == "frage" and r["fehlt"] == "haushalt", pfad
     # nichts ausgelagert
     assert len(client.get("/api/inventory", params={"q": name}).json()) == 1
+
+
+def test_gefrierschrank_verlaengert_nach_vorlage(client):
+    """Die Vorlage (30 Tage gefroren) gilt, nicht die Kategorie (180 Tage)."""
+    name = _name("Lachs")
+    client.post("/api/templates", json={"name": name, "category": "Fleisch & Fisch",
+                                        "haltbarkeit": {"kuehl": 2, "tiefkuehl": 30}})
+    r = client.post("/api/sprache/etikett", json={
+        "name": name, "ort": "Gefrierschrank", "mhd": "morgen"}).json()
+    assert r["status"] == "bestaetigen"
+    assert r["werte"]["mhd"] == (date.today() + timedelta(days=30)).isoformat()
+    assert "verlängert" in r["antwort"]
