@@ -212,6 +212,51 @@ async def druckereinstellungen_setzen(body: dict[str, int], request: Request, dr
         raise HTTPException(409, str(e)) from e
 
 
+@router.get("/usb-einstellungen")
+async def usb_einstellungen_liste():
+    """Was sich am Brother am USB eines Terminals setzen laesst (ohne aktuellen
+    Wert - das Terminal kann den Drucker nicht abfragen)."""
+    return {"einstellungen": brother.einstellungen_liste()}
+
+
+@router.post("/usb-einstellungen")
+async def usb_einstellung_setzen(body: dict[str, int], device_id: str,
+                                 session: AsyncSession = Depends(get_session)):
+    """Einstellung im Brother am USB-Anschluss des Terminals setzen, z. B.
+    {"print_priority": 1}. Die Bytes gehen als usbdruck-Auftrag hinaus; eine
+    negative Nummer, damit die Firmware kein print_result meldet und kein
+    echter Druckauftrag betroffen ist."""
+    import base64
+    import time
+
+    from ..device import protocol as proto
+    from ..device import workflow
+    from ..models import Device
+
+    try:
+        daten = b"".join(brother.einstellung_befehl(k, int(v)) for k, v in body.items())
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    if not body:
+        raise HTTPException(422, "Keine Einstellung angegeben")
+    geraet = (await session.execute(
+        select(Device).where(Device.device_id == device_id))).scalar_one_or_none()
+    if geraet is None:
+        raise HTTPException(404, "Terminal unbekannt")
+    if geraet.drucker != "usb":
+        raise HTTPException(409, "Am Terminal ist kein Brother per USB eingestellt")
+    caps = workflow.session_for(device_id).caps
+    if device_id not in hub.online_ids() or caps is None:
+        raise HTTPException(409, "Terminal ist nicht verbunden")
+    if proto.USB_DRUCK not in caps:
+        raise HTTPException(409, "Firmware des Terminals kann noch nicht per USB drucken")
+    nummer = -(int(time.time() * 1000) % 1_000_000_000) - 1
+    if not await hub.send_to(device_id, proto.usb_druck(
+            nummer, 0, True, base64.b64encode(daten).decode("ascii"))):
+        raise HTTPException(409, "Terminal ist nicht verbunden")
+    return {"ok": True, "gesendet": sorted(body)}
+
+
 @router.post("/treiberdatei")
 async def treiberdatei(datei: UploadFile = File(...),
                        session: AsyncSession = Depends(get_session)):
