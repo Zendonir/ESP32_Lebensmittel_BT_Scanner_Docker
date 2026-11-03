@@ -41,6 +41,7 @@ import io
 import json
 import logging
 import pathlib
+import time
 from typing import Any
 
 import httpx
@@ -1078,15 +1079,43 @@ def _drucker_von(cfg: dict, job: PrintJob) -> dict | None:
     return drucker_fuer(cfg, job.household or "")
 
 
+# Wann je Drucker zuletzt ein Etikett fertig war (time.monotonic) - fuer die
+# Pause zwischen zwei Etiketten (brother.pause_s).
+_zuletzt_fertig: dict[str, float] = {}
+
+
+def pause_s(cfg: dict) -> float:
+    """Eingestellte Pause zwischen zwei Etiketten, 0..60 s."""
+    try:
+        return max(0.0, min(60.0, float(cfg.get("pause_s") or 0)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def pause_rest(schluessel: str, pause: float, jetzt: float | None = None) -> float:
+    """Wie lange noch zu warten ist, bevor das naechste Etikett hinaus darf."""
+    if pause <= 0 or schluessel not in _zuletzt_fertig:
+        return 0.0
+    jetzt = time.monotonic() if jetzt is None else jetzt
+    return max(0.0, _zuletzt_fertig[schluessel] + pause - jetzt)
+
+
+def fertig_gemerkt(schluessel: str, jetzt: float | None = None) -> None:
+    _zuletzt_fertig[schluessel] = time.monotonic() if jetzt is None else jetzt
+
+
 async def _durchgang_drucker(cfg: dict, jobs: list[PrintJob],
                              printer_cfg: dict) -> tuple[bool, str]:
     """Die Auftraege eines Druckers abgeben und abgleichen."""
     erreichbar, sperre = True, ""
+    schluessel = f"wlan:{cfg.get('drucker_id', '')}"
     async with _client(cfg) as client:
         # Erst abgleichen, was schon beim Printserver liegt - das macht
         # Platz und holt ungedruckt Aufgegebenes zurueck.
         for job in [j for j in jobs if j.status == "sent"]:
             erreichbar = await _abgleichen(client, job)
+            if job.status == "done":
+                fertig_gemerkt(schluessel)
             if not erreichbar:
                 break
         wartend = [j for j in jobs if j.status == "queued"]
@@ -1110,6 +1139,13 @@ async def _durchgang_drucker(cfg: dict, jobs: list[PrintJob],
                     if frisch is not None:
                         sperre = medium_abweichung(soll, frisch)
         platz = MAX_UNTERWEGS - sum(1 for j in jobs if j.status == "sent")
+        pause = pause_s(cfg)
+        if pause:
+            # Mit Pause: hoechstens eins unterwegs (auch ueber Durchgaenge
+            # hinweg), und erst wenn die Pause nach dem letzten fertigen um
+            # ist. Der Dienst fragt alle 2 s wieder.
+            unterwegs = sum(1 for j in jobs if j.status == "sent")
+            platz = 0 if unterwegs or pause_rest(schluessel, pause) else 1
         for job in wartend:
             if sperre:
                 job.error = sperre[:255]

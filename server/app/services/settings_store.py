@@ -137,6 +137,10 @@ DEFAULTS: dict[str, Any] = {
         # Wohin gedruckt wird, wenn beim Drucken nichts gewaehlt ist (Terminal,
         # Nachdruck, Web-Vorauswahl): "brother" | "terminal".
         "standardziel": "brother",
+        # Pause zwischen zwei Etiketten in Sekunden (WLAN und USB). 0 = ohne.
+        # Mit Pause geht immer nur ein Etikett zugleich hinaus; der Druckkopf
+        # kuehlt dazwischen ab - gegen blasse Folgeetiketten.
+        "pause_s": 0,
         # Etikettensorte: Schluessel aus brother_vorlagen.json (Kopf aus einer
         # Druckdatei des Brother-Treibers), "treiberdatei" (selbst eingelesen)
         # oder "keine" = ohne Vorlage, dann gelten medium/breite_mm/laenge_mm.
