@@ -204,3 +204,61 @@ def test_usb_brother_druckt_auf_der_sorte_des_terminals(client):
     stelle = daten.find(b"\x1biz")
     # ESC i z: [gueltig, medium, breite_mm, laenge_mm, ...]
     assert stelle > 0 and (daten[stelle + 5], daten[stelle + 6]) == (57, 32)
+
+
+# ------------------------------------------- Einstellungen im USB-Brother
+def test_einstellung_befehl_wie_printserver():
+    from app.services import brother
+
+    daten = brother.einstellung_befehl("print_priority", 1)
+    # 200 x NUL, ESC @, ESC i a 01, ESC i X q 32h 01h 00h 01h (brother_status.c)
+    assert daten[:200] == b"\x00" * 200
+    assert daten[200:] == b"\x1b@\x1bia\x01" + bytes([0x1B, 0x69, 0x58, ord("q"), 0x32, 0x01, 0x00, 1])
+    with pytest.raises(ValueError):
+        brother.einstellung_befehl("print_priority", 7)
+    with pytest.raises(ValueError):
+        brother.einstellung_befehl("druckdichte", 1)
+    keys = [e["key"] for e in brother.einstellungen_liste()]
+    assert "print_priority" in keys and "command_mode" in keys
+
+
+def test_usb_einstellung_geht_als_usbdruck_ans_terminal():
+    from fastapi import HTTPException
+
+    from app.api import brother as brother_api
+
+    async def scenario():
+        await init_db()
+        geraet = f"usbset-{uuid.uuid4().hex[:6]}"
+        async with session_scope() as session:
+            session.add(Device(device_id=geraet, name="Küche", drucker="usb"))
+            await session.commit()
+        socket = _Socket()
+        conn = await hub.register(geraet, socket)
+        sess = workflow.session_for(geraet)
+        sess.caps, sess.drucker = {"usb", proto.USB_DRUCK}, "usb"
+        try:
+            async with session_scope() as session:
+                r = await brother_api.usb_einstellung_setzen({"print_priority": 1}, geraet, session)
+                assert r["ok"]
+                with pytest.raises(HTTPException) as falsch:
+                    await brother_api.usb_einstellung_setzen({"print_priority": 9}, geraet, session)
+                assert falsch.value.status_code == 422
+        finally:
+            await hub.unregister(conn)
+            workflow.drop_session(geraet)
+        # nicht verbunden
+        async with session_scope() as session:
+            with pytest.raises(HTTPException) as weg:
+                await brother_api.usb_einstellung_setzen({"print_priority": 1}, geraet, session)
+        assert weg.value.status_code == 409
+        return socket.gesendet
+
+    nachrichten = [m for m in _run(scenario()) if m["t"] == "usbdruck"]
+    assert len(nachrichten) == 1
+    m = nachrichten[0]
+    # negative Nummer: kein Druckauftrag, kein print_result
+    assert m["job"] < 0 and m["teil"] == 0 and m["letzter"]
+    assert base64.b64decode(m["daten"]).endswith(
+        bytes([0x1B, 0x69, 0x58, ord("q"), 0x32, 0x01, 0x00, 1]))
+    assert brother_api.brother.einstellungen_liste()

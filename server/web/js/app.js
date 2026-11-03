@@ -1408,7 +1408,18 @@ function usbFelder(d) {
       <select data-dev-brotheretikett="${esc(d.device_id)}">
         <option value="" ${d.brother_etikett ? '' : 'selected'}>Standard (Etiketten → Brother-Etikett)</option>
         ${brotherSortenOptionen(state.brotherSorten, d.brother_etikett)}
-      </select><span class="hint">Aussehen des Etiketts: Etiketten → Brother-Etikett</span></label>` : ''}
+      </select><span class="hint">Aussehen des Etiketts: Etiketten → Brother-Etikett</span></label>
+    <details style="margin-top:8px"${offeneUsbEinstellungen.has(d.device_id) ? ' open' : ''} data-usb-einst-box="${esc(d.device_id)}">
+      <summary><b>Einstellungen im Drucker</b> – z. B. Druckpriorität</summary>
+      <p class="hint" style="margin:6px 0">Werden im Brother gespeichert und gelten, bis man sie ändert.
+        Über USB lässt sich der Drucker nicht abfragen – angezeigt wird nur, was hier gesetzt wird.
+        Druckdichte gibt es nur im Brother „Printer Setting Tool“.</p>
+      <div class="settings-grid">${(state.usbEinstellungen || []).map((e) => `<label class="field">${esc(e.name)}
+        <select data-usb-einst="${esc(e.key)}" data-device="${esc(d.device_id)}">
+          <option value="">– unverändert –</option>
+          ${e.optionen.map((o) => `<option value="${o.wert}"${usbGesetzt[`${d.device_id}/${e.key}`] === o.wert ? ' selected' : ''}>${esc(o.text)}</option>`).join('')}
+        </select>${e.warum ? `<span class="hint">${e.empfohlen !== null ? '<b>Empfohlen:</b> ' : ''}${esc(e.warum)}</span>` : ''}</label>`).join('')}
+      </div></details>` : ''}
     <label class="row tight" style="margin-top:8px"><input type="checkbox" data-dev-usbscanner="${esc(d.device_id)}"
       ${d.usb_scanner ? 'checked' : ''}> Barcodescanner am USB-Anschluss</label>
     ${braucht ? (caps.includes('usb')
@@ -1416,6 +1427,28 @@ function usbFelder(d) {
     : '<div class="notice" style="margin-top:8px"><span>Für USB braucht das Terminal eine neuere Firmware – „Firmware-Update“.</span></div>') : ''}
     ${!braucht && usb.aktiv ? '<div class="muted" style="margin-top:6px">USB ist noch an – aus erst nach einem Neustart des Terminals.</div>' : ''}`;
 }
+
+// Einstellungen des USB-Brother: nur setzen, nicht lesen (siehe usbFelder).
+// Was in dieser Sitzung gesetzt wurde, bleibt beim Neuzeichnen stehen.
+const usbGesetzt = {};
+const offeneUsbEinstellungen = new Set();
+document.addEventListener('toggle', (ev) => {
+  const box = ev.target.closest?.('details[data-usb-einst-box]');
+  if (!box) return;
+  if (box.open) offeneUsbEinstellungen.add(box.dataset.usbEinstBox);
+  else offeneUsbEinstellungen.delete(box.dataset.usbEinstBox);
+}, true);
+document.addEventListener('change', async (ev) => {
+  const sel = ev.target.closest('select[data-usb-einst]');
+  if (!sel || sel.value === '') return;
+  const id = sel.dataset.device;
+  try {
+    await post(`/api/brother/usb-einstellungen?device_id=${encodeURIComponent(id)}`,
+      { [sel.dataset.usbEinst]: Number(sel.value) });
+    usbGesetzt[`${id}/${sel.dataset.usbEinst}`] = Number(sel.value);
+    toast('An den Drucker gesendet – er speichert es selbst', 'success');
+  } catch (e) { toast(e.message, 'error'); sel.value = ''; }
+});
 
 document.addEventListener('change', async (ev) => {
   const sel = ev.target.closest('select[data-dev-drucker],input[data-dev-usbscanner],select[data-dev-brotheretikett]');
@@ -1458,6 +1491,9 @@ async function loadDevices() {
     get('/api/devices'), get('/api/households'),
     get('/api/brother/geraet').catch(() => ({ drucker: [] })),
     get('/api/brother/sorten').catch(() => [])]);
+  if (!state.usbEinstellungen) {
+    state.usbEinstellungen = (await get('/api/brother/usb-einstellungen').catch(() => ({}))).einstellungen || [];
+  }
   const brotherHtml = (brotherGeraet.drucker || []).map(brotherCard).join('');
   // Die Anleitung bleibt erreichbar, wenn schon Terminals da sind - fuer das
   // zweite oder ein ersetztes Geraet.

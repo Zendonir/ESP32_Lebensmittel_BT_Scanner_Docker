@@ -800,6 +800,53 @@ EINSTELLUNG_EMPFOHLEN = {
 }
 
 
+# Dieselben statischen Befehle, die der Printserver schickt
+# (ESP32-USB-Brother-Label-Wifi-Server, brother_status.c): Befehlsbuchstabe und
+# erlaubte Werte mit ihren Namen. Fuer den Brother am USB eines Terminals baut
+# der Server die Bytes selbst - das Terminal reicht sie nur durch.
+EINSTELLUNG_BEFEHLE = {
+    "command_mode": ("i", ((0, "ESC/P"), (1, "Raster"), (3, "P-touch Template"))),
+    "print_priority": ("q", ((0, "Speed"), (1, "Quality"))),
+    "rotate": ("h", ((0, "No rotation"), (1, "180 degrees"))),
+    "stop_position": ("^", ((0, "Tear bar"), (1, "Head"))),
+    "recovery": ("d", ((0, "Off"), (1, "On"))),
+}
+# Hinweise ohne feste Empfehlung - neben dem Feld angezeigt.
+EINSTELLUNG_HINWEIS = {
+    "print_priority": "Qualität druckt langsamer – bei blassen Etiketten ausprobieren",
+}
+
+
+def einstellungen_liste() -> list[dict]:
+    """Die setzbaren Einstellungen (ohne aktuellen Wert) - fuer den USB-Brother,
+    der sich vom Terminal aus nicht abfragen laesst."""
+    out = []
+    for key, (_, werte) in EINSTELLUNG_BEFEHLE.items():
+        empfohlen = EINSTELLUNG_EMPFOHLEN.get(key)
+        out.append({
+            "key": key,
+            "name": EINSTELLUNG_NAMEN.get(key, key),
+            "wert": -1,
+            "optionen": [{"wert": w, "text": EINSTELLUNG_WERTE.get(t, t)} for w, t in werte],
+            "empfohlen": empfohlen[0] if empfohlen else None,
+            "warum": empfohlen[1] if empfohlen else EINSTELLUNG_HINWEIS.get(key, ""),
+        })
+    return out
+
+
+def einstellung_befehl(key: str, wert: int) -> bytes:
+    """Bytes, die eine Einstellung dauerhaft im Drucker setzen: 200 x NUL
+    (bricht Reste ab), ESC @, ESC i a 01 (Rastermodus), dann
+    ESC i X <Buchstabe> 32h 01h 00h <Wert>. ValueError bei Unbekanntem."""
+    if key not in EINSTELLUNG_BEFEHLE:
+        raise ValueError(f"Unbekannte Einstellung „{key}“")
+    buchstabe, werte = EINSTELLUNG_BEFEHLE[key]
+    if wert not in [w for w, _ in werte]:
+        raise ValueError(f"Ungültiger Wert {wert} für „{EINSTELLUNG_NAMEN.get(key, key)}“")
+    return (b"\x00" * 200 + b"\x1b@" + b"\x1bia\x01"
+            + bytes([0x1B, 0x69, 0x58, ord(buchstabe), 0x32, 0x01, 0x00, wert]))
+
+
 async def druckereinstellungen(cfg: dict, aendern: dict[str, int] | None = None) -> dict:
     """Druckereinstellungen ueber den Printserver lesen und optional setzen.
 
