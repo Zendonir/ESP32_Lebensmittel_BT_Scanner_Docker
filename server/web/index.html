@@ -301,6 +301,10 @@
             <option value="terminal">Drucker am Terminal</option>
           </select>
           <span class="hint">gilt am Terminal, beim Nachdruck und als Vorauswahl im Web</span></label>
+        <label class="field">Pause zwischen Etiketten (s)
+          <input data-setting="brother.pause_s" data-art="float" type="number" min="0" max="60" step="0.5">
+          <span class="hint">0 = ohne · mit Pause geht ein Etikett nach dem anderen hinaus, der Druckkopf
+            kühlt dazwischen ab – gegen blasse Folgeetiketten (WLAN und USB)</span></label>
       </div>
       <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;align-items:flex-start">
         <figure style="margin:0"><figcaption class="muted">Standard-Etikettensorte (Vorschau und USB-Terminals ohne eigene Wahl)

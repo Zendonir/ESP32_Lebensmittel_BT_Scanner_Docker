@@ -262,3 +262,63 @@ def test_usb_einstellung_geht_als_usbdruck_ans_terminal():
     assert base64.b64decode(m["daten"]).endswith(
         bytes([0x1B, 0x69, 0x58, ord("q"), 0x32, 0x01, 0x00, 1]))
     assert brother_api.brother.einstellungen_liste()
+
+
+# ------------------------------------------- Pause zwischen zwei Etiketten
+def test_pause_rest():
+    from app.services import brother
+
+    assert brother.pause_s({"pause_s": "2.5"}) == 2.5
+    assert brother.pause_s({"pause_s": 500}) == 60 and brother.pause_s({}) == 0
+    brother.fertig_gemerkt("t:x", jetzt=100.0)
+    assert brother.pause_rest("t:x", 3, jetzt=101.0) == 2.0
+    assert brother.pause_rest("t:x", 3, jetzt=104.0) == 0
+    assert brother.pause_rest("t:x", 0, jetzt=100.0) == 0
+    assert brother.pause_rest("t:unbekannt", 3) == 0
+
+
+def test_usb_pause_druckt_eins_nach_dem_anderen():
+    from app.services import settings_store
+
+    async def scenario():
+        await init_db()
+        geraet = f"pause-{uuid.uuid4().hex[:6]}"
+        async with session_scope() as session:
+            for job in (await session.execute(select(PrintJob))).scalars().all():
+                await session.delete(job)
+            brother_cfg = await settings_store.get(session, "brother", {})
+            await settings_store.put(session, "brother", {**brother_cfg, "pause_s": 0.3})
+            labels_ = [f"LEB{uuid.uuid4().int % 10**6:06d}" for _ in range(2)]
+            for label in labels_:
+                session.add(InventoryItem(label=label, name="Pils", expiry_date="2027-03-23",
+                                          quantity=330, unit="ml"))
+                session.add(PrintJob(label=label, status="queued", payload={}))
+            await session.commit()
+        socket = _Socket()
+        conn = await hub.register(geraet, socket)
+        sess = workflow.session_for(geraet)
+        sess.caps, sess.drucker = {"usb", proto.USB_DRUCK}, "usb"
+        try:
+            jobs = lambda: [m["job"] for m in socket.gesendet  # noqa: E731
+                            if m["t"] == "usbdruck" and m["teil"] == 0]
+            async with session_scope() as session:
+                assert await workflow.flush_print_queue(session, geraet) == 1
+                erster = jobs()
+                assert len(erster) == 1
+                # Solange das erste unterwegs ist, geht nichts weiter
+                assert await workflow.flush_print_queue(session, geraet) == 0
+                # Fertig gemeldet: das zweite wartet die Pause ab ...
+                await workflow.on_print_result(session, erster[0], True, device_id=geraet)
+                assert len(jobs()) == 1
+            await asyncio.sleep(0.6)
+            # ... und kommt dann von selbst
+            assert len(jobs()) == 2
+        finally:
+            await hub.unregister(conn)
+            workflow.drop_session(geraet)
+            async with session_scope() as session:
+                brother_cfg = await settings_store.get(session, "brother", {})
+                await settings_store.put(session, "brother", {**brother_cfg, "pause_s": 0})
+                await session.commit()
+
+    _run(scenario())

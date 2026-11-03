@@ -1730,6 +1730,20 @@ async def flush_print_queue(
     ).scalars().all()
 
     if session_for(device_id).drucker == "usb":
+        # Pause zwischen zwei Etiketten (brother.pause_s): eins nach dem
+        # anderen, das naechste erst, wenn die Pause nach dem letzten fertigen
+        # um ist - dann schickt ein geplanter Durchgang es los.
+        pause = brother.pause_s(await settings_store.get(session, "brother", {}) or {})
+        if pause and jobs:
+            if not resend_in_flight and unterwegs:
+                await session.commit()
+                return 0
+            rest = brother.pause_rest(f"usb:{device_id}", pause)
+            if rest > 0:
+                await session.commit()
+                _spaeter_flushen(device_id, rest)
+                return 0
+            jobs = jobs[:1]
         return await _usb_senden(session, conn, device_id, jobs)
 
     # Was das Terminal kann, aus seinem hello() in *dieser* Verbindung. Ein
@@ -1883,7 +1897,37 @@ async def on_print_result(
     # Geraet neu verband. Ein fehlgeschlagener Auftrag wird hier bewusst nicht
     # sofort wiederholt - sonst dreht sich ein Drucker ohne Papier im Kreis.
     if ok and device_id:
+        if session_for(device_id).drucker == "usb":
+            brother.fertig_gemerkt(f"usb:{device_id}")
         await flush_print_queue(session, device_id)
+
+
+# Je Terminal hoechstens ein geplanter Durchgang nach der Pause. Die Tasks
+# werden gehalten, sonst raeumt der Garbage Collector sie vorzeitig ab.
+_geplant: dict[str, object] = {}
+
+
+def _spaeter_flushen(device_id: str, sekunden: float) -> None:
+    import asyncio
+
+    if device_id in _geplant:
+        return
+
+    async def lauf() -> None:
+        try:
+            await asyncio.sleep(sekunden + 0.05)
+        finally:
+            # Vor dem Durchgang freigeben - plant er selbst neu, muss das gehen.
+            _geplant.pop(device_id, None)
+        try:
+            from ..db import session_scope
+
+            async with session_scope() as session:
+                await flush_print_queue(session, device_id)
+        except Exception:      # ein verpasster Durchgang holt der naechste nach
+            log.exception("Geplanter Druckdurchgang fuer %s", device_id)
+
+    _geplant[device_id] = asyncio.get_running_loop().create_task(lauf())
 
 
 # ---------------------------------------------------------------------------

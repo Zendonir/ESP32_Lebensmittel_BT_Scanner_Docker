@@ -834,3 +834,25 @@ def test_standardsorte_ist_gespeichert(client, server):
         assert client.get("/api/brother").json()["vorschau_sorte"] == "rd-50x30"
     finally:
         client.patch("/api/settings/brother", json={"etikett": ""})
+
+
+def test_pause_zwischen_etiketten_wlan(client, server, monkeypatch):
+    """Mit Pause: eins zugleich, das naechste erst, wenn die Pause nach dem
+    letzten fertigen um ist."""
+    client.patch("/api/settings/brother", json={"pause_s": 5})
+    try:
+        a, b = (client.post("/api/labels", json={"name": f"Pause {n}"}).json()["labels"][0]
+                for n in "AB")
+        uhr = [1000.0]
+        monkeypatch.setattr(brother.time, "monotonic", lambda: uhr[0])
+        _durchgang()
+        assert (_job(a).status, _job(b).status) == ("sent", "queued")
+        # Das erste ist fertig - das zweite wartet die Pause ab
+        server.jobs[_job(a).payload["brother"]["id"]].update(state="printed", message="printed")
+        _durchgang()
+        assert (_job(a).status, _job(b).status) == ("done", "queued")
+        uhr[0] += 6
+        _durchgang()
+        assert _job(b).status == "sent"
+    finally:
+        client.patch("/api/settings/brother", json={"pause_s": 0})
