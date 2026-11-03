@@ -53,9 +53,11 @@
     .swipe-inner .t { font-weight: 600; }
     .swipe-inner .s { color: var(--muted); font-size: 13px; margin-top: 2px; }
     /* Inventar kompakt: Name und Resttage in einer Zeile, darunter der Rest.
-       Die Etikettnummer steht nicht da - auf dem Etikett sieht man sie nicht,
-       gebraucht wird sie nur intern (data-label) fuer Auslagern/Nachdruck. */
+       Von der Etikettnummer stehen nur die letzten Stellen da (.nr) - genug,
+       um bei gleichen Packungen die richtige fuer den Nachdruck zu finden. */
     .swipe-inner .kopf { display: flex; align-items: center; gap: 8px; }
+    .swipe-inner .kopf .nr { flex: none; font-family: var(--mono); font-size: 12px; color: var(--muted);
+      padding: 1px 6px; border: 1px solid var(--border); border-radius: 6px; }
     .swipe-inner .kopf .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .swipe-inner .kopf .pill { flex: none; }
     #m-list { gap: 6px; }
@@ -287,11 +289,16 @@ async function fillList() {
   const leer = suche ? `Nichts gefunden für „${esc(suche)}“.` : 'Nichts vorhanden.';
   const fremd = (i) => (HAUSHALT && i.household !== HAUSHALT.name
     ? ` <span class="pill warn">🏠 ${esc(i.household)}</span>` : '');
+  // Letzte vier Ziffern der Etikettnummer ("LEB000123" -> "#0123").
+  const nummer = (label) => {
+    const ziffern = String(label || '').replace(/\D/g, '');
+    return ziffern ? `<span class="nr" title="Etikett ${esc(label)}">#${esc(ziffern.slice(-4))}</span>` : '';
+  };
   const karte = (i, titel, zeile) => `
     <div class="swipe" data-label="${esc(i.label)}">
       <div class="swipe-action">auslagern</div>
       <div class="swipe-inner" role="button" tabindex="0" aria-expanded="false">
-        <div class="kopf"><div class="t">${titel}</div>${daysPill(i.days_left)}</div>
+        <div class="kopf"><div class="t">${titel}</div>${nummer(i.label)}${daysPill(i.days_left)}</div>
         ${zeile ? `<div class="s">${zeile}</div>` : ''}
         ${mhdBalken(i)}
         <div class="acts" hidden>
