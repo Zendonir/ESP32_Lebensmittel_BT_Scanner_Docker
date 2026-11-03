@@ -288,11 +288,20 @@ def test_usb_pause_druckt_eins_nach_dem_anderen():
                 await session.delete(job)
             brother_cfg = await settings_store.get(session, "brother", {})
             await settings_store.put(session, "brother", {**brother_cfg, "pause_s": 0.3})
+            # Vorneweg ein Auftrag, der hier scheitert (zu viele Versuche) -
+            # er darf die folgenden nicht aufhalten.
+            session.add(PrintJob(label="KAPUTT", status="queued", payload={}, attempts=5))
             labels_ = [f"LEB{uuid.uuid4().int % 10**6:06d}" for _ in range(2)]
             for label in labels_:
                 session.add(InventoryItem(label=label, name="Pils", expiry_date="2027-03-23",
                                           quantity=330, unit="ml"))
                 session.add(PrintJob(label=label, status="queued", payload={}))
+            session.add(Device(device_id=geraet, name="Küche", drucker="usb"))
+            # Ein anderes Terminal hat gerade etwas unterwegs - das bremst dieses nicht
+            anderes = Device(device_id=f"anders-{uuid.uuid4().hex[:6]}", name="Keller")
+            session.add(anderes)
+            await session.flush()
+            session.add(PrintJob(label="ANDERS", status="sent", payload={}, device_pk=anderes.id))
             await session.commit()
         socket = _Socket()
         conn = await hub.register(geraet, socket)

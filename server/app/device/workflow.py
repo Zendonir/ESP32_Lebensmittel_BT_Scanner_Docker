@@ -1734,8 +1734,15 @@ async def flush_print_queue(
         # anderen, das naechste erst, wenn die Pause nach dem letzten fertigen
         # um ist - dann schickt ein geplanter Durchgang es los.
         pause = brother.pause_s(await settings_store.get(session, "brother", {}) or {})
+        hoechstens = None
         if pause and jobs:
-            if not resend_in_flight and unterwegs:
+            # Nur was an *diesem* Terminal unterwegs ist - ein anderes
+            # Terminal darf dieses nicht aufhalten.
+            hier = 0 if resend_in_flight or pk is None else (await session.execute(
+                select(func.count()).select_from(PrintJob).where(
+                    PrintJob.status == "sent", PrintJob.ziel == "",
+                    PrintJob.device_pk == pk))).scalar_one()
+            if hier:
                 await session.commit()
                 return 0
             rest = brother.pause_rest(f"usb:{device_id}", pause)
@@ -1743,8 +1750,8 @@ async def flush_print_queue(
                 await session.commit()
                 _spaeter_flushen(device_id, rest)
                 return 0
-            jobs = jobs[:1]
-        return await _usb_senden(session, conn, device_id, jobs)
+            hoechstens = 1
+        return await _usb_senden(session, conn, device_id, jobs, hoechstens, pk)
 
     # Was das Terminal kann, aus seinem hello() in *dieser* Verbindung. Ein
     # Hochformat-Etikett an eine Firmware ohne Bildstreifen zu schicken
@@ -1824,7 +1831,8 @@ async def _usb_daten(session: AsyncSession, job: PrintJob, cfg: dict,
         return f"Etikett nicht darstellbar: {e}"
 
 
-async def _usb_senden(session: AsyncSession, conn, device_id: str, jobs: list[PrintJob]) -> int:
+async def _usb_senden(session: AsyncSession, conn, device_id: str, jobs: list[PrintJob],
+                      hoechstens: int | None = None, pk: int | None = None) -> int:
     """Auftraege an ein Terminal mit Brother am USB-Anschluss: Raster in Stuecken.
 
     Die Firmware schreibt jedes Stueck sofort auf den USB-Anschluss und meldet
@@ -1844,6 +1852,10 @@ async def _usb_senden(session: AsyncSession, conn, device_id: str, jobs: list[Pr
     printer_cfg = await settings_store.get(session, "printer", {}) or {}
     sent = 0
     for job in jobs:
+        # Mit Pause zaehlt nur, was wirklich hinausging - ein hier
+        # abgelehnter Auftrag darf die folgenden nicht aufhalten.
+        if hoechstens is not None and sent >= hoechstens:
+            break
         if job.attempts >= 5:
             job.status, job.error = "failed", job.error or "zu viele Versuche"
             continue
@@ -1869,6 +1881,10 @@ async def _usb_senden(session: AsyncSession, conn, device_id: str, jobs: list[Pr
         job.status = "sent"
         job.attempts += 1
         job.error = ""
+        # Gehoert jetzt zu diesem Terminal - so zaehlt die Pause nur, was
+        # hier unterwegs ist.
+        if job.device_pk is None and pk is not None:
+            job.device_pk = pk
         sent += 1
     await session.commit()
     return sent

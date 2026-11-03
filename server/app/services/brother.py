@@ -1141,9 +1141,11 @@ async def _durchgang_drucker(cfg: dict, jobs: list[PrintJob],
         platz = MAX_UNTERWEGS - sum(1 for j in jobs if j.status == "sent")
         pause = pause_s(cfg)
         if pause:
-            # Mit Pause: eins nach dem anderen, und erst wenn die Pause nach
-            # dem letzten fertigen um ist. Der Dienst fragt alle 2 s wieder.
-            platz = min(platz, 1) if not pause_rest(schluessel, pause) else 0
+            # Mit Pause: hoechstens eins unterwegs (auch ueber Durchgaenge
+            # hinweg), und erst wenn die Pause nach dem letzten fertigen um
+            # ist. Der Dienst fragt alle 2 s wieder.
+            unterwegs = sum(1 for j in jobs if j.status == "sent")
+            platz = 0 if unterwegs or pause_rest(schluessel, pause) else 1
         for job in wartend:
             if sperre:
                 job.error = sperre[:255]

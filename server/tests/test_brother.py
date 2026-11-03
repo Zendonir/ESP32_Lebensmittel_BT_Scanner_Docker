@@ -847,6 +847,9 @@ def test_pause_zwischen_etiketten_wlan(client, server, monkeypatch):
         monkeypatch.setattr(brother.time, "monotonic", lambda: uhr[0])
         _durchgang()
         assert (_job(a).status, _job(b).status) == ("sent", "queued")
+        # Noch unterwegs: auch der naechste Durchgang schickt nichts dazu
+        _durchgang()
+        assert (_job(a).status, _job(b).status) == ("sent", "queued")
         # Das erste ist fertig - das zweite wartet die Pause ab
         server.jobs[_job(a).payload["brother"]["id"]].update(state="printed", message="printed")
         _durchgang()
