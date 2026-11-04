@@ -373,7 +373,8 @@ if (HAUSHALT) {
     a.textContent = `🏠 ${HAUSHALT.name}`;
     a.className = 'pill';
     a.style.cssText = 'text-decoration:none;margin:0 8px;white-space:nowrap';
-    const kopf = document.querySelector('body > header');
+    // body > header (Verwaltung, Handy) oder im Gehaeuse der Freitext-Seite
+    const kopf = document.querySelector('body > header, body > .shell > header');
     if (kopf) kopf.insertBefore(a, kopf.querySelector('.spacer, .linkbtn'));
     else document.body.prepend(a);
   };
