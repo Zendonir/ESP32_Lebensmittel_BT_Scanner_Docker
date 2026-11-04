@@ -49,7 +49,7 @@ from PIL import Image, ImageDraw
 from sqlalchemy import select
 
 from ..models import PrintJob
-from . import brother_layouts, hochformat
+from . import brother_layouts, freitext, hochformat
 
 log = logging.getLogger(__name__)
 
@@ -643,7 +643,7 @@ def _zeichnen(item: dict, printer_cfg: dict, w: int, h: int,
 
 
 def etikett_bild(item: dict, profil: dict, cfg: dict, printer_cfg: dict | None = None,
-                 rahmen: bool = False) -> Image.Image:
+                 rahmen: bool = False, zeichner=None) -> Image.Image:
     """Das Etikett in Druckrichtung: Breite = Etikett quer, Hoehe = Zeilen.
 
     Gezeichnet wird im Layout `cfg["layout"]` (`brother_layouts`), bei
@@ -655,7 +655,8 @@ def etikett_bild(item: dict, profil: dict, cfg: dict, printer_cfg: dict | None =
     drehung = cfg.get("drehung", "keine")
     hochkant = drehung in ("links", "rechts")
     w, h = (zeilen, breite) if hochkant else (breite, zeilen)
-    bild = _zeichnen(item, printer_cfg or {}, w, h, cfg.get("layout") or "standard")
+    bild = (zeichner(w, h) if zeichner is not None
+            else _zeichnen(item, printer_cfg or {}, w, h, cfg.get("layout") or "standard"))
     if rahmen:
         ImageDraw.Draw(bild).rectangle([0, 0, w - 1, h - 1], outline=0, width=2)
     if drehung == "180":
@@ -714,8 +715,38 @@ def rasterdaten(bild: Image.Image, profil: dict, cfg: dict) -> bytes:
     return bytes(aus)
 
 
+DREHUNGEN = ("keine", "180", "links", "rechts")
+
+
+def _freitext_cfg(daten: dict, cfg: dict) -> dict:
+    """Ein Freitext-Etikett darf anders gelesen werden als die Lebensmittel."""
+    return {**cfg, "drehung": daten["drehung"]} if daten.get("drehung") in DREHUNGEN else cfg
+
+
+def freitext_bild(daten: dict, profil: dict, cfg: dict) -> Image.Image:
+    """Freitext-Etikett (services/freitext) in Druckrichtung."""
+    return etikett_bild({}, profil, _freitext_cfg(daten, cfg),
+                        zeichner=lambda w, h: freitext.zeichnen(daten, w, h)[0])
+
+
+def freitext_vorschau(daten: dict, cfg: dict) -> dict:
+    """Vorschau in Leserichtung (so, wie man das Etikett liest) als PNG."""
+    profil = profil_aus(cfg)
+    breite, zeilen = masse(profil, cfg)
+    drehung = _freitext_cfg(daten, cfg).get("drehung", "keine")
+    w, h = (zeilen, breite) if drehung in ("links", "rechts") else (breite, zeilen)
+    bild, info = freitext.zeichnen(daten, w, h)
+    puffer = io.BytesIO()
+    hochformat.einfarbig(bild).convert("L").save(puffer, format="PNG", optimize=True)
+    return {"png": "data:image/png;base64," + base64.b64encode(puffer.getvalue()).decode("ascii"),
+            "breite": w, "hoehe": h, "breite_mm": round(w / DOTS_PER_MM, 1),
+            "hoehe_mm": round(h / DOTS_PER_MM, 1), **info}
+
+
 def auftrag_bauen(payload: dict, cfg: dict, printer_cfg: dict | None = None) -> bytes:
     profil = profil_aus(cfg)
+    if payload.get("freitext"):
+        return rasterdaten(freitext_bild(payload["freitext"], profil, cfg), profil, cfg)
     if payload.get("layout"):
         # Ein Layout-Test (POST /api/brother/test/layouts): Musterartikel im
         # genannten Layout, unabhaengig vom eingestellten.

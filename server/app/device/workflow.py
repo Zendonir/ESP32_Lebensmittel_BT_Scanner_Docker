@@ -1771,6 +1771,11 @@ async def flush_print_queue(
             job.status = "failed"
             job.error = job.error or "zu viele Versuche"
             continue
+        if (job.payload or {}).get("freitext"):
+            # Freitext zeichnet nur der Brother-Weg - ESC/POS bekaeme Muell.
+            job.status = "failed"
+            job.error = "Freitext-Etiketten gehen nur an einen Brother"
+            continue
         braucht = (job.payload or {}).get("braucht")
         noetig = [n for n in (braucht if isinstance(braucht, list) else [braucht]) if n]
         if baud != labels.BAUD_STANDARD:
@@ -1816,6 +1821,13 @@ async def _usb_daten(session: AsyncSession, job: PrintJob, cfg: dict,
     """
     import asyncio
 
+    if (job.payload or {}).get("freitext"):
+        try:
+            return await asyncio.to_thread(brother.auftrag_bauen, {"freitext": job.payload["freitext"]},
+                                           cfg, printer_cfg)
+        except Exception as e:    # Zeichnen darf den Druckweg nie anhalten
+            log.exception("Freitext-Etikett laesst sich nicht zeichnen")
+            return f"Etikett nicht darstellbar: {e}"
     item = (await session.execute(
         select(InventoryItem).where(InventoryItem.label == job.label))).scalars().first()
     if item is not None:
