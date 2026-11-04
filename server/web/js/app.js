@@ -545,6 +545,8 @@ async function loadZiele() {
   const optionen = zielOptionen(ziele);
   sel.innerHTML = optionen.map(([w, t]) => `<option value="${esc(w)}">${esc(t)}</option>`).join('');
   sel.value = zielVorauswahl(optionen, ziele.standard, vorher);
+  // Nur ein moegliches Ziel: nichts zu waehlen, also auch nichts zeigen.
+  sel.closest('label').hidden = optionen.length < 2;
 }
 $('#label-ziel').addEventListener('change', (ev) => { ev.target.dataset.gewaehlt = ev.target.value; });
 

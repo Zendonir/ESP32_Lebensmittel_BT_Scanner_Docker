@@ -12,12 +12,18 @@
     body { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
     header.ft { position: sticky; top: 0; z-index: 20; display: flex; gap: 10px; align-items: center;
       padding: 10px 14px; background: var(--surface); border-bottom: 1px solid var(--border); }
-    header.ft h1 { font-size: 16px; margin: 0; flex: 1; }
+    header.ft h1 { font-size: 16px; margin: 0; flex: 1; white-space: nowrap; }
     header.ft a { padding: 5px 10px; border: 1px solid var(--border); border-radius: 8px;
       background: var(--surface-2); color: var(--text); font-size: 13px; text-decoration: none; white-space: nowrap; }
-    main.ft { max-width: 980px; margin: 0 auto; padding: 14px; display: grid; gap: 14px;
+    main.ft { max-width: 760px; margin: 0 auto; padding: 0 14px 14px; display: grid; gap: 14px;
       grid-template-columns: minmax(0, 1fr); }
-    @media (min-width: 900px) { main.ft { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
+    /* Die Vorschau bleibt oben stehen, waehrend Text und Stile darunter
+       scrollen - man sieht jede Aenderung sofort. */
+    .vorschau-leiste { position: sticky; top: var(--kopf-h, 53px); z-index: 15; margin: 0 -14px;
+      padding: 10px 14px 8px; background: var(--bg); border-bottom: 1px solid var(--border);
+      box-shadow: 0 6px 12px -10px rgba(0,0,0,.4); }
+    .vorschau-leiste .vorschau-box { padding: 10px; }
+    .vorschau-leiste img { max-height: 26vh; width: auto; }
     .ft-werkzeug { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
     .ft-werkzeug button { min-width: 40px; }
     .ft-werkzeug .trenner { width: 1px; background: var(--border); margin: 0 4px; }
@@ -46,17 +52,17 @@
 </head>
 <body>
 <header class="ft">
-  <h1>🏷️ Freitext-Etikett</h1>
+  <h1>🏷️ Freitext</h1>
   <a href="/mobile">📦 Vorrat</a>
   <a href="/?desktop=1">🖥️ Verwaltung</a>
 </header>
 
 <main class="ft">
+  <section class="vorschau-leiste" aria-label="Vorschau">
+    <div class="vorschau-box"><img id="ft-bild" alt="Vorschau des Etiketts"></div>
+    <div class="muted" id="ft-info" style="font-size:12px;text-align:center">…</div>
+  </section>
   <section class="card" style="display:grid;gap:14px">
-    <label class="field">Drucker
-      <select id="ft-ziel"></select>
-      <span class="hint" id="ft-ziel-info"></span></label>
-
     <div>
       <div class="ft-werkzeug" role="toolbar" aria-label="Format">
         <button type="button" id="ft-fett" title="Markierten Text fett (**…**)"><b>F</b></button>
@@ -91,8 +97,9 @@
   </section>
 
   <section class="card" style="display:grid;gap:12px">
-    <div class="vorschau-box"><img id="ft-bild" alt="Vorschau des Etiketts"></div>
-    <div class="muted" id="ft-info" style="font-size:13px;text-align:center">…</div>
+    <label class="field" id="ft-ziel-feld" hidden>Drucker
+      <select id="ft-ziel"></select></label>
+    <span class="hint" id="ft-ziel-info" style="margin-top:-6px"></span>
     <div class="druck-leiste">
       <div class="anzahl">
         <button type="button" id="ft-minus" aria-label="weniger">−</button>
@@ -131,6 +138,9 @@ function zieleZeigen() {
     $('#ft-ziel-info').textContent = 'Einen Brother am WLAN-Printserver anlegen (Etiketten) oder an einem Terminal „Brother per USB“ wählen (Terminals).';
     return;
   }
+  // Nur ein Drucker: nichts zu waehlen - das Feld verschwindet, der Name
+  // steht im Hinweis unter dem Knopf.
+  $('#ft-ziel-feld').hidden = ziele.length < 2;
   sel.innerHTML = ziele.map((z) => `<option value="${esc(z.ziel)}">${esc(z.name)}${z.online ? '' : ' – nicht verbunden'}</option>`).join('');
   if (!ziele.some((z) => z.ziel === zustand.ziel)) zustand.ziel = (ziele.find((z) => z.online) || ziele[0]).ziel;
   sel.value = zustand.ziel;
@@ -138,7 +148,7 @@ function zieleZeigen() {
 }
 function zielInfo() {
   const z = ziele.find((x) => x.ziel === zustand.ziel);
-  $('#ft-ziel-info').textContent = z ? [z.sorte && `Etiketten: ${z.sorte}`,
+  $('#ft-ziel-info').textContent = z ? [ziele.length < 2 && z.name, z.sorte && `Etiketten: ${z.sorte}`,
     !z.online && 'nicht verbunden – druckt, sobald es wieder da ist'].filter(Boolean).join(' · ') : '';
 }
 
@@ -246,6 +256,13 @@ $('#ft-drucken').addEventListener('click', async (ev) => {
   } catch (e) { toast(e.message, 'error'); }
   finally { knopf.disabled = false; }
 });
+
+// Die Vorschau klebt direkt unter der Kopfzeile - deren Hoehe haengt von
+// Bildschirmbreite und Haushalt-Anzeige ab.
+const kopfHoehe = () => document.documentElement.style.setProperty(
+  '--kopf-h', `${document.querySelector('header.ft').offsetHeight}px`);
+kopfHoehe();
+addEventListener('resize', kopfHoehe);
 
 (async () => {
   $('#ft-text').value = zustand.text;
