@@ -115,9 +115,13 @@ def test_uebersicht_vorschau_und_wlan_druck(client):
     assert client.post("/api/freitext/drucken", json={"text": "  ", "ziel": "brother:ft1"}).status_code == 422
     assert client.post("/api/freitext/drucken", json={"text": "x", "ziel": "brother:gibtsnicht"}).status_code == 404
 
+    vorher = client.get("/api/labels/roll").json()
     r = client.post("/api/freitext/drucken", json={"text": "Hallo **Welt**", "stil": "balken",
                                                    "ziel": "brother:ft1", "anzahl": 3})
     assert r.status_code == 200 and len(r.json()["auftraege"]) == 3
+    # Die drei Etiketten zaehlen auf der Rolle
+    nachher = client.get("/api/labels/roll").json()
+    assert nachher["used"] == vorher["used"] + 3
     jobs = _jobs()
     assert len(jobs) == 3
     assert all(j.ziel == brother.ZIEL and j.payload["drucker"] == "ft1"

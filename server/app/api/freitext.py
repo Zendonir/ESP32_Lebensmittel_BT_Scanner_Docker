@@ -19,7 +19,7 @@ from ..db import get_session
 from ..device import workflow
 from ..device.hub import hub
 from ..models import Device, PrintJob
-from ..services import brother, freitext, haushalte, settings_store
+from ..services import brother, freitext, haushalte, labels, settings_store
 
 router = APIRouter(prefix="/api/freitext", tags=["freitext"])
 
@@ -125,6 +125,8 @@ async def drucken(body: Freitext, request: Request, session: AsyncSession = Depe
                                  household=geraet.household or "",
                                  payload={"freitext": daten}))
     session.add_all(jobs)
+    # Papier ist Papier - wie bei jedem anderen Druck auf die Rolle anrechnen.
+    await labels.consume_roll(session, len(jobs))
     await session.commit()
     if art == "brother":
         brother.anstossen()
