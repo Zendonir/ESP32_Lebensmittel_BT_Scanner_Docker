@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="de" data-theme="">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1e88e5">
+  <title>Freitext-Etikett</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <style>
+    body { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+    header.ft { position: sticky; top: 0; z-index: 20; display: flex; gap: 10px; align-items: center;
+      padding: 10px 14px; background: var(--surface); border-bottom: 1px solid var(--border); }
+    header.ft h1 { font-size: 16px; margin: 0; flex: 1; }
+    header.ft a { padding: 5px 10px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface-2); color: var(--text); font-size: 13px; text-decoration: none; white-space: nowrap; }
+    main.ft { max-width: 980px; margin: 0 auto; padding: 14px; display: grid; gap: 14px;
+      grid-template-columns: minmax(0, 1fr); }
+    @media (min-width: 900px) { main.ft { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
+    .ft-werkzeug { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+    .ft-werkzeug button { min-width: 40px; }
+    .ft-werkzeug .trenner { width: 1px; background: var(--border); margin: 0 4px; }
+    textarea#ft-text { width: 100%; min-height: 150px; font-size: 18px; line-height: 1.35; resize: vertical; }
+    .stile { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+    .stil { text-align: left; padding: 10px; border-radius: var(--radius); font-size: 13px; line-height: 1.3; }
+    .stil b { display: block; font-size: 14px; }
+    .stil span { color: var(--muted); }
+    .stil.aktiv { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary) inset; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .seg button { border: 0; border-radius: 0; background: var(--surface); padding: 7px 12px; }
+    .seg button.aktiv { background: var(--primary); color: #fff; }
+    .vorschau-box { display: grid; place-items: center; padding: 18px; border-radius: var(--radius);
+      background: repeating-conic-gradient(var(--surface-2) 0% 25%, transparent 0% 50%) 50% / 18px 18px; }
+    .vorschau-box img { max-width: 100%; background: #fff; border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,.25);
+      image-rendering: pixelated; }
+    .zuletzt { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+    .zuletzt::-webkit-scrollbar { display: none; }
+    .zuletzt button { flex: none; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+    .druck-leiste { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .druck-leiste .anzahl { display: flex; align-items: center; gap: 4px; }
+    .druck-leiste .anzahl input { width: 56px; text-align: center; }
+    .druck-leiste .primary { flex: 1; min-width: 160px; padding: 12px; font-size: 16px; }
+    .ft label.field select, .ft label.field input { width: 100%; }
+  </style>
+</head>
+<body>
+<header class="ft">
+  <h1>🏷️ Freitext-Etikett</h1>
+  <a href="/mobile">📦 Vorrat</a>
+  <a href="/?desktop=1">🖥️ Verwaltung</a>
+</header>
+
+<main class="ft">
+  <section class="card" style="display:grid;gap:14px">
+    <label class="field">Drucker
+      <select id="ft-ziel"></select>
+      <span class="hint" id="ft-ziel-info"></span></label>
+
+    <div>
+      <div class="ft-werkzeug" role="toolbar" aria-label="Format">
+        <button type="button" id="ft-fett" title="Markierten Text fett (**…**)"><b>F</b></button>
+        <button type="button" id="ft-gross" title="Zeile als Überschrift (# …)">H</button>
+        <span class="trenner"></span>
+        <div class="seg" id="ft-ausrichtung" role="group" aria-label="Ausrichtung">
+          <button type="button" data-wert="links" title="links">⯇</button>
+          <button type="button" data-wert="mitte" title="mittig">≡</button>
+          <button type="button" data-wert="rechts" title="rechts">⯈</button>
+        </div>
+      </div>
+      <textarea id="ft-text" maxlength="600" placeholder="Text – jede Zeile wird eine Zeile auf dem Etikett.&#10;**fett** · # Überschrift" autocomplete="off"></textarea>
+      <p class="hint">Markieren und <b>F</b> tippen macht fett. <code># </code> am Zeilenanfang = größere Zeile.
+        Die Schrift passt sich der Etikettgröße an.</p>
+    </div>
+
+    <div class="zuletzt" id="ft-zuletzt" hidden></div>
+
+    <div>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">STIL</div>
+      <div class="stile" id="ft-stile"></div>
+    </div>
+
+    <label class="field">Lesen
+      <select id="ft-drehung">
+        <option value="">wie bei den Lebensmittel-Etiketten</option>
+        <option value="keine">quer</option>
+        <option value="180">quer, umgedreht</option>
+        <option value="links">hochkant (links gedreht)</option>
+        <option value="rechts">hochkant (rechts gedreht)</option>
+      </select></label>
+  </section>
+
+  <section class="card" style="display:grid;gap:12px">
+    <div class="vorschau-box"><img id="ft-bild" alt="Vorschau des Etiketts"></div>
+    <div class="muted" id="ft-info" style="font-size:13px;text-align:center">…</div>
+    <div class="druck-leiste">
+      <div class="anzahl">
+        <button type="button" id="ft-minus" aria-label="weniger">−</button>
+        <input id="ft-anzahl" type="number" min="1" max="50" value="1" inputmode="numeric" aria-label="Anzahl">
+        <button type="button" id="ft-plus" aria-label="mehr">+</button>
+      </div>
+      <button type="button" class="primary" id="ft-drucken">🖨️ Drucken</button>
+    </div>
+  </section>
+</main>
+
+<div id="toasts"></div>
+<script type="module">
+import { get, post, toast, esc } from '/static/js/api.js';
+
+const $ = (s) => document.querySelector(s);
+const SPEICHER = 'ls-freitext';
+const ZULETZT = 'ls-freitext-zuletzt';
+const lesen = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const merken = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* privat */ } };
+
+// Zustand: was eingegeben ist, ueberlebt Neuladen (nur in diesem Browser).
+const zustand = { text: '', stil: 'einfach', ausrichtung: 'mitte', drehung: '', ziel: '',
+  ...lesen(SPEICHER, {}) };
+let ziele = [];
+
+function speichern() {
+  merken(SPEICHER, { text: zustand.text, stil: zustand.stil, ausrichtung: zustand.ausrichtung,
+    drehung: zustand.drehung, ziel: zustand.ziel });
+}
+
+function zieleZeigen() {
+  const sel = $('#ft-ziel');
+  if (!ziele.length) {
+    sel.innerHTML = '<option value="">– kein Brother eingerichtet –</option>';
+    $('#ft-ziel-info').textContent = 'Einen Brother am WLAN-Printserver anlegen (Etiketten) oder an einem Terminal „Brother per USB“ wählen (Terminals).';
+    return;
+  }
+  sel.innerHTML = ziele.map((z) => `<option value="${esc(z.ziel)}">${esc(z.name)}${z.online ? '' : ' – nicht verbunden'}</option>`).join('');
+  if (!ziele.some((z) => z.ziel === zustand.ziel)) zustand.ziel = (ziele.find((z) => z.online) || ziele[0]).ziel;
+  sel.value = zustand.ziel;
+  zielInfo();
+}
+function zielInfo() {
+  const z = ziele.find((x) => x.ziel === zustand.ziel);
+  $('#ft-ziel-info').textContent = z ? [z.sorte && `Etiketten: ${z.sorte}`,
+    !z.online && 'nicht verbunden – druckt, sobald es wieder da ist'].filter(Boolean).join(' · ') : '';
+}
+
+function stileZeigen(stile) {
+  $('#ft-stile').innerHTML = stile.map((s) => {
+    const [titel, rest] = s.name.split(' – ');
+    return `<button type="button" class="stil" data-stil="${esc(s.key)}"><b>${esc(titel)}</b><span>${esc(rest || '')}</span></button>`;
+  }).join('');
+  markieren();
+}
+function markieren() {
+  document.querySelectorAll('.stil').forEach((b) => b.classList.toggle('aktiv', b.dataset.stil === zustand.stil));
+  document.querySelectorAll('#ft-ausrichtung button').forEach((b) => b.classList.toggle('aktiv', b.dataset.wert === zustand.ausrichtung));
+}
+
+// Vorschau: hoechstens eine Anfrage unterwegs, die letzte Eingabe gewinnt.
+let timer = null, laeuft = false, nochmal = false;
+function vorschauBald() { clearTimeout(timer); timer = setTimeout(vorschau, 250); }
+async function vorschau() {
+  if (laeuft) { nochmal = true; return; }
+  laeuft = true;
+  try {
+    const r = await post('/api/freitext/vorschau', { ...zustand });
+    $('#ft-bild').src = r.png;
+    $('#ft-info').innerHTML = r.leer ? 'Noch kein Text.'
+      : `${r.breite_mm} × ${r.hoehe_mm} mm · Schrift ${r.groesse} pt${r.ueberlauf
+        ? ' · <b style="color:var(--danger)">passt nicht ganz – weniger Text oder kürzere Zeilen</b>' : ''}`;
+  } catch (e) { $('#ft-info').textContent = e.message; }
+  finally {
+    laeuft = false;
+    if (nochmal) { nochmal = false; vorschau(); }
+  }
+}
+
+function aendern() { speichern(); markieren(); vorschauBald(); }
+
+// Fett: Markierung in **…** setzen - oder entfernen, wenn sie schon fett ist.
+$('#ft-fett').addEventListener('click', () => {
+  const t = $('#ft-text'), a = t.selectionStart, e = t.selectionEnd, v = t.value;
+  const sel = v.slice(a, e);
+  let neu, start, ende;
+  if (sel.startsWith('**') && sel.endsWith('**') && sel.length >= 4) {
+    neu = v.slice(0, a) + sel.slice(2, -2) + v.slice(e); start = a; ende = e - 4;
+  } else if (v.slice(a - 2, a) === '**' && v.slice(e, e + 2) === '**') {
+    neu = v.slice(0, a - 2) + sel + v.slice(e + 2); start = a - 2; ende = e - 2;
+  } else {
+    neu = `${v.slice(0, a)}**${sel || 'fett'}**${v.slice(e)}`; start = a + 2; ende = a + 2 + (sel || 'fett').length;
+  }
+  t.value = neu; t.focus(); t.setSelectionRange(start, ende);
+  zustand.text = neu; aendern();
+});
+// Ueberschrift: "# " am Anfang der aktuellen Zeile an/aus.
+$('#ft-gross').addEventListener('click', () => {
+  const t = $('#ft-text'), v = t.value, a = t.selectionStart;
+  const anfang = v.lastIndexOf('\n', a - 1) + 1;
+  const hat = v.startsWith('# ', anfang);
+  t.value = hat ? v.slice(0, anfang) + v.slice(anfang + 2) : `${v.slice(0, anfang)}# ${v.slice(anfang)}`;
+  const pos = a + (hat ? -2 : 2);
+  t.focus(); t.setSelectionRange(Math.max(anfang, pos), Math.max(anfang, pos));
+  zustand.text = t.value; aendern();
+});
+$('#ft-text').addEventListener('input', (ev) => { zustand.text = ev.target.value; aendern(); });
+$('#ft-stile').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-stil]');
+  if (b) { zustand.stil = b.dataset.stil; aendern(); }
+});
+$('#ft-ausrichtung').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-wert]');
+  if (b) { zustand.ausrichtung = b.dataset.wert; aendern(); }
+});
+$('#ft-drehung').addEventListener('change', (ev) => { zustand.drehung = ev.target.value; aendern(); });
+$('#ft-ziel').addEventListener('change', (ev) => { zustand.ziel = ev.target.value; zielInfo(); aendern(); });
+const anzahl = $('#ft-anzahl');
+$('#ft-minus').addEventListener('click', () => { anzahl.value = Math.max(1, (+anzahl.value || 1) - 1); });
+$('#ft-plus').addEventListener('click', () => { anzahl.value = Math.min(50, (+anzahl.value || 1) + 1); });
+
+// Zuletzt gedruckt: ein Tipp holt Text und Stil zurueck.
+function zuletztZeigen() {
+  const liste = lesen(ZULETZT, []);
+  const box = $('#ft-zuletzt');
+  box.hidden = !liste.length;
+  box.innerHTML = liste.map((e, i) => `<button type="button" class="chip" data-i="${i}" title="${esc(e.text)}">${
+    esc(e.text.replace(/\*\*|^# /gm, '').split('\n').filter(Boolean).join(' · '))}</button>`).join('');
+}
+$('#ft-zuletzt').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-i]');
+  if (!b) return;
+  const e = lesen(ZULETZT, [])[+b.dataset.i];
+  Object.assign(zustand, { text: e.text, stil: e.stil, ausrichtung: e.ausrichtung, drehung: e.drehung || '' });
+  $('#ft-text').value = zustand.text; $('#ft-drehung').value = zustand.drehung;
+  aendern();
+});
+
+$('#ft-drucken').addEventListener('click', async (ev) => {
+  const knopf = ev.currentTarget;
+  if (!zustand.text.trim()) return toast('Erst einen Text eingeben', 'warn');
+  knopf.disabled = true;
+  try {
+    const r = await post('/api/freitext/drucken', { ...zustand, anzahl: Math.max(1, Math.min(50, +anzahl.value || 1)) });
+    const n = r.auftraege.length;
+    toast(`${n === 1 ? 'Etikett' : `${n} Etiketten`} an ${r.ziel}${r.online ? '' : ' – druckt, sobald verbunden'}`, 'success');
+    const eintrag = { text: zustand.text, stil: zustand.stil, ausrichtung: zustand.ausrichtung, drehung: zustand.drehung };
+    merken(ZULETZT, [eintrag, ...lesen(ZULETZT, []).filter((e) => e.text !== eintrag.text)].slice(0, 8));
+    zuletztZeigen();
+  } catch (e) { toast(e.message, 'error'); }
+  finally { knopf.disabled = false; }
+});
+
+(async () => {
+  $('#ft-text').value = zustand.text;
+  $('#ft-drehung').value = zustand.drehung;
+  zuletztZeigen();
+  try {
+    const d = await get('/api/freitext');
+    ziele = d.ziele;
+    zieleZeigen();
+    stileZeigen(d.stile);
+  } catch (e) { toast(e.message, 'error'); }
+  vorschau();
+})();
+</script>
+</body>
+</html>

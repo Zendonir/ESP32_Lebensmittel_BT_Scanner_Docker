@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .api import brother as brother_api
 from .api import catalog, firmware, haushalte as haushalte_api, inventory, labels, system
+from .api import freitext as freitext_api
 from .api import sprache as sprache_api
 from .config import settings
 from .db import init_db, session_scope
@@ -114,6 +115,7 @@ def _seite(datei: str, medientyp: str = "text/html; charset=utf-8",
         for alt, neu in (('href="/manifest.json"', f'href="{basis}/manifest.json"'),
                          ("location.replace('/mobile')", f"location.replace('{basis}/mobile')"),
                          ('href="/mobile"', f'href="{basis}/mobile"'),
+                         ('href="/freitext"', f'href="{basis}/freitext"'),
                          ('href="/?desktop=1"', f'href="{basis}/?desktop=1"')):
             text = text.replace(alt, neu)
         sicher = html.escape(name, quote=True)
@@ -356,6 +358,7 @@ app.include_router(brother_api.router, dependencies=_guard)
 app.include_router(system.router, dependencies=_guard)
 app.include_router(firmware.router, dependencies=_guard)
 app.include_router(haushalte_api.router, dependencies=_guard)
+app.include_router(freitext_api.router, dependencies=_guard)
 # Eigene Anmeldung (SPRACHE_TOKEN oder wie die Oberflaeche).
 app.include_router(sprache_api.router)
 # Beide ohne _guard - sie melden sich ueber DEVICE_TOKEN an, nicht ueber
@@ -431,6 +434,15 @@ if WEB_DIR.is_dir():
     @app.get("/h/{hid}/mobile", include_in_schema=False)
     async def haushalt_mobile(hid: int, _: None = Depends(require_ui_page)):
         return _seite("mobile.html", haushalt=await _haushalt_oder_404(hid))
+
+    @app.get("/h/{hid}/freitext", include_in_schema=False)
+    async def haushalt_freitext(hid: int, _: None = Depends(require_ui_page)):
+        return _seite("freitext.html", haushalt=await _haushalt_oder_404(hid))
+
+    @app.get("/freitext", include_in_schema=False)
+    async def freitext_seite(_: None = Depends(require_ui_page)):
+        """Freitext-Etiketten - eigene Seite, fuer Handy und Rechner gleich."""
+        return _seite("freitext.html")
 
     @app.get("/h/{hid}/manifest.json", include_in_schema=False)
     async def haushalt_manifest(hid: int):

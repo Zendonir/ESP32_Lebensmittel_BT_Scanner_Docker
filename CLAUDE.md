@@ -18,16 +18,17 @@ server/app/
   config.py      Einstellungen aus der Umgebung (kein Config-File!)
   models.py      ORM: inventory, events, products, templates, categories,
                  locations, devices, print_jobs, settings
-  api/           inventory · catalog · labels · brother · system · firmware · haushalte
+  api/           inventory · catalog · labels · brother · system · firmware · haushalte ·
+                 sprache · freitext
   device/        protocol · hub · workflow · routes
   services/      inventory · labels · calibration · categories · openfoodfacts ·
                  notify · scheduler · dates · mengen · settings_store · seed · importer ·
                  firmware · updates · deploy · zeichen · hochformat · haushalte ·
-                 druckertest · mhd_ocr (MHD vom Foto, lokal) · sprache (Assist) ·
+                 druckertest · mhd_ocr (MHD vom Foto, lokal) · sprache (Assist) · freitext ·
                  brother (TD-2020A am WLAN-Printserver) · brother_layouts
   fonts/         DejaVu Sans fuer das Hochformat-Bild (im Repo, damit Test und
                  Container gleich umbrechen)
-server/web/      index.html · mobile.html · js/ · css/ (kein Build-Schritt)
+server/web/      index.html · mobile.html · freitext.html · js/ · css/ (kein Build-Schritt)
                  js/vendor/  ZXing – Barcodes aus der Handykamera, siehe
                              das README dort
 firmware/scripts/ gen_gfx_font.py  · preview_screens.py (Bildschirme ansehen,
@@ -244,6 +245,7 @@ cd firmware && pio run --target upload # flashen
 | Haltbarkeitsbalken | `mhdBalken()`/`mhdAnteil()` in `api.js`: Anteil von Einlagerdatum bis MHD, der schon vorbei ist – Inventar, Übersicht, Handy |
 | Sprachassistent (Home Assistant) | `POST /api/sprache/{bestand,ablauf,auslagern,etikett}` (`services/sprache.py`, Anmeldung `Authorization: Bearer <SPRACHE_TOKEN>` oder wie die Oberfläche). Jede Antwort hat `antwort` (zum Vorlesen) und `status` `info`/`frage`/`bestaetigen`/`erledigt`. Geführt wird vom Server, der Zustand reist mit dem Aufrufer: bei `frage` stehen `fehlt`/`optionen`, bei `bestaetigen` die `werte`, die mit `bestaetigt: true` zurückkommen – erst dann wird angelegt (über `api.labels.etiketten_anlegen`, derselbe Weg wie im Web). MHD gesprochen: `mhd_lesen()` („morgen“, „in 5 Tagen“, „8. November“, „kein“), leer = Vorschlag aus Vorlage/Kategorie, im Gefrierschrank verlängert wie am Terminal. Auslagern nimmt das früheste MHD, Grund `sprache` bzw. `weggeworfen`. HA-Seite: `deploy/homeassistant/lebensmittel_lager.yaml` (ein `rest_command`, vier Skripte für ein LLM-Assist) |
 | Brother-Etiketten blass / Pause zwischen Etiketten | `brother.pause_s` (Etiketten → Brother-Etikett, 0–60 s, gilt für WLAN und USB): mit Pause geht nur **ein** Etikett zugleich hinaus, das nächste erst, wenn die Pause nach dem letzten fertigen um ist (`brother.pause_rest`, gemerkt je Drucker in `_zuletzt_fertig`, Schlüssel `wlan:<id>` bzw. `usb:<device_id>`). WLAN: `_durchgang_drucker` setzt dann `platz` auf 1 bzw. 0, der Dienst fragt alle 2 s wieder. USB: `flush_print_queue` schickt eins, `on_print_result` merkt „fertig“, `_spaeter_flushen()` plant den nächsten Durchgang nach Ablauf der Pause |
+| Freitext-Etiketten (ohne Bestand) | Seite `/freitext` (`web/freitext.html`, Links in Verwaltung und Handy, auch `/h/<id>/freitext`), API `api/freitext.py`: `GET /api/freitext` (Ziele, Stile), `POST /vorschau`, `POST /drucken`. Gezeichnet in `services/freitext.py` (`**fett**`, `# ` = größere Zeile, Stile `freitext.STILE`; Schrift per Binärsuche so groß wie möglich, `ueberlauf` wenn's nicht passt), gedreht/gerastert wie jedes Brother-Etikett (`brother.freitext_bild`, eigene `drehung` möglich). Druckauftrag mit Label `FREITEXT`, Text in `payload.freitext`: WLAN = `ziel "brother"` + `payload.drucker`, USB = fest an `device_pk` des Terminals (`_usb_daten` zeichnet). Am seriellen ESC/POS-Drucker scheitert so ein Auftrag mit Meldung. Zuletzt Gedrucktes merkt sich nur der Browser (localStorage) |
 | Brother-Dienst | `brother.start()` in der Lifespan, Takt 2 s solange offen, sonst schlaeft er bis `brother.anstossen()` (nach dem **commit** aufrufen) oder 60 s. Printserver nicht erreichbar: Fehler steht am Auftrag, Versuche zaehlen nicht. Tests stellen den Printserver per `brother._transport` (httpx-MockTransport) nach |
 
 ## Entwicklungsregeln
