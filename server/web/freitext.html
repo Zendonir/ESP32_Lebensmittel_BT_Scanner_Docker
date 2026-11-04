@@ -9,21 +9,35 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/css/app.css">
   <style>
-    body { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
-    header.ft { position: sticky; top: 0; z-index: 20; display: flex; gap: 10px; align-items: center;
+    /* Die Seite ist ein festes Gehaeuse in genau der Hoehe, die sichtbar ist
+       (visualViewport): Kopf, Vorschau, darunter ein eigener Scrollbereich.
+       Oeffnet sich die Tastatur, schrumpft das Gehaeuse mit - die Vorschau
+       bleibt oben, das Textfeld direkt darunter. Ohne das schob iOS die
+       ganze Seite samt Vorschau nach oben weg. */
+    html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+    body { padding: 0; }
+    .shell { position: fixed; left: 0; right: 0; top: 0; height: var(--vvh, 100dvh);
+      transform: translateY(var(--vvtop, 0px)); display: flex; flex-direction: column; }
+    header.ft { flex: none; display: flex; gap: 10px; align-items: center;
       padding: 10px 14px; background: var(--surface); border-bottom: 1px solid var(--border); }
     header.ft h1 { font-size: 16px; margin: 0; flex: 1; white-space: nowrap; }
     header.ft a { padding: 5px 10px; border: 1px solid var(--border); border-radius: 8px;
       background: var(--surface-2); color: var(--text); font-size: 13px; text-decoration: none; white-space: nowrap; }
-    main.ft { max-width: 760px; margin: 0 auto; padding: 0 14px 14px; display: grid; gap: 14px;
-      grid-template-columns: minmax(0, 1fr); }
-    /* Die Vorschau bleibt oben stehen, waehrend Text und Stile darunter
-       scrollen - man sieht jede Aenderung sofort. */
-    .vorschau-leiste { position: sticky; top: var(--kopf-h, 53px); z-index: 15; margin: 0 -14px;
-      padding: 10px 14px 8px; background: var(--bg); border-bottom: 1px solid var(--border);
-      box-shadow: 0 6px 12px -10px rgba(0,0,0,.4); }
-    .vorschau-leiste .vorschau-box { padding: 10px; }
+    .vorschau-leiste { flex: none; padding: 10px 14px 8px; background: var(--bg);
+      border-bottom: 1px solid var(--border); box-shadow: 0 6px 12px -10px rgba(0,0,0,.4); }
+    .vorschau-leiste .vorschau-box { padding: 10px; max-width: 732px; margin: 0 auto; }
     .vorschau-leiste img { max-height: 26vh; width: auto; }
+    .scroll { flex: 1; min-height: 0; position: relative; overflow-y: auto;
+      -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+    main.ft { max-width: 760px; margin: 0 auto; padding: 14px 14px calc(24px + env(safe-area-inset-bottom));
+      display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+    /* Tastatur offen: Kopf und Hinweis weg, Vorschau kleiner - Platz fuer
+       Vorschau, Werkzeuge und Textfeld zusammen. */
+    .shell.tastatur header.ft, .shell.tastatur .ft-hinweis { display: none; }
+    .shell.tastatur .vorschau-leiste { padding-top: 6px; padding-bottom: 4px; }
+    .shell.tastatur .vorschau-leiste .vorschau-box { padding: 6px; }
+    .shell.tastatur .vorschau-leiste img { max-height: calc(var(--vvh, 100dvh) * .28); }
+    .shell.tastatur textarea#ft-text { min-height: 96px; }
     .ft-werkzeug { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
     .ft-werkzeug button { min-width: 40px; }
     .ft-werkzeug .trenner { width: 1px; background: var(--border); margin: 0 4px; }
@@ -51,19 +65,21 @@
   </style>
 </head>
 <body>
+<div class="shell" id="ft-shell">
 <header class="ft">
   <h1>🏷️ Freitext</h1>
   <a href="/mobile">📦 Vorrat</a>
   <a href="/?desktop=1">🖥️ Verwaltung</a>
 </header>
 
+<section class="vorschau-leiste" aria-label="Vorschau">
+  <div class="vorschau-box"><img id="ft-bild" alt="Vorschau des Etiketts"></div>
+  <div class="muted" id="ft-info" style="font-size:12px;text-align:center">…</div>
+</section>
+<div class="scroll" id="ft-scroll">
 <main class="ft">
-  <section class="vorschau-leiste" aria-label="Vorschau">
-    <div class="vorschau-box"><img id="ft-bild" alt="Vorschau des Etiketts"></div>
-    <div class="muted" id="ft-info" style="font-size:12px;text-align:center">…</div>
-  </section>
   <section class="card" style="display:grid;gap:14px">
-    <div>
+    <div id="ft-eingabe">
       <div class="ft-werkzeug" role="toolbar" aria-label="Format">
         <button type="button" id="ft-fett" title="Markierten Text fett (**…**)"><b>F</b></button>
         <button type="button" id="ft-gross" title="Zeile als Überschrift (# …)">H</button>
@@ -75,7 +91,7 @@
         </div>
       </div>
       <textarea id="ft-text" maxlength="600" placeholder="Text – jede Zeile wird eine Zeile auf dem Etikett.&#10;**fett** · # Überschrift" autocomplete="off"></textarea>
-      <p class="hint">Markieren und <b>F</b> tippen macht fett. <code># </code> am Zeilenanfang = größere Zeile.
+      <p class="hint ft-hinweis">Markieren und <b>F</b> tippen macht fett. <code># </code> am Zeilenanfang = größere Zeile.
         Die Schrift passt sich der Etikettgröße an.</p>
     </div>
 
@@ -110,6 +126,8 @@
     </div>
   </section>
 </main>
+</div>
+</div>
 
 <div id="toasts"></div>
 <script type="module">
@@ -257,12 +275,33 @@ $('#ft-drucken').addEventListener('click', async (ev) => {
   finally { knopf.disabled = false; }
 });
 
-// Die Vorschau klebt direkt unter der Kopfzeile - deren Hoehe haengt von
-// Bildschirmbreite und Haushalt-Anzeige ab.
-const kopfHoehe = () => document.documentElement.style.setProperty(
-  '--kopf-h', `${document.querySelector('header.ft').offsetHeight}px`);
-kopfHoehe();
-addEventListener('resize', kopfHoehe);
+// Gehaeuse auf den sichtbaren Bereich (ohne Tastatur) setzen. iOS laesst
+// das Layout bei offener Tastatur gleich hoch und schiebt nur das Sichtfeld -
+// visualViewport sagt, wo es steht und wie hoch es ist.
+const sicht = window.visualViewport;
+const shell = $('#ft-shell'), scrollbereich = $('#ft-scroll');
+function tastaturOffen() { return !!sicht && sicht.height < innerHeight - 120; }
+function eingabeZeigen() {
+  // Werkzeugleiste und Textfeld direkt unter die Vorschau
+  scrollbereich.scrollTop = Math.max(0, $('#ft-eingabe').offsetTop - 8);
+}
+function anpassen() {
+  const wurzel = document.documentElement.style;
+  wurzel.setProperty('--vvh', `${sicht ? sicht.height : innerHeight}px`);
+  wurzel.setProperty('--vvtop', `${sicht ? sicht.offsetTop : 0}px`);
+  const offen = tastaturOffen();
+  shell.classList.toggle('tastatur', offen);
+  if (offen && document.activeElement === $('#ft-text')) eingabeZeigen();
+}
+if (sicht) {
+  sicht.addEventListener('resize', anpassen);
+  sicht.addEventListener('scroll', anpassen);
+}
+addEventListener('resize', anpassen);
+// Das Dokument selbst soll nie scrollen - nur der Bereich unter der Vorschau.
+addEventListener('scroll', () => { if (scrollY) scrollTo(0, 0); });
+$('#ft-text').addEventListener('focus', () => setTimeout(anpassen, 350));
+anpassen();
 
 (async () => {
   $('#ft-text').value = zustand.text;
