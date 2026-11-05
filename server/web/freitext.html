@@ -39,7 +39,13 @@
     .shell.tastatur .vorschau-leiste img { max-height: calc(var(--vvh, 100dvh) * .28); }
     .shell.tastatur textarea#ft-text { min-height: 96px; }
     .ft-werkzeug { display: flex; gap: 5px; flex-wrap: nowrap; align-items: stretch; margin-bottom: 6px; }
-    .ft-werkzeug button { min-width: 36px; padding: 6px 9px; }
+    /* Sieben gleich breite Felder in einer Reihe - schrumpfen statt umbrechen
+       (320 px Bildschirm: ca. 258 px fuer die Leiste). */
+    .ft-werkzeug > button { flex: 1 1 0; min-width: 0; padding: 6px 0; }
+    .ft-werkzeug > .seg { display: flex; min-width: 0; }
+    #ft-ausrichtung { flex: 3 1 0; }
+    #ft-drehung { flex: 2 1 0; }
+    .ft-werkzeug .seg button { flex: 1 1 0; min-width: 0; padding: 6px 0; }
     .ft-werkzeug .trenner { width: 1px; background: var(--border); margin: 0 2px; flex: none; }
     textarea#ft-text { width: 100%; min-height: 150px; font-size: 18px; line-height: 1.35; resize: vertical; }
     .stile { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
