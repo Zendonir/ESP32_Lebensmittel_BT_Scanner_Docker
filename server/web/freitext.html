@@ -80,6 +80,12 @@
 <main class="ft">
   <section class="card" style="display:grid;gap:14px">
     <div id="ft-eingabe">
+      <div class="ft-werkzeug">
+        <div class="seg" id="ft-drehung" role="group" aria-label="Lesen">
+          <button type="button" data-wert="keine" title="Etikett quer lesen">▭ Quer</button>
+          <button type="button" data-wert="links" title="Etikett hochkant lesen (links gedreht)">▯ Hochkant</button>
+        </div>
+      </div>
       <div class="ft-werkzeug" role="toolbar" aria-label="Format">
         <button type="button" id="ft-fett" title="Markierten Text fett (**…**)"><b>F</b></button>
         <button type="button" id="ft-gross" title="Zeile als Überschrift (# …)">H</button>
@@ -102,14 +108,6 @@
       <div class="stile" id="ft-stile"></div>
     </div>
 
-    <label class="field">Lesen
-      <select id="ft-drehung">
-        <option value="">wie bei den Lebensmittel-Etiketten</option>
-        <option value="keine">quer</option>
-        <option value="180">quer, umgedreht</option>
-        <option value="links">hochkant (links gedreht)</option>
-        <option value="rechts">hochkant (rechts gedreht)</option>
-      </select></label>
   </section>
 
   <section class="card" style="display:grid;gap:12px">
@@ -140,8 +138,11 @@ const lesen = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d;
 const merken = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* privat */ } };
 
 // Zustand: was eingegeben ist, ueberlebt Neuladen (nur in diesem Browser).
-const zustand = { text: '', stil: 'einfach', ausrichtung: 'mitte', drehung: '', ziel: '',
+const zustand = { text: '', stil: 'einfach', ausrichtung: 'mitte', drehung: 'keine', ziel: '',
   ...lesen(SPEICHER, {}) };
+// Nur noch quer oder hochkant (links gedreht); Gemerktes von frueher passend einordnen.
+const drehungOrdnen = (d) => (d === 'links' || d === 'rechts' ? 'links' : 'keine');
+zustand.drehung = drehungOrdnen(zustand.drehung);
 let ziele = [];
 
 function speichern() {
@@ -180,6 +181,7 @@ function stileZeigen(stile) {
 function markieren() {
   document.querySelectorAll('.stil').forEach((b) => b.classList.toggle('aktiv', b.dataset.stil === zustand.stil));
   document.querySelectorAll('#ft-ausrichtung button').forEach((b) => b.classList.toggle('aktiv', b.dataset.wert === zustand.ausrichtung));
+  document.querySelectorAll('#ft-drehung button').forEach((b) => b.classList.toggle('aktiv', b.dataset.wert === zustand.drehung));
 }
 
 // Vorschau: hoechstens eine Anfrage unterwegs, die letzte Eingabe gewinnt.
@@ -237,7 +239,10 @@ $('#ft-ausrichtung').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-wert]');
   if (b) { zustand.ausrichtung = b.dataset.wert; aendern(); }
 });
-$('#ft-drehung').addEventListener('change', (ev) => { zustand.drehung = ev.target.value; aendern(); });
+$('#ft-drehung').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button');
+  if (b) { zustand.drehung = b.dataset.wert; aendern(); }
+});
 $('#ft-ziel').addEventListener('change', (ev) => { zustand.ziel = ev.target.value; zielInfo(); aendern(); });
 const anzahl = $('#ft-anzahl');
 $('#ft-minus').addEventListener('click', () => { anzahl.value = Math.max(1, (+anzahl.value || 1) - 1); });
@@ -255,8 +260,8 @@ $('#ft-zuletzt').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-i]');
   if (!b) return;
   const e = lesen(ZULETZT, [])[+b.dataset.i];
-  Object.assign(zustand, { text: e.text, stil: e.stil, ausrichtung: e.ausrichtung, drehung: e.drehung || '' });
-  $('#ft-text').value = zustand.text; $('#ft-drehung').value = zustand.drehung;
+  Object.assign(zustand, { text: e.text, stil: e.stil, ausrichtung: e.ausrichtung, drehung: drehungOrdnen(e.drehung) });
+  $('#ft-text').value = zustand.text;
   aendern();
 });
 
@@ -305,7 +310,6 @@ anpassen();
 
 (async () => {
   $('#ft-text').value = zustand.text;
-  $('#ft-drehung').value = zustand.drehung;
   zuletztZeigen();
   try {
     const d = await get('/api/freitext');
