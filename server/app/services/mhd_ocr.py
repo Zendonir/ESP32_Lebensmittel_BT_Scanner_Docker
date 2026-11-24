@@ -172,13 +172,21 @@ def _lesen_sync(bild: bytes, gruendlich: bool) -> dict:
     plan = [("original", lambda: img), ("punkte", lambda: _punkte(img)),
             ("punkte grob", lambda: _punkte(img, grob=True))]
     start = time.perf_counter()
+    # Nur ein Zeitstempel (Charge/Datum/Uhrzeit) gefunden: das grosse MHD steht
+    # womoeglich daneben und kommt erst im naechsten Durchgang heraus. Bis
+    # "punkte grob" weitersuchen, dann den Stempel nehmen statt weiter zu drehen.
+    reserve = None
     i = 0
     while i < len(plan) and time.perf_counter() - start < _GRUENDLICH_HOECHSTENS_S:
         name, erzeugen = plan[i]
         zeilen, kand, mhd = versuch(name, erzeugen())
-        if mhd:
+        if mhd and mhd[0]["stempel"] and reserve is None:
+            reserve = (mhd[0], kand, zeilen)
+        elif mhd and not mhd[0]["stempel"]:
             return {"datum": mhd[0]["datum"], "gelesen": mhd[0]["gelesen"], "kandidaten": kand,
                     "zeilen": zeilen, "durchgaenge": durchgaenge, "groesse": groesse}
+        if reserve and i >= 2:
+            break
         if i == 2:
             # Nach den ersten dreien: Richtungen aus dem, was bisher erkannt
             # wurde, dann hochkant - manche Flaschen tragen das Datum um 90 Grad
@@ -193,6 +201,10 @@ def _lesen_sync(bild: bytes, gruendlich: bool) -> dict:
                     if all(abs(w - x) > 8 for x in schon):
                         plan.append((f"punkte, {w:+d}°", lambda w=w: _punkte(_drehen(img, w))))
         i += 1
+    if reserve:
+        k, kand, zeilen = reserve
+        return {"datum": k["datum"], "gelesen": k["gelesen"], "kandidaten": kand,
+                "zeilen": zeilen, "durchgaenge": durchgaenge, "groesse": groesse}
     # Nichts gefunden: die Zeilen des ersten Durchgangs zeigen, was im Bild steht.
     return {"datum": "", "gelesen": "", "kandidaten": [], "zeilen": erste,
             "durchgaenge": durchgaenge, "groesse": groesse}
@@ -246,6 +258,22 @@ _HINWEIS = re.compile(r"mhd|haltbar|verbrauch|best|bis|exp|use by|bbe|ddm", re.I
 _KEIN_MHD = re.compile(
     r"efd|eingefr|einfrier|herge|herst|produ|prod\b|abgepack|verpack|abgef[uü]ll|"
     r"gefertigt|mfd|mfg|packed|pack ?date|frozen on", re.I)
+# Zeitstempel der Abfuellung: Charge davor, Uhrzeit dahinter, alles in einer
+# Zeile ("L285/02/12.10.2026/11:45:18"). Das ist fast immer das Herstell- oder
+# Abpackdatum; das MHD steht daneben gross und allein. Solche Daten gelten nur,
+# wenn es sonst keins gibt - die Erkennung sortiert die kleine Zeile gern
+# direkt unter "mindestens haltbar bis", sonst erbte sie dessen Hinweis.
+_CHARGE_DAVOR = re.compile(r"(?:^|[^a-zA-Z])(?:L|LOT|Lot|Ch|CH)\s*[.:]?\s*\d{2,}")
+_UHRZEIT_DANACH = re.compile(r"^\D{0,3}\d{1,2}\s*:\s*\d{2}")
+
+
+def _zeitstempel(text: str, anfang: int, gelesen: str) -> bool:
+    """Steht das Datum zwischen Charge und Uhrzeit, ohne Hinweiswort davor?"""
+    davor, danach = text[:anfang], text[anfang + len(gelesen):]
+    return (bool(_CHARGE_DAVOR.search(davor)) and not _HINWEIS.search(davor)
+            and bool(_UHRZEIT_DANACH.match(danach)))
+
+
 # Eine Beschriftung in der Zeile davor zaehlt nur, wenn die Zeile kurz ist
 # ("EFD" als eigenes Kaestchen) - die lange Kopfzeile nennt beide Arten.
 _BESCHRIFTUNG_ZEICHEN = 14
@@ -338,13 +366,17 @@ def kandidaten(texte: list[str], heute: date | None = None) -> list[dict]:
             # bei "Hergestellt … / haltbar bis / Datum" das Herstelldatum. Die
             # eigene Beschriftung geht vor: "MHD:" ja, "EFD:" nie.
             kein_mhd = bool(_KEIN_MHD.search(beschriftung)) and not _HINWEIS.search(beschriftung)
+            stempel = _zeitstempel(text, anfang, gelesen)
             liste.append({"datum": iso, "gelesen": gelesen.strip(), "zeile": i,
-                          "hinweis": (hinweis or bool(_HINWEIS.search(beschriftung))) and not kein_mhd,
-                          "kein_mhd": kein_mhd})
+                          "hinweis": (hinweis or bool(_HINWEIS.search(beschriftung)))
+                          and not kein_mhd and not stempel,
+                          "kein_mhd": kein_mhd, "stempel": stempel})
     # Stehen mehrere Daten da, gewinnt eins mit Hinweiswort davor
     # ("mindestens haltbar bis"), sonst das spaeteste - ein Herstell- oder
-    # Abpackdatum liegt immer vor dem MHD. Beschriftete Nicht-MHDs ganz hinten.
-    liste.sort(key=lambda k: (not k["kein_mhd"], k["hinweis"], k["datum"]), reverse=True)
+    # Abpackdatum liegt immer vor dem MHD. Zeitstempel (Charge/Datum/Uhrzeit)
+    # dahinter, beschriftete Nicht-MHDs ganz hinten.
+    liste.sort(key=lambda k: (not k["kein_mhd"], not k["stempel"], k["hinweis"], k["datum"]),
+               reverse=True)
     return liste
 
 

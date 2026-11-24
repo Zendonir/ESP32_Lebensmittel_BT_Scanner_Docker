@@ -262,3 +262,52 @@ def test_datierte_efd_zeile_beschriftet_nicht_das_naechste_datum():
 
 def test_efd_mit_o_statt_null_bleibt_ausgeschlossen():
     assert mhd_ocr.mhd_finden(["EFD:11.O8.2026"], HEUTE)["datum"] == ""
+
+
+# Tiefkuehl-Pizza: MHD gross allein, darunter "L285/02/12.10.2026/11:45:18".
+# Die Erkennung sortiert die kleine Zeile direkt unter den Hinweis.
+_PIZZA = ["Bei-18°Cmindestens haltbar bis:", "L285.02.12.10.202611:45:1#", "09.06.2027"]
+
+
+def test_zeitstempel_mit_charge_ist_nicht_das_mhd():
+    assert mhd_ocr.mhd_finden(_PIZZA, HEUTE)["datum"] == "2027-06-09"
+    kand = mhd_ocr.kandidaten(_PIZZA, HEUTE)
+    stempel = next(k for k in kand if k["datum"] == "2026-10-12")
+    assert stempel["stempel"] and not stempel["hinweis"] and not stempel["kein_mhd"]
+
+
+@pytest.mark.parametrize("texte, datum", [
+    (["L285/02/12.10.2026/11:45:18"], "2026-10-12"),       # allein: besser als nichts
+    (["LOT 4711 12.10.2026 11:45", "05.01.2027"], "2027-01-05"),
+    (["MHD L285 12.10.2026 11:45"], "2026-10-12"),          # Hinweiswort davor: gilt
+    (["haltbar bis Ende:", "L330029", "02/2027 07:10"], "2027-02-28"),   # Charge nur darueber
+])
+def test_zeitstempel_varianten(texte, datum):
+    assert mhd_ocr.mhd_finden(texte, HEUTE)["datum"] == datum
+
+
+def _durchgaenge_nachstellen(monkeypatch, je_durchgang):
+    """Statt der Erkennung: je Durchgang feste Zeilen (Text, Sicherheit, x, y)."""
+    texte = iter(je_durchgang)
+    class Bild:
+        shape = (10, 20)
+    monkeypatch.setattr(mhd_ocr, "_laden", lambda bild: Bild())
+    monkeypatch.setattr(mhd_ocr, "_punkte", lambda img, grob=False: img)
+    monkeypatch.setattr(mhd_ocr, "_drehen", lambda img, w: img)
+    monkeypatch.setattr(mhd_ocr, "_winkel_aus", lambda zeilen: [])
+    monkeypatch.setattr(mhd_ocr, "_lauf", lambda img: [(t, 0.9, 0, 0) for t in next(texte, [])])
+
+
+def test_nur_zeitstempel_sucht_im_naechsten_durchgang_weiter(monkeypatch):
+    _durchgaenge_nachstellen(monkeypatch, [["L285/02/12.10.2026/11:45:18"], _PIZZA])
+    r = mhd_ocr._lesen_sync(b"x", gruendlich=False)
+    assert r["datum"] == "2027-06-09"
+    assert [d["name"] for d in r["durchgaenge"]] == ["original", "punkte"]
+
+
+def test_nur_zeitstempel_wird_nach_drei_durchgaengen_genommen(monkeypatch):
+    stempel = ["L285/02/12.10.2026/11:45:18"]
+    _durchgaenge_nachstellen(monkeypatch, [stempel] * 10)
+    r = mhd_ocr._lesen_sync(b"x", gruendlich=True)
+    assert r["datum"] == "2026-10-12"
+    assert len(r["durchgaenge"]) == 3          # nicht noch alle Drehungen
