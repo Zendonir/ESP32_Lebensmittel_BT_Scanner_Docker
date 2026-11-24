@@ -1977,7 +1977,7 @@ function mhdTestKarte(name, url, r) {
   const kand = (l.kandidaten || []).map((k, i) => {
     const fett = i === 0 && !k.kein_mhd;
     return `<li>${fett ? '<b>' : ''}${mhdDatum(k.datum)}${fett ? '</b>' : ''}
-      <span class="muted">aus „${esc(k.gelesen)}“, Zeile ${k.zeile + 1}${k.hinweis ? ', mit Hinweiswort' : ''}${k.kein_mhd ? ', kein MHD (Einfrier-/Herstelldatum)' : ''}</span></li>`;
+      <span class="muted">aus „${esc(k.gelesen)}“, Zeile ${k.zeile + 1}${k.hinweis ? ', mit Hinweiswort' : ''}${k.kein_mhd ? ', kein MHD (Einfrier-/Herstelldatum)' : ''}${k.stempel ? ', Zeitstempel (Charge/Uhrzeit) – nur ohne anderes Datum' : ''}</span></li>`;
   }).join('');
   const ki = r.ki ? `<div>KI: <b>${mhdDatum(r.ki.datum)}</b>
       <span class="muted">${r.ki.gelesen ? `„${esc(r.ki.gelesen)}“ · ` : ''}${r.ki.ms} ms${r.ki.fehler ? ` · ${esc(r.ki.fehler)}` : ''}</span></div>` : '';
